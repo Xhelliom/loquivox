@@ -208,18 +208,6 @@ class GtkOverlay(Gtk.Window):
         # Slide the content up as it fades in.
         cr.translate(0, (1.0 - a) * self.SLIDE_PX)
 
-        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
-        bg_rgb = self._hex_to_rgb(scheme.get(self.config["bg"], scheme["bg"]))
-        fg_rgb = self._hex_to_rgb(scheme.get(self.config["fg"], scheme["accent"]))
-
-        # Background rounded rect + subtle accent border.
-        self._draw_rounded_rect(cr, w, h, 16)
-        cr.set_source_rgba(*bg_rgb, 0.92 * a)
-        cr.fill_preserve()
-        cr.set_source_rgba(*fg_rgb, 0.18 * a)
-        cr.set_line_width(1)
-        cr.stroke()
-
         if self.transcribing:
             text = "Transcription…"
         elif self.live_text:
@@ -229,28 +217,52 @@ class GtkOverlay(Gtk.Window):
         else:
             text = self.config["text"]
 
-        # Icon (vector, drawn in cairo — no font dependency)
-        if self.transcribing:
-            self._icon_spinner(cr, 30, h / 2, fg_rgb, a)
-        else:
-            self._draw_icon(cr, self.mode, 30, h / 2, fg_rgb, a)
+        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+        # Shared renderer → the settings preview looks identical to the real bubble.
+        self.render_content(
+            cr, w, h, scheme=scheme, mode=self.mode, text=text,
+            bars=self._bars, tick=self._tick, font_family=self._font_family,
+            transcribing=self.transcribing, a=a,
+        )
 
-        # Text (Pango → crisp, uses the desktop font)
-        self._draw_text(cr, text, 112, 19, 9.5, fg_rgb, a)
+    @classmethod
+    def render_content(cls, cr, w, h, *, scheme, mode, text, bars, tick,
+                       font_family, transcribing=False, a=1.0):
+        """
+        Paint the overlay bubble at (0, 0, w, h). Pure of widget state so the
+        settings dialog can render an identical preview by passing its own
+        scheme / looping bars.
+        """
+        config = CFG.MODES.get(mode, CFG.MODES["dictation"])
+        bg_rgb = cls._hex_to_rgb(scheme.get(config["bg"], scheme["bg"]))
+        fg_rgb = cls._hex_to_rgb(scheme.get(config["fg"], scheme["accent"]))
 
-        # Activity area
-        if self.transcribing:
-            self._draw_pulse(cr, 58, 212, 42, fg_rgb, a)
+        # Background rounded rect + subtle accent border.
+        cls._rounded_rect_path(cr, 0, 0, w, h, 16)
+        cr.set_source_rgba(*bg_rgb, 0.92 * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*fg_rgb, 0.18 * a)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        # Icon (left), text (centered, top), activity (bars / pulse, below).
+        if transcribing:
+            cls._icon_spinner(cr, 30, h / 2, fg_rgb, a, tick)
         else:
-            self._draw_bars(cr, 58, 212, 42, fg_rgb, a)
+            cls._draw_icon(cr, mode, 30, h / 2, fg_rgb, a)
+        cls._draw_text(cr, font_family, text, w / 2, 19, 9.5, fg_rgb, a)
+        if transcribing:
+            cls._draw_pulse(cr, 58, w - 8, 42, fg_rgb, a, tick)
+        else:
+            cls._draw_bars(cr, 58, w - 8, 42, fg_rgb, a, bars)
 
     # ---------------------------------------------------------------- text
-    def _draw_text(self, cr: cairo.Context, text: str, cx: float, cy: float,
-                   size: float, color: Tuple[float, ...], a: float) -> None:
+    @staticmethod
+    def _draw_text(cr, font_family, text, cx, cy, size, color, a):
         """Center text horizontally at cx, vertically at cy, via Pango."""
         layout = PangoCairo.create_layout(cr)
         fd = Pango.FontDescription()
-        fd.set_family(self._font_family)
+        fd.set_family(font_family)
         fd.set_size(int(size * Pango.SCALE))
         fd.set_weight(Pango.Weight.SEMIBOLD)
         layout.set_font_description(fd)
@@ -261,23 +273,23 @@ class GtkOverlay(Gtk.Window):
         PangoCairo.show_layout(cr, layout)
 
     # --------------------------------------------------------------- icons
-    def _draw_icon(self, cr: cairo.Context, mode: str, cx: float, cy: float,
-                   color: Tuple[float, ...], a: float) -> None:
+    @classmethod
+    def _draw_icon(cls, cr, mode, cx, cy, color, a):
         """Dispatch to a vector glyph for the recording mode."""
         cr.set_source_rgba(*color, a)
         cr.set_line_width(1.8)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         cr.set_line_join(cairo.LINE_JOIN_ROUND)
         drawer = {
-            "dictation": self._icon_mic,
-            "ai": self._icon_sparkle,
-            "ai_rewrite": self._icon_pencil,
-            "vision": self._icon_camera,
-        }.get(mode, self._icon_mic)
+            "dictation": cls._icon_mic,
+            "ai": cls._icon_sparkle,
+            "ai_rewrite": cls._icon_pencil,
+            "vision": cls._icon_camera,
+        }.get(mode, cls._icon_mic)
         drawer(cr, cx, cy)
 
-    def _icon_mic(self, cr: cairo.Context, cx: float, cy: float) -> None:
-        # capsule body
+    @staticmethod
+    def _icon_mic(cr, cx, cy):
         r = 3.6
         top, bot = cy - 9, cy - 1
         cr.new_sub_path()
@@ -285,10 +297,8 @@ class GtkOverlay(Gtk.Window):
         cr.arc(cx, bot - r, r, 0, math.pi)
         cr.close_path()
         cr.stroke()
-        # holder arc
         cr.arc(cx, cy - 3, 6.5, math.radians(20), math.radians(160))
         cr.stroke()
-        # stem + base
         cr.move_to(cx, cy + 3.5)
         cr.line_to(cx, cy + 7)
         cr.stroke()
@@ -296,55 +306,51 @@ class GtkOverlay(Gtk.Window):
         cr.line_to(cx + 4, cy + 7)
         cr.stroke()
 
-    def _icon_pencil(self, cr: cairo.Context, cx: float, cy: float) -> None:
-        # shaft
+    @staticmethod
+    def _icon_pencil(cr, cx, cy):
         cr.move_to(cx - 6, cy + 6)
         cr.line_to(cx + 4, cy - 4)
         cr.stroke()
-        # tip
         cr.move_to(cx + 4, cy - 4)
         cr.line_to(cx + 7, cy - 7)
         cr.stroke()
-        # nib mark
         cr.move_to(cx - 6, cy + 6)
         cr.line_to(cx - 3, cy + 6.5)
         cr.stroke()
 
-    def _icon_camera(self, cr: cairo.Context, cx: float, cy: float) -> None:
-        # viewfinder bump
+    @classmethod
+    def _icon_camera(cls, cr, cx, cy):
         cr.move_to(cx - 3, cy - 6)
         cr.line_to(cx + 1, cy - 6)
         cr.stroke()
-        # body
-        self._rounded_rect_path(cr, cx - 9, cy - 5, 18, 12, 2.5)
+        cls._rounded_rect_path(cr, cx - 9, cy - 5, 18, 12, 2.5)
         cr.stroke()
-        # lens
         cr.arc(cx, cy + 1, 3.4, 0, 2 * math.pi)
         cr.stroke()
 
-    def _icon_sparkle(self, cr: cairo.Context, cx: float, cy: float) -> None:
-        # four-point star (AI)
-        s, w = 9.0, 2.6
+    @staticmethod
+    def _icon_sparkle(cr, cx, cy):
+        s, ww = 9.0, 2.6
         cr.move_to(cx, cy - s)
-        cr.curve_to(cx + w, cy - w, cx + w, cy - w, cx + s, cy)
-        cr.curve_to(cx + w, cy + w, cx + w, cy + w, cx, cy + s)
-        cr.curve_to(cx - w, cy + w, cx - w, cy + w, cx - s, cy)
-        cr.curve_to(cx - w, cy - w, cx - w, cy - w, cx, cy - s)
+        cr.curve_to(cx + ww, cy - ww, cx + ww, cy - ww, cx + s, cy)
+        cr.curve_to(cx + ww, cy + ww, cx + ww, cy + ww, cx, cy + s)
+        cr.curve_to(cx - ww, cy + ww, cx - ww, cy + ww, cx - s, cy)
+        cr.curve_to(cx - ww, cy - ww, cx - ww, cy - ww, cx, cy - s)
         cr.close_path()
         cr.fill()
 
-    def _icon_spinner(self, cr: cairo.Context, cx: float, cy: float,
-                      color: Tuple[float, ...], a: float) -> None:
+    @staticmethod
+    def _icon_spinner(cr, cx, cy, color, a, tick):
         """Rotating arc spinner for the transcribing state."""
         cr.set_line_width(2.2)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
-        start = (self._tick * 0.12) % (2 * math.pi)
+        start = (tick * 0.12) % (2 * math.pi)
         cr.set_source_rgba(*color, a)
         cr.arc(cx, cy, 7, start, start + math.radians(270))
         cr.stroke()
 
-    def _rounded_rect_path(self, cr: cairo.Context, x: float, y: float,
-                           w: float, h: float, r: float) -> None:
+    @staticmethod
+    def _rounded_rect_path(cr, x, y, w, h, r):
         cr.new_sub_path()
         cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
         cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
@@ -352,39 +358,29 @@ class GtkOverlay(Gtk.Window):
         cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
         cr.close_path()
 
-    def _draw_rounded_rect(self, cr: cairo.Context, w: int, h: int, r: int) -> None:
-        """Draw rounded rectangle path."""
-        cr.new_sub_path()
-        cr.arc(w - r, r, r, -math.pi / 2, 0)
-        cr.arc(w - r, h - r, r, 0, math.pi / 2)
-        cr.arc(r, h - r, r, math.pi / 2, math.pi)
-        cr.arc(r, r, r, math.pi, 3 * math.pi / 2)
-        cr.close_path()
-
-    def _draw_bars(self, cr: cairo.Context, x1: int, x2: int, cy: int,
-                   color: Tuple[float, ...], a: float) -> None:
-        """Draw the smoothed, mirrored EQ bars."""
-        n = self.NUM_BARS
+    @classmethod
+    def _draw_bars(cls, cr, x1, x2, cy, color, a, bars):
+        """Draw the smoothed, mirrored EQ bars from a list of 0..1 levels."""
+        n = len(bars)
         slot = (x2 - x1) / n
         cr.set_line_width(max(2.0, slot * 0.5))
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         for i in range(n):
-            level = self._bars[i]
-            hh = max(0.6, level * self.MAX_BAR)
+            level = bars[i]
+            hh = max(0.6, level * cls.MAX_BAR)
             x = x1 + slot * (i + 0.5)
-            # Taller bars are brighter for a bit of depth.
             cr.set_source_rgba(*color, (0.4 + 0.6 * level) * a)
             cr.move_to(x, cy - hh)
             cr.line_to(x, cy + hh)
             cr.stroke()
 
-    def _draw_pulse(self, cr: cairo.Context, x1: int, x2: int, cy: int,
-                    color: Tuple[float, ...], a: float) -> None:
+    @staticmethod
+    def _draw_pulse(cr, x1, x2, cy, color, a, tick):
         """Three pulsing dots to signal transcription in progress."""
         num_dots = 3
         spacing = (x2 - x1) / (num_dots + 1)
         for i in range(num_dots):
-            phase = self._tick / 14.0 - i * 0.7
+            phase = tick / 14.0 - i * 0.7
             alpha = 0.35 + 0.65 * (0.5 + 0.5 * math.sin(phase))
             cr.set_source_rgba(*color, alpha * a)
             cr.arc(x1 + spacing * (i + 1), cy, 4, 0, 2 * math.pi)
