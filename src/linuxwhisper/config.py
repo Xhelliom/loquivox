@@ -111,7 +111,7 @@ class Config:
     CHAT_AUTO_HIDE_SEC: int = 3
 
     # --- AI Models ---
-    MODEL_CHAT: str = "moonshotai/kimi-k2-instruct"
+    MODEL_CHAT: str = "llama-3.3-70b-versatile"
     MODEL_VISION: str = "meta-llama/llama-4-scout-17b-16e-instruct"
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
@@ -132,6 +132,12 @@ class Config:
     # Streaming-backend models (used in the streaming phase).
     OPENAI_MODEL: str = "gpt-4o-transcribe"
     DEEPGRAM_MODEL: str = "nova-3"
+
+    # --- Post-processing (dictation text → LLM cleanup, opt-in) ---
+    # none | correct | reformulate | translate
+    POSTPROCESS_MODE: str = "none"
+    # Target language for the "translate" mode (ISO-639-1 code or a language name).
+    POSTPROCESS_TARGET_LANG: str = "en"
 
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
@@ -294,6 +300,12 @@ def _build_config() -> Config:
         overrides["HALLUCINATIONS"] = frozenset(
             str(h).strip().lower() for h in trans["hallucinations"]
         )
+
+    post = data.get("postprocess", {})
+    if "mode" in post:
+        overrides["POSTPROCESS_MODE"] = str(post["mode"])
+    if "target_language" in post:
+        overrides["POSTPROCESS_TARGET_LANG"] = str(post["target_language"])
 
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:

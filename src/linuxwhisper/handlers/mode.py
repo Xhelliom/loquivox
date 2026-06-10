@@ -78,11 +78,25 @@ class ModeHandler:
             pass
 
         if transcribed:
+            transcribed = ModeHandler._maybe_postprocess(mode, transcribed)
             # Run processing (API calls etc) on the GTK main thread
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
             # Nothing to insert (too short / failed) — clear the indicator.
             OverlayManager.hide()
+
+    @staticmethod
+    def _maybe_postprocess(mode: str, text: str) -> str:
+        """
+        Apply optional LLM post-processing to dictation text (correct /
+        reformulate / translate). Runs here in the worker thread so the LLM
+        round-trip never blocks the GTK loop. No-op unless mode is 'dictation'
+        and post-processing is enabled in config.
+        """
+        if mode != "dictation":
+            return text
+        from linuxwhisper.services.postprocess import PostProcessor
+        return PostProcessor.process(text)
 
     @staticmethod
     def process_stream_async(mode: str, session, audio_data: Optional[np.ndarray]) -> None:
@@ -114,6 +128,7 @@ class ModeHandler:
             pass
 
         if transcribed:
+            transcribed = ModeHandler._maybe_postprocess(mode, transcribed)
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
         else:
             OverlayManager.hide()
