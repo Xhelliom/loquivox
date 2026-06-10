@@ -67,6 +67,7 @@ class SettingsDialog:
     _key_status: Optional[Gtk.Label] = None
     _pp_combo: Optional[Gtk.ComboBoxText] = None
     _pp_lang: Optional[Gtk.ComboBoxText] = None
+    _pp_lang_label: Optional[Gtk.Label] = None
     _pp_status: Optional[Gtk.Label] = None
 
     # Post-processing modes offered in the UI/tray: (id, label)
@@ -536,9 +537,11 @@ class SettingsDialog:
             if mid == current:
                 active_idx = i
         cls._pp_combo.set_active(active_idx)
+        cls._pp_combo.connect("changed", cls._on_pp_mode_changed)
         grid.attach(cls._pp_combo, 1, 0, 1, 1)
 
-        grid.attach(cls._row_label("Translate to:"), 0, 1, 1, 1)
+        cls._pp_lang_label = cls._row_label("Translate to:")
+        grid.attach(cls._pp_lang_label, 0, 1, 1, 1)
         cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
             if code:  # skip "Autodetect" — translation needs a real target
@@ -547,6 +550,9 @@ class SettingsDialog:
             cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
         grid.attach(cls._pp_lang, 1, 1, 1, 1)
         vbox.pack_start(grid, False, False, 0)
+        # "Translate to" only matters for the Translate mode — grey it out
+        # otherwise so it's clear the other modes keep the original language.
+        cls._update_pp_lang_sensitivity()
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         apply_btn = Gtk.Button(label="Apply")
@@ -567,9 +573,26 @@ class SettingsDialog:
         vbox.pack_start(hint, False, False, 0)
 
     @classmethod
+    def _selected_pp_mode(cls) -> str:
+        idx = cls._pp_combo.get_active() if cls._pp_combo else 0
+        return cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
+
+    @classmethod
+    def _update_pp_lang_sensitivity(cls) -> None:
+        """Enable 'Translate to' only for the Translate mode."""
+        is_translate = cls._selected_pp_mode() == "translate"
+        if cls._pp_lang:
+            cls._pp_lang.set_sensitive(is_translate)
+        if cls._pp_lang_label:
+            cls._pp_lang_label.set_sensitive(is_translate)
+
+    @classmethod
+    def _on_pp_mode_changed(cls, _combo: Gtk.ComboBoxText) -> None:
+        cls._update_pp_lang_sensitivity()
+
+    @classmethod
     def _on_apply_postprocess(cls, _btn: Gtk.Button) -> None:
-        idx = cls._pp_combo.get_active()
-        mode = cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
+        mode = cls._selected_pp_mode()
         lang = cls._pp_lang.get_active_id() or cls._combo_text(cls._pp_lang)
         # If a "Name (code)" row was typed, extract the code.
         if "(" in lang and lang.endswith(")"):
