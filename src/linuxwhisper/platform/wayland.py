@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from typing import Tuple
 
+from linuxwhisper.config import CFG
 from linuxwhisper.platform.base import ClipboardBackend, InputBackend, ScreenshotBackend
 
 # Terminal app-ids matched against focused window info (lowercase).
@@ -48,6 +50,12 @@ class WaylandClipboard(ClipboardBackend):
 class WaylandInput(InputBackend):
     """Input simulation via wtype (Wayland)."""
 
+    # Cache for terminal detection — a single dictation insertion calls
+    # is_terminal_focused() several times; this avoids repeated `niri msg`
+    # subprocesses within a short window.
+    _term_cache_value: bool = False
+    _term_cache_time: float = 0.0
+
     def simulate_paste(self, is_terminal: bool = False) -> None:
         if is_terminal:
             # Ctrl+Shift+V: wtype needs modifiers spelled out
@@ -75,11 +83,21 @@ class WaylandInput(InputBackend):
 
     def is_terminal_focused(self) -> bool:
         """
-        Detect focused terminal via compositor IPC.
+        Detect focused terminal via compositor IPC, cached for a short TTL.
 
         Currently supports niri (via `niri msg focused-window`).
         Returns False for unsupported compositors (safe default → Ctrl+V).
         """
+        now = time.monotonic()
+        if now - WaylandInput._term_cache_time < CFG.TERMINAL_CACHE_TTL:
+            return WaylandInput._term_cache_value
+        result = self._detect_terminal()
+        WaylandInput._term_cache_value = result
+        WaylandInput._term_cache_time = now
+        return result
+
+    def _detect_terminal(self) -> bool:
+        """Query the compositor for the focused window's terminal-ness."""
         # Try niri IPC
         try:
             result = subprocess.run(

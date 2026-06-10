@@ -4,9 +4,11 @@ Unified handler for all recording modes.
 from __future__ import annotations
 
 import threading
+from typing import Optional
 
 import numpy as np
 
+from linuxwhisper.config import CFG
 from linuxwhisper.decorators import run_on_main_thread
 from linuxwhisper.managers.chat import ChatManager
 from linuxwhisper.managers.history import HistoryManager
@@ -50,14 +52,15 @@ class ModeHandler:
         blocking Groq call runs in a worker thread and all UI work is
         marshalled back to the GTK main loop via GLib.idle_add.
         """
+        generation = STATE.recording_generation
         threading.Thread(
             target=ModeHandler._process_worker,
-            args=(mode, audio_data),
+            args=(mode, audio_data, generation),
             daemon=True,
         ).start()
 
     @staticmethod
-    def _process_worker(mode: str, audio_data: np.ndarray) -> None:
+    def _process_worker(mode: str, audio_data: np.ndarray, generation: int) -> None:
         """Worker thread for processing audio."""
         transcribed = None
         try:
@@ -66,18 +69,24 @@ class ModeHandler:
             pass
 
         if transcribed:
-            # Run processing (API calls etc)
-            GLib.idle_add(lambda: ModeHandler.process(mode, transcribed))
+            # Run processing (API calls etc) on the GTK main thread
+            GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
 
     @staticmethod
-    def process(mode: str, transcribed_text: str) -> None:
+    def process(mode: str, transcribed_text: str, generation: Optional[int] = None) -> None:
         """Route to appropriate handler based on mode."""
+        # --- Stale Guard ---
+        # Drop a result whose recording was superseded by a newer one while the
+        # transcription was in flight.
+        if generation is not None and generation != STATE.recording_generation:
+            print(f"⏭️ Ignored stale transcription (gen {generation}): '{transcribed_text}'")
+            return
+
         # --- Hallucination Guard ---
-        # Whisper often outputs "Thank you", "You're welcome", or "Subtitle" on silence.
-        # We filter these out to prevent weird loops.
-        clean = transcribed_text.strip().lower().replace(".", "").replace("!", "")
-        hallucinations = {"thank you", "you're welcome", "thanks", "subtitle", "untertitel", "you"}
-        if clean in hallucinations or len(clean) < 2:
+        # Whisper often emits canned phrases ("Thank you", "Merci", "Untertitel")
+        # on silence; filter them to prevent weird loops.
+        clean = transcribed_text.strip().lower().rstrip(".!?")
+        if clean in CFG.HALLUCINATIONS or len(clean) < 2:
             print(f"⚠️ Ignored Hallucination: '{transcribed_text}'")
             return
 

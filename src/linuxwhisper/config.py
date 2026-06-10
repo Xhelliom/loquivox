@@ -119,6 +119,30 @@ class Config:
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
     WHISPER_LANGUAGE: str = ""
+    # Skip transcription (and the API call) for clips shorter than this, in
+    # seconds — filters accidental key-clicks. 0 disables the check.
+    MIN_AUDIO_SEC: float = 0.5
+    # Audio is resampled to this rate before upload (Whisper runs at 16 kHz, so
+    # smaller uploads = lower latency, no quality loss). 0 disables resampling.
+    UPLOAD_SAMPLE_RATE: int = 16000
+
+    # Phrases Whisper commonly hallucinates on silence — dropped before
+    # insertion. Overridable via [transcription] hallucinations = [...].
+    HALLUCINATIONS: frozenset = frozenset({
+        # English
+        "thank you", "you're welcome", "thanks", "subtitle", "you", "bye",
+        # German (Whisper artifacts)
+        "untertitel",
+        # French
+        "merci", "merci beaucoup", "sous-titres", "sous-titrage",
+        "abonnez-vous", "merci d'avoir regardé", "au revoir",
+    })
+
+    # --- Clipboard timing (seconds) ---
+    CLIPBOARD_PASTE_DELAY: float = 0.05
+    CLIPBOARD_RESTORE_DELAY: float = 0.03
+    # Cache window for focused-window / terminal detection (seconds).
+    TERMINAL_CACHE_TTL: float = 0.2
 
     # --- TTS Voices ---
     TTS_VOICES: Tuple[str, ...] = ("diana", "hannah", "autumn", "austin", "daniel", "troy")
@@ -235,6 +259,22 @@ def _build_config() -> Config:
         overrides["WHISPER_LANGUAGE"] = str(trans["language"])
     if "sample_rate" in trans:
         overrides["SAMPLE_RATE"] = int(trans["sample_rate"])
+    if "min_audio_sec" in trans:
+        overrides["MIN_AUDIO_SEC"] = float(trans["min_audio_sec"])
+    if "upload_sample_rate" in trans:
+        overrides["UPLOAD_SAMPLE_RATE"] = int(trans["upload_sample_rate"])
+    if "hallucinations" in trans:
+        overrides["HALLUCINATIONS"] = frozenset(
+            str(h).strip().lower() for h in trans["hallucinations"]
+        )
+
+    clip = data.get("clipboard", {})
+    if "paste_delay" in clip:
+        overrides["CLIPBOARD_PASTE_DELAY"] = float(clip["paste_delay"])
+    if "restore_delay" in clip:
+        overrides["CLIPBOARD_RESTORE_DELAY"] = float(clip["restore_delay"])
+    if "terminal_cache_ttl" in clip:
+        overrides["TERMINAL_CACHE_TTL"] = float(clip["terminal_cache_ttl"])
 
     models = data.get("models", {})
     if "chat" in models:

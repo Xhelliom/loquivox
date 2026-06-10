@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import io
 import queue
-from typing import Any, Optional
+from math import gcd
+from typing import Any, Optional, Tuple
 
 import numpy as np
 import sounddevice as sd
 from scipy.io.wavfile import write as wav_write
+from scipy.signal import resample_poly
 
-from linuxwhisper.api import GROQ_CLIENT
+from linuxwhisper.api import get_client
 from linuxwhisper.config import CFG
 from linuxwhisper.decorators import safe_execute
 from linuxwhisper.state import STATE
@@ -51,6 +53,7 @@ class AudioService:
         )
         STATE.stream.start()
         STATE.recording = True
+        STATE.recording_generation += 1
 
     @staticmethod
     def stop_recording() -> Optional[np.ndarray]:
@@ -75,12 +78,35 @@ class AudioService:
                 break
 
     @staticmethod
+    def _resample_for_upload(audio: np.ndarray, src_rate: int) -> Tuple[np.ndarray, int]:
+        """
+        Downsample to CFG.UPLOAD_SAMPLE_RATE before upload (Whisper runs at
+        16 kHz, so this shrinks the upload with no quality loss). No-op if the
+        target is 0/disabled or not below the source rate.
+        """
+        target = CFG.UPLOAD_SAMPLE_RATE
+        if not target or target >= src_rate:
+            return audio, src_rate
+        g = gcd(int(target), int(src_rate))
+        resampled = resample_poly(audio, target // g, src_rate // g, axis=0)
+        return resampled.astype(np.float32), target
+
+    @staticmethod
     @safe_execute("Transcription")
     def transcribe(audio_data: np.ndarray) -> Optional[str]:
         """Transcribe audio using Groq Whisper."""
+        # Skip clips too short to be speech (filters key-click noise) — also
+        # saves the API round-trip.
+        duration = len(audio_data) / CFG.SAMPLE_RATE
+        if CFG.MIN_AUDIO_SEC and duration < CFG.MIN_AUDIO_SEC:
+            print(f"⏭️  Ignored {duration:.2f}s clip (< {CFG.MIN_AUDIO_SEC}s)")
+            return None
+
+        audio, rate = AudioService._resample_for_upload(audio_data, CFG.SAMPLE_RATE)
+
         wav_buffer = io.BytesIO()
         wav_buffer.name = "audio.wav"
-        wav_write(wav_buffer, CFG.SAMPLE_RATE, audio_data)
+        wav_write(wav_buffer, rate, audio)
         wav_buffer.seek(0)
 
         # Pass language only when configured; empty string = autodetect.
@@ -88,5 +114,5 @@ class AudioService:
         if CFG.WHISPER_LANGUAGE:
             params["language"] = CFG.WHISPER_LANGUAGE
 
-        transcript = GROQ_CLIENT.audio.transcriptions.create(**params)
+        transcript = get_client().audio.transcriptions.create(**params)
         return transcript.text.strip()
