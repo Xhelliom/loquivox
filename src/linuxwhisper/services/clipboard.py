@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 
+from linuxwhisper.config import CFG
 from linuxwhisper.platform import get_clipboard, get_input
 
 
@@ -36,10 +37,11 @@ class ClipboardService:
         # Paste via clipboard — use correct shortcut for terminals
         clipboard.copy(clean_text)
         is_term = inp.is_terminal_focused()
+        time.sleep(CFG.CLIPBOARD_PASTE_DELAY)  # let the clipboard offer settle
         inp.simulate_paste(is_terminal=is_term)
 
-        # Restore original clipboard after short delay
-        time.sleep(0.1)
+        # Restore original clipboard once the paste has been consumed
+        time.sleep(CFG.CLIPBOARD_RESTORE_DELAY)
         if original is not None:
             try:
                 clipboard.copy(original)
@@ -53,7 +55,7 @@ class ClipboardService:
         inp = get_input()
         is_term = inp.is_terminal_focused()
         inp.simulate_copy(is_terminal=is_term)
-        time.sleep(0.1)
+        time.sleep(CFG.CLIPBOARD_PASTE_DELAY)
         return clipboard.paste().strip()
 
     @staticmethod

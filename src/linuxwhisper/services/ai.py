@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from linuxwhisper.api import GROQ_CLIENT
+from linuxwhisper.api import get_client
 from linuxwhisper.config import CFG
 from linuxwhisper.decorators import safe_execute
 from linuxwhisper.state import STATE
@@ -27,7 +27,7 @@ class AIService:
     def chat(prompt: str) -> Optional[str]:
         """Send chat completion request."""
         messages = AIService.build_messages(prompt)
-        response = GROQ_CLIENT.chat.completions.create(
+        response = get_client().chat.completions.create(
             model=CFG.MODEL_CHAT,
             messages=messages
         )
@@ -46,7 +46,7 @@ class AIService:
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
         }
-        response = GROQ_CLIENT.chat.completions.create(
+        response = get_client().chat.completions.create(
             model=CFG.MODEL_VISION,
             messages=messages
         )

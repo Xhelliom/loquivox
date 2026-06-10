@@ -81,6 +81,9 @@ class AppState:
     audio_buffer: List[np.ndarray] = field(default_factory=list)
     stream: Optional[sd.InputStream] = None
     viz_queue: queue.Queue = field(default_factory=queue.Queue)
+    # Monotonic counter bumped on each new recording; used to discard a
+    # transcription whose recording was superseded before it returned.
+    recording_generation: int = 0
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance
