@@ -97,6 +97,9 @@ class TrayManager:
         toggle_mode.connect("toggled", TrayManager._toggle_mode)
         menu.append(toggle_mode)
 
+        # Post-processing submenu (quick toggle; fine-tune in Settings)
+        menu.append(TrayManager._build_postprocess_item())
+
         # Settings
         settings_item = Gtk.MenuItem(label="Settings")
         settings_item.connect("activate", lambda w: SettingsDialog.show())
@@ -111,6 +114,42 @@ class TrayManager:
 
         menu.show_all()
         return menu
+
+    @staticmethod
+    def _build_postprocess_item() -> Gtk.MenuItem:
+        """A 'Post-processing' menu entry with a radio submenu of modes."""
+        import linuxwhisper.config as config_module
+        from linuxwhisper.ui.settings_dialog import SettingsDialog
+
+        current = (config_module.CFG.POSTPROCESS_MODE or "none").strip().lower()
+        modes = SettingsDialog._POSTPROCESS_MODES
+
+        item = Gtk.MenuItem(label="Post-processing")
+        submenu = Gtk.Menu()
+        group = None
+        for mid, label in modes:
+            radio = Gtk.RadioMenuItem(label=label, group=group)
+            group = radio
+            radio.set_active(mid == current)
+            radio.connect("toggled", TrayManager._on_postprocess_selected, mid)
+            submenu.append(radio)
+        item.set_submenu(submenu)
+        return item
+
+    @staticmethod
+    def _on_postprocess_selected(widget, mode: str) -> None:
+        """Apply a post-processing mode chosen from the tray (live + persisted)."""
+        if not widget.get_active():
+            return  # only the newly-selected radio acts
+        from linuxwhisper import config as config_module
+        from linuxwhisper.config_io import ConfigWriteError, update_section
+        try:
+            update_section("postprocess", {"mode": mode})
+        except ConfigWriteError as e:
+            print(f"⚠️ Could not save post-processing mode: {e}")
+            return
+        config_module.reload_config()  # PostProcessor reads config_module.CFG live
+        print(f"✨ Post-processing mode → {mode}")
 
     @staticmethod
     def _make_history_callback(item: Dict[str, str], clipboard_service) -> Callable:

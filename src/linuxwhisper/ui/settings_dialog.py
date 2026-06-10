@@ -65,6 +65,17 @@ class SettingsDialog:
     _hotkey_capture_btns: Optional[list] = None
     _key_entries: Optional[dict] = None
     _key_status: Optional[Gtk.Label] = None
+    _pp_combo: Optional[Gtk.ComboBoxText] = None
+    _pp_lang: Optional[Gtk.ComboBoxText] = None
+    _pp_status: Optional[Gtk.Label] = None
+
+    # Post-processing modes offered in the UI/tray: (id, label)
+    _POSTPROCESS_MODES = [
+        ("none",        "Off"),
+        ("correct",     "Correct (spelling/grammar/punctuation)"),
+        ("reformulate", "Reformulate (clearer phrasing)"),
+        ("translate",   "Translate to…"),
+    ]
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -114,6 +125,9 @@ class SettingsDialog:
 
         # --- Transcription Section ---
         cls._build_transcription_section(vbox)
+
+        # --- Post-processing Section ---
+        cls._build_postprocess_section(vbox)
 
         # --- API Keys Section ---
         cls._build_api_keys_section(vbox)
@@ -498,6 +512,80 @@ class SettingsDialog:
             if text.lower() == lbl.lower():
                 return code
         return text  # assume the user typed a raw code
+
+    # -----------------------------------------------------------------
+    # Post-processing section (correct / reformulate / translate)
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_postprocess_section(cls, vbox: Gtk.Box) -> None:
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Post-processing</b> <small>(dictation → LLM)</small>")
+        vbox.pack_start(header, False, False, 6)
+
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(6)
+
+        grid.attach(cls._row_label("Mode:"), 0, 0, 1, 1)
+        cls._pp_combo = Gtk.ComboBoxText()
+        current = (CFG.POSTPROCESS_MODE or "none").strip().lower()
+        active_idx = 0
+        for i, (mid, label) in enumerate(cls._POSTPROCESS_MODES):
+            cls._pp_combo.append_text(label)
+            if mid == current:
+                active_idx = i
+        cls._pp_combo.set_active(active_idx)
+        grid.attach(cls._pp_combo, 1, 0, 1, 1)
+
+        grid.attach(cls._row_label("Translate to:"), 0, 1, 1, 1)
+        cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
+        for label, code in cls._LANGUAGES:
+            if code:  # skip "Autodetect" — translation needs a real target
+                cls._pp_lang.append(code, f"{label} ({code})")
+        if not cls._pp_lang.set_active_id(CFG.POSTPROCESS_TARGET_LANG):
+            cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
+        grid.attach(cls._pp_lang, 1, 1, 1, 1)
+        vbox.pack_start(grid, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.connect("clicked", cls._on_apply_postprocess)
+        row.pack_start(apply_btn, False, False, 0)
+        cls._pp_status = Gtk.Label()
+        cls._pp_status.set_halign(Gtk.Align.START)
+        cls._pp_status.set_line_wrap(True)
+        row.pack_start(cls._pp_status, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        hint = Gtk.Label()
+        hint.set_halign(Gtk.Align.START)
+        hint.set_markup(
+            "<small><i>Applied to dictation before it's typed. Uses the Groq chat "
+            "model (needs GROQ_API_KEY). Off adds no latency.</i></small>"
+        )
+        vbox.pack_start(hint, False, False, 0)
+
+    @classmethod
+    def _on_apply_postprocess(cls, _btn: Gtk.Button) -> None:
+        idx = cls._pp_combo.get_active()
+        mode = cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
+        lang = cls._pp_lang.get_active_id() or cls._combo_text(cls._pp_lang)
+        # If a "Name (code)" row was typed, extract the code.
+        if "(" in lang and lang.endswith(")"):
+            lang = lang[lang.rfind("(") + 1:-1].strip()
+
+        from linuxwhisper.config_io import ConfigWriteError, update_section
+        try:
+            update_section("postprocess", {"mode": mode, "target_language": lang})
+        except ConfigWriteError as e:
+            cls._pp_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        from linuxwhisper import config as config_module
+        config_module.reload_config()  # PostProcessor reads config_module.CFG live
+        desc = "off" if mode == "none" else (f"translate → {lang}" if mode == "translate" else mode)
+        cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
+        print(f"✨ Post-processing set: mode={mode} lang={lang}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)

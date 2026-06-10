@@ -69,7 +69,13 @@ class OpenAIRealtimeSession(StreamingSession):
         if self._language:
             transcription["language"] = self._language
         try:
-            async with client.realtime.connect(model=self._model) as conn:
+            # A transcription-only session connects with intent=transcription
+            # (NOT a realtime model — passing gpt-4o-transcribe to connect is
+            # rejected as invalid_model). The transcription model goes in the
+            # session config below.
+            async with client.realtime.connect(
+                extra_query={"intent": "transcription"}
+            ) as conn:
                 self._conn = conn
                 # GA Realtime transcription-session shape (openai>=2): audio
                 # config is nested under audio.input; format is 24 kHz PCM.
