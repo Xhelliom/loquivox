@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import logging
 import selectors
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import evdev
-from evdev import InputDevice, categorize, ecodes
+from evdev import InputDevice, ecodes
 
-from loquivox.config import CFG
+from loquivox.config import (
+    CFG, MODIFIER_CODES, POSTPROCESS_MAX_LEVEL, modifier_name, resolve_hotkeys,
+)
 from loquivox.handlers.mode import ModeHandler
 from loquivox.managers.chat import ChatManager
 from loquivox.managers.overlay import OverlayManager
@@ -29,28 +31,34 @@ logger = logging.getLogger(__name__)
 class KeyboardHandler:
     """Global keyboard listener using evdev (works on X11 + Wayland)."""
 
-    # Flat lookup keycode -> mode_id for all recording modes + toggle actions.
-    # Rebuilt by reload_hotkeys() so edits in the settings UI apply live
-    # (the listener reads this dict on every key event — no restart needed).
-    _KEY_TO_MODE: Dict[int, str] = {}
+    # Resolved bindings keyed by TRIGGER keycode → list of (mode, modifier
+    # groups). Rebuilt by reload_hotkeys() so settings edits apply live. The
+    # listener tracks held keys (_held) so combos like ALT+SPACE match; _active
+    # remembers which mode a trigger fired so its key-up releases the right one.
+    _BY_TRIGGER: Dict[int, List[Tuple[str, Tuple[frozenset, ...]]]] = {}
+    _held: set = set()
+    _active: Dict[int, str] = {}
 
     @classmethod
     def reload_hotkeys(cls, config: Any = None) -> None:
         """
-        Rebuild the keycode→mode map from ``config`` (or the live ``CFG``).
+        Rebuild the trigger→bindings map from ``config`` (or the live ``CFG``).
 
-        Called once at import time and again by the settings UI after the
-        user edits hotkeys, so new bindings take effect immediately without
-        restarting the service. A brand-new dict is assigned (never mutated
-        in place) so the listener thread always reads a consistent map.
+        Called once at import time and again by the settings UI after the user
+        edits hotkeys, so new bindings take effect immediately without a
+        restart. Bindings sharing a trigger are sorted most-specific-first (most
+        modifiers), so a combo (ALT+SPACE) wins over the bare key (SPACE) when
+        its modifiers are held. A brand-new dict is assigned (never mutated in
+        place) so the listener thread always reads a consistent map.
         """
         cfg = config if config is not None else CFG
-        mapping: Dict[int, str] = {}
-        for mode_id, (_, primary, extras) in cfg.HOTKEY_DEFS.items():
-            mapping[primary] = mode_id
-            for extra in extras:
-                mapping[extra] = mode_id
-        cls._KEY_TO_MODE = mapping
+        by_trigger: Dict[int, List[Tuple[str, Tuple[frozenset, ...]]]] = {}
+        for mode_id, bindings in resolve_hotkeys(cfg).items():
+            for trigger, mods in bindings:
+                by_trigger.setdefault(trigger, []).append((mode_id, mods))
+        for entries in by_trigger.values():
+            entries.sort(key=lambda b: len(b[1]), reverse=True)
+        cls._BY_TRIGGER = by_trigger
 
     @staticmethod
     def _is_keyboard(dev: InputDevice) -> bool:
@@ -102,13 +110,15 @@ class KeyboardHandler:
     @classmethod
     def capture_next_key(cls, timeout: float = 6.0) -> Optional[str]:
         """
-        Block until the next key is pressed on any keyboard and return its evdev
-        name (e.g. 'HOME', 'RIGHTALT'), or None on timeout / no device.
+        Block until the next key (or chord) is pressed and return its spec, or
+        None on timeout / no device. Returns a combo like ``"ALT+SPACE"`` when
+        modifiers are held, a lone modifier name (``"RIGHTALT"``) if a modifier
+        is tapped on its own, or a plain key name (``"F3"``) otherwise.
 
-        Used by the settings UI's "capture" button so the user can press a key
-        instead of guessing its evdev name. Devices are grabbed for the (short)
-        duration so the keypress doesn't leak to the focused app or trigger an
-        existing hotkey. Meant to run in a background thread; always ungrabs.
+        Used by the settings UI's "capture" button. Devices are grabbed for the
+        (short) duration so the keypress doesn't leak to the focused app or
+        trigger an existing hotkey. Meant to run in a background thread; always
+        ungrabs.
         """
         import time
 
@@ -129,6 +139,7 @@ class KeyboardHandler:
             except Exception:
                 pass  # grab is best-effort; capture still works passively
 
+        held: List[int] = []  # modifier keycodes currently down, in press order
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -141,11 +152,24 @@ class KeyboardHandler:
                     except Exception:
                         continue
                     for event in events:
-                        # First key-DOWN of a real KEY_* code wins.
-                        if event.type == ecodes.EV_KEY and event.value == 1:
-                            name = cls.keycode_to_name(event.code)
-                            if name:
-                                return name
+                        if event.type != ecodes.EV_KEY:
+                            continue
+                        code = event.code
+                        if event.value == 1:  # key down
+                            if code in MODIFIER_CODES:
+                                if code not in held:
+                                    held.append(code)  # part of a combo
+                            else:
+                                trigger = cls.keycode_to_name(code)
+                                if trigger:
+                                    mods = [modifier_name(c) for c in held]
+                                    return "+".join([*mods, trigger])
+                        elif event.value == 0 and code in held:  # modifier up
+                            held.remove(code)
+                            if not held:  # a lone modifier tapped → bind it as-is
+                                name = cls.keycode_to_name(code)
+                                if name:
+                                    return name
         finally:
             for dev in grabbed:
                 try:
@@ -163,9 +187,12 @@ class KeyboardHandler:
                     pass
 
     @classmethod
-    def _get_mode_for_keycode(cls, keycode: int) -> Optional[str]:
-        """Get mode name for a keycode, if any."""
-        return cls._KEY_TO_MODE.get(keycode)
+    def _match_binding(cls, trigger: int) -> Optional[str]:
+        """Mode whose chord (this trigger + currently-held modifiers) matches."""
+        for mode, mods in cls._BY_TRIGGER.get(trigger, ()):  # most-specific first
+            if all(group & cls._held for group in mods):
+                return mode
+        return None
 
     @classmethod
     def _is_recording_mode(cls, mode: str) -> bool:
@@ -174,24 +201,23 @@ class KeyboardHandler:
 
     @classmethod
     def _handle_key_event(cls, event: evdev.InputEvent) -> None:
-        """Process a single key event."""
-        key_event = categorize(event)
-        keycode = event.code
-
-        mode = cls._get_mode_for_keycode(keycode)
-        if mode is None:
-            return
-
-        # Key DOWN
-        if key_event.keystate == key_event.key_down:
-            cls._on_press(mode)
-
-        # Key UP
-        elif key_event.keystate == key_event.key_up:
-            cls._on_release(mode)
+        """Track held keys and fire press/release on the matching chord."""
+        code = event.code
+        if event.value == 1:        # key down
+            cls._held.add(code)
+            mode = cls._match_binding(code)
+            if mode is not None:
+                cls._active[code] = mode
+                cls._on_press(mode)
+        elif event.value == 0:      # key up
+            cls._held.discard(code)
+            mode = cls._active.pop(code, None)
+            if mode is not None:
+                cls._on_release(mode)
+        # event.value == 2 (autorepeat): ignore
 
     # Hotkeys that act on the session itself rather than starting a recording.
-    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause")
+    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause", "refine")
 
     @classmethod
     def _on_press(cls, mode: str) -> None:
@@ -205,6 +231,12 @@ class KeyboardHandler:
         if mode == "pause":
             if STATE.recording:
                 cls._toggle_pause()
+            return
+
+        # Stop the active recording, then pick a refinement level for it.
+        if mode == "refine":
+            if STATE.recording:
+                cls._stop_and_choose()
             return
 
         # Pin toggle (non-recording action)
@@ -289,6 +321,133 @@ class KeyboardHandler:
             ModeHandler.process_audio_async(STATE.current_mode, audio_data)
         else:
             OverlayManager.hide()
+
+    # --- On-the-fly refinement chooser (bound to the 'refine' hotkey) --------
+
+    @classmethod
+    def _stop_and_choose(cls) -> None:
+        """
+        Stop the recording, then let the user pick a refinement level for THIS
+        dictation (overriding the configured default) before processing.
+        Runs the (blocking, grabbed) chooser in a background thread.
+        """
+        import threading
+
+        audio_data = AudioService.stop_recording()
+        session = STATE.stream_session
+        STATE.stream_session = None
+        mode = STATE.current_mode
+        generation = STATE.recording_generation
+        if session is None and audio_data is None:
+            OverlayManager.hide()
+            return
+        threading.Thread(
+            target=cls._refine_choose_worker,
+            args=(mode, session, audio_data, generation),
+            daemon=True,
+        ).start()
+
+    @classmethod
+    def _refine_choose_worker(cls, mode, session, audio_data, generation) -> None:
+        """Show the chooser, then route processing with the chosen level."""
+        default = int(CFG.POSTPROCESS_LEVEL or 0)
+        level = cls.capture_refinement(default)
+        if level is None:  # cancelled
+            OverlayManager.hide(generation)
+            print("✖️  Refinement choice cancelled — nothing inserted")
+            return
+        OverlayManager.set_transcribing()
+        if session is not None:
+            ModeHandler.process_stream_async(mode, session, audio_data, level_override=level)
+        elif audio_data is not None:
+            ModeHandler.process_audio_async(mode, audio_data, level_override=level)
+        else:
+            OverlayManager.hide(generation)
+
+    @classmethod
+    def capture_refinement(cls, default_level: int, timeout: float = 12.0) -> Optional[int]:
+        """
+        Grab the keyboard and let the user choose a refinement level (0..MAX),
+        shown live on the overlay. Returns the chosen level, or None if Esc is
+        pressed. Selection: digits 0-N, ←/→ to step, the 'refine' key again to
+        cycle, Enter to confirm; auto-confirms on timeout. Always ungrabs.
+        """
+        import time
+
+        level = max(0, min(POSTPROCESS_MAX_LEVEL, int(default_level)))
+        # Keys that cycle (re-pressing the 'refine' hotkey trigger).
+        cycle_codes = {trig for trig, _ in resolve_hotkeys(CFG).get("refine", [])}
+        digits = {}
+        for n in range(POSTPROCESS_MAX_LEVEL + 1):
+            digits[getattr(ecodes, f"KEY_{n}")] = n
+            kp = getattr(ecodes, f"KEY_KP{n}", None)
+            if kp is not None:
+                digits[kp] = n
+        confirm = {ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)}
+
+        devices = cls._find_keyboards()
+        if not devices:
+            return level  # no input device → just use the default
+        sel = selectors.DefaultSelector()
+        grabbed: List[InputDevice] = []
+        for dev in devices:
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+            try:
+                dev.grab()
+                grabbed.append(dev)
+            except Exception:
+                pass
+
+        OverlayManager.set_choosing(level)
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return level  # auto-confirm
+                for key_obj, _ in sel.select(timeout=remaining):
+                    try:
+                        events = list(key_obj.fileobj.read())
+                    except Exception:
+                        continue
+                    for event in events:
+                        if event.type != ecodes.EV_KEY or event.value != 1:
+                            continue
+                        code = event.code
+                        if code == ecodes.KEY_ESC:
+                            return None
+                        if code in confirm:
+                            return level
+                        if code in digits:
+                            level = digits[code]
+                        elif code in (ecodes.KEY_UP, ecodes.KEY_LEFT):
+                            level = max(0, level - 1)
+                        elif code in (ecodes.KEY_DOWN, ecodes.KEY_RIGHT):
+                            level = min(POSTPROCESS_MAX_LEVEL, level + 1)
+                        elif code in cycle_codes:
+                            level = (level + 1) % (POSTPROCESS_MAX_LEVEL + 1)
+                        else:
+                            continue
+                        deadline = time.monotonic() + timeout  # keep alive on activity
+                        OverlayManager.set_choosing(level)
+        finally:
+            for dev in grabbed:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
+            for dev in devices:
+                try:
+                    sel.unregister(dev)
+                except Exception:
+                    pass
+                try:
+                    dev.close()
+                except Exception:
+                    pass
 
     # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
     # after resume from suspend or USB hotplug.

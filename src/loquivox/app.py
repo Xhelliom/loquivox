@@ -37,10 +37,11 @@ def main() -> None:
         "tts": "Toggle TTS (Read AI responses aloud)",
         "cancel": "Cancel recording / transcription (no text inserted)",
         "pause": "Pause / resume the current recording",
+        "refine": "Stop & choose this dictation's refinement level (unbound by default)",
     }
 
     i = 1
-    for mode_id, (label, _, _) in CFG.HOTKEY_DEFS.items():
+    for mode_id, (label, _specs) in CFG.HOTKEY_DEFS.items():
         desc = descriptions.get(mode_id, "Unknown Mode")
         print(f" {i}. {label:<13}: {desc}")
         i += 1

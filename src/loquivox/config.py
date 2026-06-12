@@ -22,6 +22,20 @@ from evdev import ecodes
 
 CONFIG_FILE: Path = Path.home() / ".config" / "loquivox" / "config.toml"
 
+# Refinement levels for post-processing — single source of truth for the
+# settings slider and the tray submenu. 0 = off; higher = more rewriting. The
+# per-level system prompts live in services.postprocess (_LEVEL_PROMPTS).
+POSTPROCESS_LEVELS: tuple = (
+    (0, "Off"),
+    (1, "Correct"),
+    (2, "Light"),
+    (3, "Medium"),
+    (4, "Strong"),
+    (5, "Custom"),   # uses POSTPROCESS_CUSTOM_PROMPT
+)
+POSTPROCESS_MAX_LEVEL: int = 5
+POSTPROCESS_CUSTOM_LEVEL: int = 5
+
 
 @dataclass(frozen=True)
 class Config:
@@ -133,11 +147,15 @@ class Config:
     OPENAI_MODEL: str = "gpt-4o-transcribe"
     DEEPGRAM_MODEL: str = "nova-3"
 
-    # --- Post-processing (dictation text → LLM cleanup, opt-in) ---
-    # none | correct | reformulate | translate
-    POSTPROCESS_MODE: str = "none"
-    # Target language for the "translate" mode (ISO-639-1 code or a language name).
+    # --- Post-processing (dictation text → LLM, opt-in) ---
+    # Refinement intensity: 0 = off, 1 = correct … 4 = strong (POSTPROCESS_LEVELS).
+    POSTPROCESS_LEVEL: int = 0
+    # Translate instead of refine — a separate axis; uses POSTPROCESS_TARGET_LANG.
+    POSTPROCESS_TRANSLATE: bool = False
+    # Target language for translate (ISO-639-1 code or a language name).
     POSTPROCESS_TARGET_LANG: str = "en"
+    # System prompt used by the "Custom" level (POSTPROCESS_CUSTOM_LEVEL).
+    POSTPROCESS_CUSTOM_PROMPT: str = ""
 
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
@@ -197,21 +215,27 @@ class Config:
     })
 
     # --- Hotkey Definitions ---
-    # format: "id": (Label, PrimaryKeycode, [ExtraKeycodes])
-    # Uses evdev ecodes — works on both X11 and Wayland.
-    # Override per-mode in config.toml under [hotkeys] using key names, e.g.
-    #   dictation = ["RIGHTALT", "F3", "F13"]
-    HOTKEY_DEFS: Dict[str, Tuple[str, int, List[int]]] = field(default_factory=lambda: {
-        "dictation":  ("R-Alt / F3",  ecodes.KEY_RIGHTALT,  [ecodes.KEY_F3, ecodes.KEY_F13]),
-        "ai":         ("F4",  ecodes.KEY_F4,  [ecodes.KEY_F14]),
-        "ai_rewrite": ("F7",  ecodes.KEY_F7,  [ecodes.KEY_PREVIOUSSONG]),
-        "vision":     ("F8",  ecodes.KEY_F8,  [ecodes.KEY_PLAYPAUSE]),
-        "pin":        ("F9",  ecodes.KEY_F9,  [ecodes.KEY_NEXTSONG]),
-        "tts":        ("F10", ecodes.KEY_F10, [ecodes.KEY_MUTE]),
+    # format: "id": (Label, [chord specs])
+    # A chord spec is "+"-joined: the LAST token is the trigger key; any leading
+    # tokens are modifiers (ALT/CTRL/SHIFT/SUPER, or a specific key name). So a
+    # spec is either a single key ("RIGHTALT", "F3") or a combo ("ALT+SPACE",
+    # "CTRL+SHIFT+D"). evdev key names — work on both X11 and Wayland.
+    # Override per-mode in config.toml under [hotkeys], e.g.
+    #   dictation = ["ALT+SPACE", "F3"]
+    HOTKEY_DEFS: Dict[str, Tuple[str, List[str]]] = field(default_factory=lambda: {
+        "dictation":  ("R-Alt / F3", ["RIGHTALT", "F3", "F13"]),
+        "ai":         ("F4",  ["F4", "F14"]),
+        "ai_rewrite": ("F7",  ["F7", "PREVIOUSSONG"]),
+        "vision":     ("F8",  ["F8", "PLAYPAUSE"]),
+        "pin":        ("F9",  ["F9", "NEXTSONG"]),
+        "tts":        ("F10", ["F10", "MUTE"]),
         # Cancel the active recording / in-flight transcription (no text inserted).
-        "cancel":     ("Esc", ecodes.KEY_ESC, []),
+        "cancel":     ("Esc", ["ESC"]),
         # Pause / resume the current recording (capture is held, not stopped).
-        "pause":      ("Space", ecodes.KEY_SPACE, []),
+        "pause":      ("Space", ["SPACE"]),
+        # Stop the recording and choose this dictation's refinement level.
+        # Unbound by default — assign a key in Settings → Hotkeys.
+        "refine":     ("(unset)", []),
     })
 
 
@@ -246,27 +270,97 @@ def _resolve_keycode(name: str) -> int:
     return code
 
 
+# Modifier name → keycodes that satisfy it (any one held is enough).
+_MODIFIER_ALIASES: Dict[str, Tuple[int, ...]] = {
+    "ALT":     (ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT),
+    "CTRL":    (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL),
+    "CONTROL": (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL),
+    "SHIFT":   (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT),
+    "SUPER":   (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA),
+    "META":    (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA),
+    "WIN":     (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA),
+}
+
+# Reverse map: a modifier keycode → its friendly name (used by chord capture).
+_MODIFIER_NAME_BY_CODE: Dict[int, str] = {
+    code: name
+    for name in ("ALT", "CTRL", "SHIFT", "SUPER")
+    for code in _MODIFIER_ALIASES[name]
+}
+#: keycodes recognised as modifiers (used by the capture UI to build combos).
+MODIFIER_CODES = frozenset(_MODIFIER_NAME_BY_CODE)
+
+
+def modifier_name(code: int):
+    """Friendly modifier name for a keycode (KEY_LEFTALT → 'ALT'), or None."""
+    return _MODIFIER_NAME_BY_CODE.get(code)
+
+
+def _resolve_modifier(token: str) -> frozenset:
+    """Resolve a modifier token to the set of keycodes that satisfy it."""
+    key = token.strip().upper().replace(" ", "_")
+    if key.startswith("KEY_"):
+        key = key[4:]
+    if key in _MODIFIER_ALIASES:
+        return frozenset(_MODIFIER_ALIASES[key])
+    return frozenset({_resolve_keycode(token)})  # a specific key acting as modifier
+
+
+def parse_chord(spec: str) -> Tuple[int, Tuple[frozenset, ...]]:
+    """
+    Parse a chord spec into ``(trigger_keycode, (modifier_groups...))``.
+
+    The last ``+``-separated token is the trigger; leading tokens are modifiers.
+    ``"F3"`` → ``(KEY_F3, ())``; ``"ALT+SPACE"`` →
+    ``(KEY_SPACE, ({KEY_LEFTALT, KEY_RIGHTALT},))``. Raises ``ValueError`` on an
+    unknown key/modifier name.
+    """
+    parts = [p for p in spec.replace(" ", "").split("+") if p]
+    if not parts:
+        raise ValueError(f"empty hotkey spec '{spec}'")
+    *mods, trigger = parts
+    return _resolve_keycode(trigger), tuple(_resolve_modifier(m) for m in mods)
+
+
+def resolve_hotkeys(cfg: "Config") -> Dict[str, list]:
+    """
+    Parse every mode's chord specs into ``(trigger, modifier_groups)`` bindings
+    for the keyboard listener. Unparseable specs are skipped with a warning.
+    """
+    resolved: Dict[str, list] = {}
+    for mode, (_label, specs) in cfg.HOTKEY_DEFS.items():
+        bindings = []
+        for spec in specs:
+            try:
+                bindings.append(parse_chord(spec))
+            except ValueError as e:
+                print(f"⚠️ hotkey [{mode}]: {e} — skipped")
+        resolved[mode] = bindings
+    return resolved
+
+
 def _build_hotkeys(
-    base: Dict[str, Tuple[str, int, List[int]]],
+    base: Dict[str, Tuple[str, List[str]]],
     overrides: Dict[str, Any],
-) -> Dict[str, Tuple[str, int, List[int]]]:
-    """Apply [hotkeys] overrides (lists of key names) onto the base defs."""
+) -> Dict[str, Tuple[str, List[str]]]:
+    """Apply [hotkeys] overrides (lists of chord specs) onto the base defs."""
     result = dict(base)
-    for mode, names in overrides.items():
+    for mode, specs in overrides.items():
         if mode not in result:
             print(f"⚠️ config.toml [hotkeys]: unknown mode '{mode}' — ignored")
             continue
-        if isinstance(names, str):
-            names = [names]
-        try:
-            codes = [_resolve_keycode(n) for n in names]
+        if isinstance(specs, str):
+            specs = [specs]
+        specs = [str(s).strip() for s in specs if str(s).strip()]
+        if not specs:
+            continue
+        try:  # validate now so we never store a broken binding
+            for s in specs:
+                parse_chord(s)
         except ValueError as e:
             print(f"⚠️ config.toml [hotkeys.{mode}]: {e} — keeping default")
             continue
-        if not codes:
-            continue
-        label = " / ".join(str(n).upper().replace("KEY_", "") for n in names)
-        result[mode] = (label, codes[0], codes[1:])
+        result[mode] = (" / ".join(specs), specs)
     return result
 
 
@@ -306,10 +400,28 @@ def _build_config() -> Config:
         )
 
     post = data.get("postprocess", {})
-    if "mode" in post:
-        overrides["POSTPROCESS_MODE"] = str(post["mode"])
+    # Back-compat: map the old `mode` (none/correct/reformulate/translate) onto
+    # the new level + translate axes when the new keys aren't present.
+    _mode_to_level = {"none": 0, "correct": 1, "reformulate": 2}
+    if "level" in post:
+        overrides["POSTPROCESS_LEVEL"] = max(0, min(POSTPROCESS_MAX_LEVEL, int(post["level"])))
+    elif "mode" in post:
+        m = str(post["mode"]).strip().lower()
+        if m == "translate":
+            overrides["POSTPROCESS_TRANSLATE"] = True
+        elif m == "reformulate" and str(post.get("reformulate_prompt", "")).strip():
+            # old reformulate + a custom prompt → the new Custom level
+            overrides["POSTPROCESS_LEVEL"] = POSTPROCESS_CUSTOM_LEVEL
+        else:
+            overrides["POSTPROCESS_LEVEL"] = _mode_to_level.get(m, 0)
+    if "translate" in post:
+        overrides["POSTPROCESS_TRANSLATE"] = bool(post["translate"])
     if "target_language" in post:
         overrides["POSTPROCESS_TARGET_LANG"] = str(post["target_language"])
+    # `reformulate_prompt` is the old name for the custom override.
+    custom = post.get("custom_prompt", post.get("reformulate_prompt"))
+    if custom is not None:
+        overrides["POSTPROCESS_CUSTOM_PROMPT"] = str(custom).strip()
 
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:

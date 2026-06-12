@@ -70,18 +70,14 @@ class SettingsDialog:
     _hotkey_capture_btns: Optional[list] = None
     _key_entries: Optional[dict] = None
     _key_status: Optional[Gtk.Label] = None
-    _pp_combo: Optional[Gtk.ComboBoxText] = None
+    _pp_scale: Optional[Gtk.Scale] = None
+    _pp_scale_label: Optional[Gtk.Label] = None
+    _pp_translate_check: Optional[Gtk.CheckButton] = None
     _pp_lang: Optional[Gtk.ComboBoxText] = None
-    _pp_lang_label: Optional[Gtk.Label] = None
     _pp_status: Optional[Gtk.Label] = None
-
-    # Post-processing modes offered in the UI/tray: (id, label)
-    _POSTPROCESS_MODES = [
-        ("none",        "Off"),
-        ("correct",     "Correct (spelling/grammar/punctuation)"),
-        ("reformulate", "Reformulate (clearer phrasing)"),
-        ("translate",   "Translate to…"),
-    ]
+    _pp_prompt_view: Optional[Gtk.TextView] = None
+    _pp_prompt_scroll: Optional[Gtk.ScrolledWindow] = None
+    _pp_prompt_label: Optional[Gtk.Label] = None
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -616,44 +612,76 @@ class SettingsDialog:
         return text  # assume the user typed a raw code
 
     # -----------------------------------------------------------------
-    # Post-processing section (correct / reformulate / translate)
+    # Post-processing: one Refinement level (0-4) + optional Translate
     # -----------------------------------------------------------------
     @classmethod
     def _build_postprocess_section(cls, vbox: Gtk.Box) -> None:
+        from loquivox.config import POSTPROCESS_LEVELS, POSTPROCESS_MAX_LEVEL
+
         header = Gtk.Label()
         header.set_halign(Gtk.Align.START)
         header.set_markup("<b>Post-processing</b> <small>(dictation → LLM)</small>")
         vbox.pack_start(header, False, False, 6)
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(6)
+        # Refinement intensity: Off → Correct → Light → Medium → Strong.
+        cls._pp_scale_label = Gtk.Label()
+        cls._pp_scale_label.set_halign(Gtk.Align.START)
+        vbox.pack_start(cls._pp_scale_label, False, False, 2)
 
-        grid.attach(cls._row_label("Mode:"), 0, 0, 1, 1)
-        cls._pp_combo = Gtk.ComboBoxText()
-        current = (CFG.POSTPROCESS_MODE or "none").strip().lower()
-        active_idx = 0
-        for i, (mid, label) in enumerate(cls._POSTPROCESS_MODES):
-            cls._pp_combo.append_text(label)
-            if mid == current:
-                active_idx = i
-        cls._pp_combo.set_active(active_idx)
-        cls._pp_combo.connect("changed", cls._on_pp_mode_changed)
-        grid.attach(cls._pp_combo, 1, 0, 1, 1)
+        cls._pp_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, POSTPROCESS_MAX_LEVEL, 1)
+        cls._pp_scale.set_digits(0)
+        cls._pp_scale.set_round_digits(0)
+        cls._pp_scale.set_draw_value(False)
+        cls._pp_scale.set_hexpand(True)
+        for level, label in POSTPROCESS_LEVELS:
+            cls._pp_scale.add_mark(level, Gtk.PositionType.BOTTOM, label)
+        cls._pp_scale.set_value(int(CFG.POSTPROCESS_LEVEL or 0))
+        # Snap to whole levels while dragging, and show the level name live.
+        cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
+        cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
+        cls._refresh_pp_scale_label()
+        vbox.pack_start(cls._pp_scale, False, False, 0)
 
-        cls._pp_lang_label = cls._row_label("Translate to:")
-        grid.attach(cls._pp_lang_label, 0, 1, 1, 1)
+        # Translate — a separate axis; when on it overrides the level.
+        trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cls._pp_translate_check = Gtk.CheckButton(label="Translate to")
+        cls._pp_translate_check.set_active(bool(CFG.POSTPROCESS_TRANSLATE))
+        cls._pp_translate_check.connect("toggled", cls._on_pp_translate_toggled)
+        trow.pack_start(cls._pp_translate_check, False, False, 0)
         cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
-            if code:  # skip "Autodetect" — translation needs a real target
+            if code:  # translation needs a real target
                 cls._pp_lang.append(code, f"{label} ({code})")
         if not cls._pp_lang.set_active_id(CFG.POSTPROCESS_TARGET_LANG):
             cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
-        grid.attach(cls._pp_lang, 1, 1, 1, 1)
-        vbox.pack_start(grid, False, False, 0)
-        # "Translate to" only matters for the Translate mode — grey it out
-        # otherwise so it's clear the other modes keep the original language.
-        cls._update_pp_lang_sensitivity()
+        trow.pack_start(cls._pp_lang, True, True, 0)
+        vbox.pack_start(trow, False, False, 0)
+
+        # Advanced: a custom prompt that overrides the level's built-in prompt.
+        cls._pp_prompt_label = Gtk.Label()
+        cls._pp_prompt_label.set_halign(Gtk.Align.START)
+        cls._pp_prompt_label.set_markup(
+            "<small><b>Custom level prompt</b> — used when the level is set to "
+            "<i>Custom</i></small>"
+        )
+        vbox.pack_start(cls._pp_prompt_label, False, False, 2)
+
+        cls._pp_prompt_view = Gtk.TextView()
+        cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_CUSTOM_PROMPT)
+        cls._pp_prompt_scroll = Gtk.ScrolledWindow()
+        cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        cls._pp_prompt_scroll.set_min_content_height(80)
+        cls._pp_prompt_scroll.add(cls._pp_prompt_view)
+        vbox.pack_start(cls._pp_prompt_scroll, False, False, 0)
+
+        clear_btn = Gtk.Button(label="Clear custom prompt")
+        clear_btn.set_halign(Gtk.Align.START)
+        clear_btn.connect("clicked", cls._on_reset_pp_prompt)
+        vbox.pack_start(clear_btn, False, False, 0)
+
+        cls._update_pp_sensitivity()
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         apply_btn = Gtk.Button(label="Apply")
@@ -674,42 +702,76 @@ class SettingsDialog:
         vbox.pack_start(hint, False, False, 0)
 
     @classmethod
-    def _selected_pp_mode(cls) -> str:
-        idx = cls._pp_combo.get_active() if cls._pp_combo else 0
-        return cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
-
-    @classmethod
-    def _update_pp_lang_sensitivity(cls) -> None:
-        """Enable 'Translate to' only for the Translate mode."""
-        is_translate = cls._selected_pp_mode() == "translate"
+    def _update_pp_sensitivity(cls) -> None:
+        """Translate on → only the language matters; off → the level + prompt do."""
+        translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
         if cls._pp_lang:
-            cls._pp_lang.set_sensitive(is_translate)
-        if cls._pp_lang_label:
-            cls._pp_lang_label.set_sensitive(is_translate)
+            cls._pp_lang.set_sensitive(translate)
+        for w in (cls._pp_scale, cls._pp_scale_label,
+                  cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
+            if w:
+                w.set_sensitive(not translate)
 
     @classmethod
-    def _on_pp_mode_changed(cls, _combo: Gtk.ComboBoxText) -> None:
-        cls._update_pp_lang_sensitivity()
+    def _on_pp_translate_toggled(cls, _chk: Gtk.CheckButton) -> None:
+        cls._update_pp_sensitivity()
+
+    @staticmethod
+    def _on_pp_scale_change(scale: Gtk.Scale, _scroll, value: float):
+        """Snap the slider to whole levels (it's continuous by default)."""
+        scale.set_value(round(value))
+        return True  # handled — don't apply the raw continuous value
+
+    @classmethod
+    def _refresh_pp_scale_label(cls) -> None:
+        """Show the selected level's name next to the slider for clarity."""
+        from loquivox.config import POSTPROCESS_LEVELS
+        if not (cls._pp_scale and cls._pp_scale_label):
+            return
+        level = int(cls._pp_scale.get_value())
+        name = dict(POSTPROCESS_LEVELS).get(level, level)
+        cls._pp_scale_label.set_markup(f"<small><b>Refinement level:</b> {name}</small>")
+
+    @classmethod
+    def _pp_prompt_text(cls) -> str:
+        """Current custom-prompt text (empty = use the level's built-in prompt)."""
+        buf = cls._pp_prompt_view.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
+
+    @classmethod
+    def _on_reset_pp_prompt(cls, _btn: Gtk.Button) -> None:
+        cls._pp_prompt_view.get_buffer().set_text("")
 
     @classmethod
     def _on_apply_postprocess(cls, _btn: Gtk.Button) -> None:
-        mode = cls._selected_pp_mode()
+        from loquivox.config import POSTPROCESS_LEVELS
+
+        level = int(cls._pp_scale.get_value()) if cls._pp_scale else 0
+        translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
         lang = cls._pp_lang.get_active_id() or cls._combo_text(cls._pp_lang)
-        # If a "Name (code)" row was typed, extract the code.
-        if "(" in lang and lang.endswith(")"):
+        if "(" in lang and lang.endswith(")"):  # a "Name (code)" row was typed
             lang = lang[lang.rfind("(") + 1:-1].strip()
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:
-            update_section("postprocess", {"mode": mode, "target_language": lang})
+            update_section("postprocess", {
+                "level": level,
+                "translate": translate,
+                "target_language": lang,
+                # Written verbatim (empty string clears any prior override).
+                "custom_prompt": cls._pp_prompt_text(),
+            })
         except ConfigWriteError as e:
             cls._pp_status.set_markup(f"<small>❌ {e}</small>")
             return
         from loquivox import config as config_module
         config_module.reload_config()  # PostProcessor reads config_module.CFG live
-        desc = "off" if mode == "none" else (f"translate → {lang}" if mode == "translate" else mode)
+        if translate:
+            desc = f"translate → {lang}"
+        else:
+            desc = f"level {level} ({dict(POSTPROCESS_LEVELS).get(level, level)})"
         cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
-        print(f"✨ Post-processing set: mode={mode} lang={lang}")
+        print(f"✨ Post-processing: level={level} translate={translate} lang={lang}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)
@@ -802,6 +864,7 @@ class SettingsDialog:
         "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
         "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
+        "refine": "Stop + choose level",
     }
 
     @classmethod
@@ -818,14 +881,13 @@ class SettingsDialog:
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
-        for i, (mode_id, (_label, primary, extras)) in enumerate(CFG.HOTKEY_DEFS.items()):
+        for i, (mode_id, (_label, specs)) in enumerate(CFG.HOTKEY_DEFS.items()):
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
             lbl = Gtk.Label(label=name + ":")
             lbl.set_halign(Gtk.Align.START)
             entry = Gtk.Entry()
             entry.set_hexpand(True)
-            names = [cls._keycode_to_name(c) for c in [primary, *extras]]
-            entry.set_text(" ".join(n for n in names if n))
+            entry.set_text(" ".join(specs))
 
             capture_btn = Gtk.Button(label="⌨ Set")
             capture_btn.set_tooltip_text("Press a key to bind it (no need to know its name)")
@@ -842,8 +904,9 @@ class SettingsDialog:
         hint = Gtk.Label()
         hint.set_halign(Gtk.Align.START)
         hint.set_markup(
-            "<small><i>Click <b>⌨ Set</b> then press the key — or type space-separated "
-            "evdev names (first = primary, rest = aliases). Applied instantly on save.</i></small>"
+            "<small><i>Click <b>⌨ Set</b> then press a key or combo (e.g. Alt+Space) — "
+            "or type space-separated specs like <tt>ALT+SPACE F3</tt> (first = primary, "
+            "rest = aliases; combos join with <tt>+</tt>). Applied instantly on save.</i></small>"
         )
         vbox.pack_start(hint, False, False, 0)
 
@@ -857,33 +920,23 @@ class SettingsDialog:
         apply_row.pack_start(cls._hotkey_status, True, True, 0)
         vbox.pack_start(apply_row, False, False, 0)
 
-    @staticmethod
-    def _keycode_to_name(code: int) -> str:
-        """Reverse an evdev keycode to a clean key name (e.g. 'RIGHTALT')."""
-        from evdev import ecodes
-        name = ecodes.KEY.get(code)
-        if isinstance(name, (list, tuple)):
-            name = name[0]
-        return name.replace("KEY_", "") if name else str(code)
-
     @classmethod
     def _on_apply_hotkeys(cls, _btn: Gtk.Button) -> None:
-        """Validate every binding, then write [hotkeys] to config.toml."""
-        from loquivox.config import _resolve_keycode
+        """Validate every chord spec, then write [hotkeys] to config.toml."""
+        from loquivox.config import parse_chord
 
         parsed: dict = {}
         for mode_id, entry in cls._hotkey_entries.items():
             raw = entry.get_text().replace(",", " ").split()
-            if not raw:
-                cls._set_hotkey_status(f"❌ {mode_id}: at least one key is required.")
-                return
-            for n in raw:  # validate now so we never write a broken binding
+            specs = []
+            for tok in raw:  # validate now so we never write a broken binding
                 try:
-                    _resolve_keycode(n)
+                    parse_chord(tok)
                 except ValueError:
-                    cls._set_hotkey_status(f"❌ unknown key '{n}' for {mode_id}.")
+                    cls._set_hotkey_status(f"❌ invalid binding '{tok}' for {mode_id}.")
                     return
-            parsed[mode_id] = [n.strip().upper().replace("KEY_", "") for n in raw]
+                specs.append(tok.strip().upper())
+            parsed[mode_id] = specs  # empty = unbound (e.g. the 'refine' action)
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:
