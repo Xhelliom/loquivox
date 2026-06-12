@@ -395,7 +395,7 @@ class GtkOverlay(Gtk.Window):
             self._draw_text_at(cr, self._font_family, str(lvl), 22, mid, 8.5, row_color, a, weight)
             self._draw_text_at(cr, self._font_family, label, 48, mid, 8.5, row_color, a, weight)
 
-        self._draw_text(cr, self._font_family, "0-5 / ←→  ·  Enter ✓  ·  Esc ✗",
+        self._draw_text(cr, self._font_family, "0-5 / ↑↓  ·  Enter ✓  ·  Esc ✗",
                         w / 2, h - 13, 7.5, fg, a)
 
     @staticmethod

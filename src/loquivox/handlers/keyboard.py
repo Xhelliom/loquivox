@@ -423,9 +423,9 @@ class KeyboardHandler:
                             return level
                         if code in digits:
                             level = digits[code]
-                        elif code == ecodes.KEY_LEFT:
+                        elif code in (ecodes.KEY_UP, ecodes.KEY_LEFT):
                             level = max(0, level - 1)
-                        elif code == ecodes.KEY_RIGHT:
+                        elif code in (ecodes.KEY_DOWN, ecodes.KEY_RIGHT):
                             level = min(POSTPROCESS_MAX_LEVEL, level + 1)
                         elif code in cycle_codes:
                             level = (level + 1) % (POSTPROCESS_MAX_LEVEL + 1)
