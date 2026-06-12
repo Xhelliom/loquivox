@@ -626,17 +626,21 @@ class SettingsDialog:
         # Refinement intensity: Off → Correct → Light → Medium → Strong.
         cls._pp_scale_label = Gtk.Label()
         cls._pp_scale_label.set_halign(Gtk.Align.START)
-        cls._pp_scale_label.set_markup("<small><b>Refinement level</b></small>")
         vbox.pack_start(cls._pp_scale_label, False, False, 2)
 
         cls._pp_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, POSTPROCESS_MAX_LEVEL, 1)
         cls._pp_scale.set_digits(0)
+        cls._pp_scale.set_round_digits(0)
         cls._pp_scale.set_draw_value(False)
         cls._pp_scale.set_hexpand(True)
         for level, label in POSTPROCESS_LEVELS:
             cls._pp_scale.add_mark(level, Gtk.PositionType.BOTTOM, label)
         cls._pp_scale.set_value(int(CFG.POSTPROCESS_LEVEL or 0))
+        # Snap to whole levels while dragging, and show the level name live.
+        cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
+        cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
+        cls._refresh_pp_scale_label()
         vbox.pack_start(cls._pp_scale, False, False, 0)
 
         # Translate — a separate axis; when on it overrides the level.
@@ -711,6 +715,22 @@ class SettingsDialog:
     @classmethod
     def _on_pp_translate_toggled(cls, _chk: Gtk.CheckButton) -> None:
         cls._update_pp_sensitivity()
+
+    @staticmethod
+    def _on_pp_scale_change(scale: Gtk.Scale, _scroll, value: float):
+        """Snap the slider to whole levels (it's continuous by default)."""
+        scale.set_value(round(value))
+        return True  # handled — don't apply the raw continuous value
+
+    @classmethod
+    def _refresh_pp_scale_label(cls) -> None:
+        """Show the selected level's name next to the slider for clarity."""
+        from loquivox.config import POSTPROCESS_LEVELS
+        if not (cls._pp_scale and cls._pp_scale_label):
+            return
+        level = int(cls._pp_scale.get_value())
+        name = dict(POSTPROCESS_LEVELS).get(level, level)
+        cls._pp_scale_label.set_markup(f"<small><b>Refinement level:</b> {name}</small>")
 
     @classmethod
     def _pp_prompt_text(cls) -> str:
