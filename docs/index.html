@@ -18,6 +18,7 @@
   --text: #16202e;
   --text-muted: #5a6b80;
   --accent: #2563eb;
+  --accent-2: #38bdf8;
   --accent-soft: rgba(37, 99, 235, .1);
   --accent-glow: rgba(56, 189, 248, .25);
   --border: #e2e8f0;
@@ -34,6 +35,7 @@
   --text: #e6edf6;
   --text-muted: #8aa0b8;
   --accent: #38bdf8;
+  --accent-2: #7dd3fc;
   --accent-soft: rgba(56, 189, 248, .1);
   --accent-glow: rgba(56, 189, 248, .35);
   --border: #1c2a3e;
@@ -51,9 +53,18 @@ body {
   color: var(--text);
   line-height: 1.6;
   transition: background .3s ease, color .3s ease;
+  overflow-x: hidden;
 }
 a { color: var(--accent); text-decoration: none; }
 .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+/* ───── Scroll reveal ───── */
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  * { animation-duration: .01s !important; }
+}
 
 /* ───── Nav ───── */
 nav {
@@ -63,12 +74,9 @@ nav {
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   border-bottom: 1px solid var(--border);
 }
-.nav-inner {
-  display: flex; align-items: center; justify-content: space-between;
-  height: 64px;
-}
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.15rem; color: var(--text); }
-.brand img { width: 34px; height: 34px; border-radius: 8px; }
+.brand img { width: 34px; height: 34px; border-radius: 9px; }
 .nav-links { display: flex; align-items: center; gap: 26px; font-size: .95rem; }
 .nav-links a { color: var(--text-muted); font-weight: 500; transition: color .2s; }
 .nav-links a:hover { color: var(--accent); }
@@ -81,45 +89,33 @@ nav {
 #theme-toggle:hover { transform: scale(1.08); }
 
 /* ───── Hero ───── */
-.hero {
-  position: relative;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border);
-}
+.hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--border); }
 .hero::before {
-  content: "";
-  position: absolute; inset: 0;
+  content: ""; position: absolute; inset: 0;
   background: var(--hero-img) center right / cover no-repeat;
   opacity: .95;
 }
-.hero::after {
-  content: "";
-  position: absolute; inset: 0;
-  background: var(--hero-fade);
+.hero::after { content: ""; position: absolute; inset: 0; background: var(--hero-fade); }
+#hero-wave {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 130px; z-index: 2;
+  pointer-events: none;
 }
-.hero-inner {
-  position: relative; z-index: 1;
-  padding: 110px 0 120px;
-  max-width: 620px;
-}
+.hero-inner { position: relative; z-index: 3; padding: 100px 0 150px; max-width: 660px; }
 .hero h1 {
-  font-size: clamp(2.4rem, 5.5vw, 3.6rem);
-  line-height: 1.12;
-  letter-spacing: -.02em;
-  margin-bottom: 20px;
+  font-size: clamp(2.4rem, 5.5vw, 3.7rem);
+  line-height: 1.12; letter-spacing: -.02em; margin-bottom: 20px;
 }
-.hero h1 .grad {
-  background: linear-gradient(92deg, var(--accent), #7dd3fc);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.swap-wrap { display: inline-block; position: relative; }
+.swap {
+  display: inline-block;
+  background: linear-gradient(92deg, var(--accent), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: swapIn .5s ease;
+  white-space: nowrap;
 }
-.hero p.sub {
-  font-size: 1.18rem;
-  color: var(--text-muted);
-  margin-bottom: 34px;
-  max-width: 540px;
-}
+@keyframes swapIn { from { opacity: 0; transform: translateY(14px) skewY(2deg); } to { opacity: 1; transform: none; } }
+.hero p.sub { font-size: 1.18rem; color: var(--text-muted); margin-bottom: 34px; max-width: 540px; }
 .cta-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 30px; }
 .btn {
   display: inline-flex; align-items: center; gap: 9px;
@@ -133,12 +129,9 @@ nav {
   background: linear-gradient(92deg, #2563eb, #38bdf8);
   color: #fff;
   box-shadow: 0 8px 24px var(--accent-glow);
+  position: relative;
 }
-.btn-ghost {
-  background: var(--bg-elevated);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
+.btn-ghost { background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border); }
 .hero-badges { display: flex; gap: 10px; flex-wrap: wrap; }
 .pill {
   font-size: .82rem; font-weight: 600;
@@ -147,24 +140,37 @@ nav {
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* ───── Marquee ───── */
+.marquee {
+  border-bottom: 1px solid var(--border);
+  padding: 16px 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.marquee-track {
+  display: flex; gap: 46px; width: max-content;
+  animation: scrollX 30s linear infinite;
+  font-size: .9rem; font-weight: 600; color: var(--text-muted);
+  white-space: nowrap;
+}
+.marquee-track span::before { content: "◆"; color: var(--accent); font-size: .6rem; margin-right: 46px; vertical-align: 2px; }
+@keyframes scrollX { to { transform: translateX(-50%); } }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+
 /* ───── Sections ───── */
 section { padding: 86px 0; }
 .section-title { font-size: 2rem; letter-spacing: -.01em; margin-bottom: 10px; text-align: center; }
-.section-sub { color: var(--text-muted); text-align: center; max-width: 560px; margin: 0 auto 52px; }
+.section-sub { color: var(--text-muted); text-align: center; max-width: 580px; margin: 0 auto 52px; }
 
 /* Features */
-.features-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 22px;
-}
+.features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 22px; }
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 28px;
+  border-radius: 16px; padding: 28px;
   box-shadow: var(--shadow);
   transition: transform .2s, border-color .2s;
+  position: relative; overflow: hidden;
 }
 .card:hover { transform: translateY(-4px); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .card .icon {
@@ -181,108 +187,72 @@ section { padding: 86px 0; }
 }
 .card p { color: var(--text-muted); font-size: .95rem; }
 
-/* Demo mockup (pure CSS) */
-.demo-stage {
-  position: relative;
-  max-width: 860px; margin: 0 auto;
-  padding-bottom: 40px;
+/* ───── Refinement pipeline demo ───── */
+.pipe-levels { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 28px; }
+.pipe-btn {
+  background: var(--bg-elevated); color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 9px 20px; font-size: .92rem; font-weight: 600;
+  cursor: pointer; transition: all .2s;
 }
+.pipe-btn:hover { border-color: var(--accent); color: var(--accent); }
+.pipe-btn.active {
+  background: linear-gradient(92deg, #2563eb, #38bdf8);
+  color: #fff; border-color: transparent;
+  box-shadow: 0 6px 18px var(--accent-glow);
+}
+.demo-stage { position: relative; max-width: 860px; margin: 0 auto; padding-bottom: 40px; }
 .mock-window {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow: var(--shadow);
-  overflow: hidden;
-  max-width: 640px;
+  overflow: hidden; max-width: 640px;
 }
-.mock-titlebar {
-  display: flex; align-items: center; gap: 7px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
+.mock-titlebar { display: flex; align-items: center; gap: 7px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 .mock-titlebar .dot { width: 11px; height: 11px; border-radius: 50%; opacity: .85; }
 .mock-titlebar .dot:nth-child(1) { background: #f87171; }
 .mock-titlebar .dot:nth-child(2) { background: #fbbf24; }
 .mock-titlebar .dot:nth-child(3) { background: #34d399; }
 .mock-titlebar .title { margin-left: 10px; font-size: .8rem; color: var(--text-muted); }
-.mock-body { padding: 26px 28px 70px; font-size: .98rem; }
+.mock-body { padding: 26px 28px 80px; font-size: .98rem; min-height: 190px; }
 .mock-body .line { height: 10px; border-radius: 6px; background: var(--border); margin-bottom: 14px; }
 .mock-body .line.w60 { width: 60%; }
 .mock-body .line.w85 { width: 85%; }
-.typed {
-  color: var(--text);
-  font-size: 1rem;
-  display: inline-block;
-  overflow: hidden; white-space: nowrap;
-  max-width: 100%;
-  vertical-align: bottom;
-  animation: typing 5s steps(46) infinite;
+#typed-out {
+  color: var(--text); font-size: 1rem;
   border-right: 2px solid var(--accent);
-}
-@keyframes typing {
-  0% { width: 0; }
-  60% { width: 46ch; }
-  92% { width: 46ch; }
-  100% { width: 0; }
+  padding-right: 2px;
+  min-height: 1.5em; display: inline;
 }
 .rec-pill {
-  position: absolute;
-  left: 50%; bottom: 0;
+  position: absolute; left: 50%; bottom: 0;
   transform: translateX(-70%);
   display: flex; align-items: center; gap: 14px;
   background: color-mix(in srgb, var(--bg-elevated) 85%, var(--accent) 4%);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
-  border-radius: 999px;
-  padding: 14px 24px;
+  border-radius: 999px; padding: 14px 24px;
   box-shadow: 0 14px 40px var(--accent-glow);
   backdrop-filter: blur(8px);
 }
-.rec-dot {
-  width: 12px; height: 12px; border-radius: 50%;
-  background: #ef4444;
-  animation: pulse 1.4s ease-in-out infinite;
-}
+.rec-dot { width: 12px; height: 12px; border-radius: 50%; background: #ef4444; animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: .45; transform: scale(.8);} }
 .wave { display: flex; align-items: center; gap: 3px; height: 30px; }
-.wave span {
-  width: 4px; border-radius: 3px;
-  background: linear-gradient(180deg, #38bdf8, #2563eb);
-  animation: bounce 1s ease-in-out infinite;
-}
+.wave span { width: 4px; border-radius: 3px; background: linear-gradient(180deg, #38bdf8, #2563eb); animation: bounce 1s ease-in-out infinite; }
 @keyframes bounce { 0%,100% { height: 22%; } 50% { height: 100%; } }
 .rec-label { font-size: .85rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 .rec-label kbd { font-size: .75rem; padding: 2px 8px; margin: 0 0 0 6px; }
 .chat-card {
-  position: absolute;
-  right: 0; top: 36px;
-  width: 270px;
+  position: absolute; right: 0; top: 36px; width: 270px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
-  padding: 16px;
+  border-radius: 16px; box-shadow: var(--shadow); padding: 16px;
 }
-.chat-card .chat-head {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: .78rem; font-weight: 700; color: var(--text-muted);
-  margin-bottom: 12px;
-}
+.chat-card .chat-head { display: flex; justify-content: space-between; align-items: center; font-size: .78rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; }
 .chat-card .chat-head .live { color: var(--accent); }
-.bubble {
-  font-size: .85rem; line-height: 1.45;
-  border-radius: 12px; padding: 9px 13px; margin-bottom: 9px;
-  max-width: 92%;
-}
-.bubble.user {
-  background: linear-gradient(92deg, #2563eb, #38bdf8);
-  color: #fff; margin-left: auto;
-  border-bottom-right-radius: 4px;
-}
-.bubble.ai {
-  background: var(--accent-soft);
-  color: var(--text);
-  border-bottom-left-radius: 4px;
-}
+.bubble { font-size: .85rem; line-height: 1.45; border-radius: 12px; padding: 9px 13px; margin-bottom: 9px; max-width: 92%; }
+.bubble.user { background: linear-gradient(92deg, #2563eb, #38bdf8); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+.bubble.ai { background: var(--accent-soft); color: var(--text); border-bottom-left-radius: 4px; }
 @media (max-width: 860px) {
   .chat-card { display: none; }
   .rec-pill { transform: translateX(-50%); }
@@ -290,31 +260,61 @@ section { padding: 86px 0; }
 }
 
 /* Privacy / engines */
-.engine-cols {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: 22px;
-}
+.engine-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 22px; }
 .engine-cols .card ul { list-style: none; margin-top: 12px; }
-.engine-cols .card li {
-  color: var(--text-muted); font-size: .95rem;
-  padding: 6px 0 6px 26px; position: relative;
-}
-.engine-cols .card li::before {
-  content: "✓"; position: absolute; left: 0;
-  color: var(--accent); font-weight: 700;
-}
+.engine-cols .card li { color: var(--text-muted); font-size: .95rem; padding: 6px 0 6px 26px; position: relative; }
+.engine-cols .card li::before { content: "✓"; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
 
-/* Hotkeys */
-.hotkeys {
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  gap: 16px; max-width: 640px; margin: 0 auto;
+/* ───── Interactive keyboard ───── */
+.keyboard { max-width: 880px; margin: 0 auto; }
+.keys-row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 34px; }
+.kkey {
+  width: 58px; height: 58px;
+  border-radius: 10px;
+  border: 1px solid var(--kbd-border);
+  border-bottom-width: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-family: ui-monospace, "JetBrains Mono", monospace;
+  font-size: .85rem; font-weight: 700;
+  display: grid; place-items: center;
+  user-select: none;
+  transition: all .12s ease;
 }
-@media (max-width: 560px) { .hotkeys { grid-template-columns: repeat(2, 1fr); } }
-.hotkey {
-  background: var(--bg-elevated); border: 1px solid var(--border);
-  border-radius: 14px; padding: 20px; text-align: center;
+.kkey.mapped {
+  color: var(--accent); cursor: pointer;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--kbd-border));
+  box-shadow: 0 0 0 0 var(--accent-glow);
+}
+.kkey.mapped:hover { transform: translateY(-3px); box-shadow: 0 8px 20px var(--accent-glow); }
+.kkey.mapped.active {
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  color: #fff; border-color: #1d4ed8;
+  transform: translateY(2px); border-bottom-width: 2px;
+  box-shadow: 0 0 24px var(--accent-glow);
+}
+.kkey:not(.mapped) { opacity: .45; }
+.key-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   box-shadow: var(--shadow);
+  padding: 30px 34px;
+  display: flex; gap: 22px; align-items: center;
+  min-height: 120px;
+  max-width: 640px; margin: 0 auto;
 }
+.key-panel .kp-icon {
+  font-size: 2.2rem; width: 70px; height: 70px; flex-shrink: 0;
+  border-radius: 16px; background: var(--accent-soft);
+  display: grid; place-items: center;
+}
+.key-panel h3 { font-size: 1.2rem; margin-bottom: 4px; }
+.key-panel h3 small { color: var(--accent); font-family: ui-monospace, monospace; margin-left: 8px; font-size: .8rem; }
+.key-panel p { color: var(--text-muted); font-size: .95rem; }
+.kb-hint { text-align: center; color: var(--text-muted); font-size: .85rem; margin-top: 18px; }
+.kb-hint .real { color: var(--accent); font-weight: 600; }
+
 kbd {
   display: inline-block;
   font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
@@ -322,10 +322,8 @@ kbd {
   background: var(--kbd-bg); color: var(--accent);
   border: 1px solid var(--kbd-border);
   border-bottom-width: 3px;
-  border-radius: 8px; padding: 6px 14px; margin-bottom: 10px;
+  border-radius: 8px; padding: 6px 14px;
 }
-.hotkey .name { font-weight: 600; font-size: .95rem; }
-.hotkey .desc { color: var(--text-muted); font-size: .82rem; }
 
 /* Install */
 #install { scroll-margin-top: 80px; }
@@ -366,17 +364,14 @@ kbd {
 .tab-note a { font-weight: 600; }
 
 /* Footer */
-footer {
-  border-top: 1px solid var(--border);
-  padding: 44px 0; text-align: center;
-  color: var(--text-muted); font-size: .92rem;
-}
+footer { border-top: 1px solid var(--border); padding: 44px 0; text-align: center; color: var(--text-muted); font-size: .92rem; }
 footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom: 14px; }
 
 @media (max-width: 720px) {
   .nav-links a:not(.gh) { display: none; }
-  .hero-inner { padding: 70px 0 80px; }
+  .hero-inner { padding: 70px 0 120px; }
   section { padding: 60px 0; }
+  .kkey { width: 46px; height: 46px; font-size: .75rem; }
 }
 </style>
 </head>
@@ -387,6 +382,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
     <a class="brand" href="#"><img src="assets/logo.png" alt="Loquivox logo">Loquivox</a>
     <div class="nav-links">
       <a href="#features">Features</a>
+      <a href="#demo">Demo</a>
       <a href="#hotkeys">Hotkeys</a>
       <a href="#install">Install</a>
       <a class="gh" href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
@@ -398,7 +394,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 <header class="hero">
   <div class="container">
     <div class="hero-inner">
-      <h1>Your voice, <span class="grad">everywhere</span> on Linux.</h1>
+      <h1>Your voice,<br><span class="swap-wrap"><span class="swap" id="swap-word">everywhere</span></span><br>on Linux.</h1>
       <p class="sub">Dictate into any app, chat with an AI, rewrite text or analyze your screen — all from a global hotkey. Powered by Whisper, <strong>fully offline if you want</strong>.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#install">⬇ Install now</a>
@@ -412,39 +408,46 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
       </div>
     </div>
   </div>
+  <canvas id="hero-wave"></canvas>
 </header>
+
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track" id="marquee-track">
+    <span>X11</span><span>Wayland</span><span>GNOME</span><span>Niri</span><span>Arch Linux</span><span>Debian</span><span>Ubuntu</span><span>whisper.cpp</span><span>Groq</span><span>Deepgram</span><span>OpenAI</span><span>GTK3</span><span>evdev</span>
+  </div>
+</div>
 
 <section id="features">
   <div class="container">
-    <h2 class="section-title">One hotkey away</h2>
-    <p class="section-sub">No window switching, no copy-paste gymnastics. Press a key, speak, done.</p>
+    <h2 class="section-title reveal">One hotkey away</h2>
+    <p class="section-sub reveal">No window switching, no copy-paste gymnastics. Press a key, speak, done.</p>
     <div class="features-grid">
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">🎙️</div>
         <h3>Dictation<span class="key">F3</span></h3>
         <p>Speak and watch your words appear at the cursor — in any application. Backed by Whisper large-v3 for state-of-the-art accuracy.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">💬</div>
         <h3>AI Chat<span class="key">F4</span></h3>
         <p>A lightweight chat overlay for quick questions and conversations, always one keystroke away. Pin it on top with F9.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">✍️</div>
         <h3>Smart Rewrite<span class="key">F7</span></h3>
         <p>Select any text, then tell Loquivox how to change it: "make it formal", "translate to English", "shorten this".</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">👁️</div>
         <h3>Vision<span class="key">F8</span></h3>
         <p>Take a screenshot and ask about it. Llama 4 vision explains errors, summarizes pages, or reads what's on screen.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">🪄</div>
         <h3>Refinement levels</h3>
         <p>Raw transcript, grammar correction, full reformulation or translation — pick a post-processing level on the fly, per dictation.</p>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">🔊</div>
         <h3>Voice feedback<span class="key">F10</span></h3>
         <p>Optional text-to-speech reads AI answers aloud, so you can stay hands-free from question to answer.</p>
@@ -453,9 +456,17 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
   </div>
 </section>
 
-<section id="demo" style="padding-top: 0;">
+<section id="demo" style="padding-top: 0; scroll-margin-top: 80px;">
   <div class="container">
-    <div class="demo-stage" aria-hidden="true">
+    <h2 class="section-title reveal">From rambling to ready</h2>
+    <p class="section-sub reveal">You mumble, Loquivox polishes. Pick a refinement level and watch the same take land differently — try them:</p>
+    <div class="pipe-levels reveal">
+      <button class="pipe-btn" data-level="raw">Raw</button>
+      <button class="pipe-btn active" data-level="correct">Correct</button>
+      <button class="pipe-btn" data-level="reformulate">Reformulate</button>
+      <button class="pipe-btn" data-level="translate">Translate 🇫🇷</button>
+    </div>
+    <div class="demo-stage reveal" >
       <div class="mock-window">
         <div class="mock-titlebar">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
@@ -465,7 +476,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
           <div class="line w85"></div>
           <div class="line w60"></div>
           <div class="line w85"></div>
-          <span class="typed">Ship the release notes by Friday, then call Sam.</span>
+          <span id="typed-out"></span>
         </div>
       </div>
       <div class="rec-pill">
@@ -486,10 +497,10 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 
 <section id="privacy" style="background: var(--bg-elevated); border-block: 1px solid var(--border);">
   <div class="container">
-    <h2 class="section-title">Your words stay yours</h2>
-    <p class="section-sub">Choose your transcription engine. Go fully local, or plug in the cloud provider you trust.</p>
+    <h2 class="section-title reveal">Your words stay yours</h2>
+    <p class="section-sub reveal">Choose your transcription engine. Go fully local, or plug in the cloud provider you trust.</p>
     <div class="engine-cols">
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">🔒</div>
         <h3>100% offline</h3>
         <ul>
@@ -498,7 +509,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
           <li>Static binaries built for x86_64 &amp; aarch64</li>
         </ul>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">☁️</div>
         <h3>Cloud, your pick</h3>
         <ul>
@@ -507,7 +518,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
           <li>OpenAI gpt-4o-transcribe</li>
         </ul>
       </div>
-      <div class="card">
+      <div class="card reveal">
         <div class="icon">🐧</div>
         <h3>Linux-native</h3>
         <ul>
@@ -520,26 +531,43 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
   </div>
 </section>
 
-<section id="hotkeys">
+<section id="hotkeys" style="scroll-margin-top: 80px;">
   <div class="container">
-    <h2 class="section-title">The command center</h2>
-    <p class="section-sub">Six keys, fully customizable — combos supported.</p>
-    <div class="hotkeys">
-      <div class="hotkey"><kbd>F3</kbd><div class="name">Dictate</div><div class="desc">Voice → text at cursor</div></div>
-      <div class="hotkey"><kbd>F4</kbd><div class="name">Chat</div><div class="desc">Open AI conversation</div></div>
-      <div class="hotkey"><kbd>F7</kbd><div class="name">Rewrite</div><div class="desc">Modify selected text</div></div>
-      <div class="hotkey"><kbd>F8</kbd><div class="name">Vision</div><div class="desc">Screenshot + analysis</div></div>
-      <div class="hotkey"><kbd>F9</kbd><div class="name">Pin</div><div class="desc">Chat always on top</div></div>
-      <div class="hotkey"><kbd>F10</kbd><div class="name">TTS</div><div class="desc">Toggle voice feedback</div></div>
+    <h2 class="section-title reveal">The command center</h2>
+    <p class="section-sub reveal">Six keys, fully customizable — combos supported.</p>
+    <div class="keyboard reveal">
+      <div class="keys-row" id="keys-row">
+        <div class="kkey">Esc</div>
+        <div class="kkey">F1</div>
+        <div class="kkey">F2</div>
+        <div class="kkey mapped" data-key="F3">F3</div>
+        <div class="kkey mapped" data-key="F4">F4</div>
+        <div class="kkey">F5</div>
+        <div class="kkey">F6</div>
+        <div class="kkey mapped" data-key="F7">F7</div>
+        <div class="kkey mapped" data-key="F8">F8</div>
+        <div class="kkey mapped" data-key="F9">F9</div>
+        <div class="kkey mapped" data-key="F10">F10</div>
+        <div class="kkey">F11</div>
+        <div class="kkey">F12</div>
+      </div>
+      <div class="key-panel" id="key-panel">
+        <div class="kp-icon" id="kp-icon">🎙️</div>
+        <div>
+          <h3 id="kp-title">Dictate<small id="kp-key">F3</small></h3>
+          <p id="kp-desc">Hold the floor. Your speech lands as text at the cursor, in whatever app has focus.</p>
+        </div>
+      </div>
+      <p class="kb-hint">Click a glowing key — or <span class="real">press the real one</span> on your keyboard. Go on, this page is listening too. 😉</p>
     </div>
   </div>
 </section>
 
 <section id="install" style="background: var(--bg-elevated); border-block: 1px solid var(--border);">
   <div class="container">
-    <h2 class="section-title">Get Loquivox</h2>
-    <p class="section-sub">Pick your flavor. Every path ends with you talking to your computer.</p>
-    <div class="tabs">
+    <h2 class="section-title reveal">Get Loquivox</h2>
+    <p class="section-sub reveal">Pick your flavor. Every path ends with you talking to your computer.</p>
+    <div class="tabs reveal">
       <div class="tab-buttons">
         <button class="tab-btn active" data-tab="arch">Arch Linux (AUR)</button>
         <button class="tab-btn" data-tab="deb">Debian / Ubuntu</button>
@@ -592,7 +620,7 @@ loquivox</div>
 </footer>
 
 <script>
-// Theme: saved preference > system preference
+// ───── Theme: saved preference > system preference ─────
 const root = document.documentElement;
 const toggle = document.getElementById('theme-toggle');
 function applyTheme(t) {
@@ -607,7 +635,135 @@ toggle.addEventListener('click', () => {
   applyTheme(next);
 });
 
-// Install tabs
+// ───── Rotating hero word ─────
+const words = ['everywhere', 'in your IDE', 'in your inbox', 'in your terminal', 'in that form', 'everywhere'];
+let wi = 0;
+const swapEl = document.getElementById('swap-word');
+setInterval(() => {
+  wi = (wi + 1) % words.length;
+  swapEl.style.animation = 'none';
+  void swapEl.offsetWidth;            // restart the CSS animation
+  swapEl.textContent = words[wi];
+  swapEl.style.animation = '';
+}, 2600);
+
+// ───── Living waveform canvas ─────
+const canvas = document.getElementById('hero-wave');
+const ctx = canvas.getContext('2d');
+let mouseX = -1;
+addEventListener('mousemove', e => { mouseX = e.clientX; });
+function resizeCanvas() {
+  canvas.width = canvas.offsetWidth * devicePixelRatio;
+  canvas.height = canvas.offsetHeight * devicePixelRatio;
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+resizeCanvas();
+addEventListener('resize', resizeCanvas);
+const BARS = 160;
+function drawWave(t) {
+  const w = canvas.offsetWidth, h = canvas.offsetHeight;
+  ctx.clearRect(0, 0, w, h);
+  const gap = w / BARS;
+  const dark = root.getAttribute('data-theme') === 'dark';
+  for (let i = 0; i < BARS; i++) {
+    const x = i * gap + gap / 2;
+    // layered sines give a speech-like envelope
+    let a = Math.sin(i * .31 + t * .002) * .35
+          + Math.sin(i * .11 - t * .0013) * .4
+          + Math.sin(i * .53 + t * .0031) * .25;
+    a = Math.abs(a);
+    // swell near the cursor
+    if (mouseX >= 0) {
+      const d = Math.abs(x - mouseX);
+      if (d < 140) a += (1 - d / 140) * .9;
+    }
+    const bh = Math.max(3, a * h * .62);
+    const grad = ctx.createLinearGradient(0, h - bh, 0, h);
+    grad.addColorStop(0, dark ? 'rgba(125,211,252,.85)' : 'rgba(37,99,235,.75)');
+    grad.addColorStop(1, dark ? 'rgba(37,99,235,.15)' : 'rgba(56,189,248,.12)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x - 1.6, h - bh, 3.2, bh, 2);
+    ctx.fill();
+  }
+  requestAnimationFrame(drawWave);
+}
+requestAnimationFrame(drawWave);
+
+// ───── Marquee: duplicate content for a seamless loop ─────
+const track = document.getElementById('marquee-track');
+track.innerHTML += track.innerHTML;
+
+// ───── Refinement pipeline demo ─────
+const TAKES = {
+  raw:         'uh so basically we should um ship the the release on friday i think',
+  correct:     'So basically, we should ship the release on Friday, I think.',
+  reformulate: "Let's plan to ship the release on Friday.",
+  translate:   'Prévoyons de publier la version vendredi.'
+};
+const typedOut = document.getElementById('typed-out');
+let typeTimer = null;
+function typeText(text) {
+  clearInterval(typeTimer);
+  typedOut.textContent = '';
+  let i = 0;
+  typeTimer = setInterval(() => {
+    typedOut.textContent = text.slice(0, ++i);
+    if (i >= text.length) clearInterval(typeTimer);
+  }, 28);
+}
+document.querySelectorAll('.pipe-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.pipe-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    typeText(TAKES[btn.dataset.level]);
+  });
+});
+// auto-cycle until the visitor interacts
+const order = ['raw', 'correct', 'reformulate', 'translate'];
+let cycleIdx = 1, userTouched = false;
+typeText(TAKES.correct);
+const cycle = setInterval(() => {
+  if (userTouched) return clearInterval(cycle);
+  cycleIdx = (cycleIdx + 1) % order.length;
+  const lvl = order[cycleIdx];
+  document.querySelectorAll('.pipe-btn').forEach(b => b.classList.toggle('active', b.dataset.level === lvl));
+  typeText(TAKES[lvl]);
+}, 4200);
+document.querySelector('.pipe-levels').addEventListener('click', () => { userTouched = true; });
+
+// ───── Interactive keyboard ─────
+const ACTIONS = {
+  F3:  { icon: '🎙️', title: 'Dictate',  desc: 'Hold the floor. Your speech lands as text at the cursor, in whatever app has focus.' },
+  F4:  { icon: '💬', title: 'Chat',     desc: 'Summon the AI overlay, ask anything, get back to work. It politely hides when ignored.' },
+  F7:  { icon: '✍️', title: 'Rewrite',  desc: 'Select text anywhere, press F7, and say how it should change. "Make it sound less grumpy."' },
+  F8:  { icon: '👁️', title: 'Vision',   desc: 'Screenshot + question in one move. Great for cryptic error dialogs and other people\'s code.' },
+  F9:  { icon: '📌', title: 'Pin',      desc: 'Nail the chat overlay on top of everything. Unpin when you need your screen back.' },
+  F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. Orpheus TTS reads answers aloud — toggle anytime.' }
+};
+const kpIcon = document.getElementById('kp-icon'),
+      kpTitle = document.getElementById('kp-title'),
+      kpDesc = document.getElementById('kp-desc');
+function showAction(key) {
+  const a = ACTIONS[key];
+  if (!a) return;
+  kpIcon.textContent = a.icon;
+  kpTitle.innerHTML = a.title + '<small>' + key + '</small>';
+  kpDesc.textContent = a.desc;
+  document.querySelectorAll('.kkey').forEach(k => k.classList.toggle('active', k.dataset.key === key));
+}
+document.querySelectorAll('.kkey.mapped').forEach(k => {
+  k.addEventListener('click', () => showAction(k.dataset.key));
+});
+addEventListener('keydown', e => {
+  if (ACTIONS[e.key]) {
+    e.preventDefault();
+    showAction(e.key);
+    document.getElementById('hotkeys').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+
+// ───── Install tabs ─────
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -617,7 +773,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// Copy buttons
+// ───── Copy buttons ─────
 document.querySelectorAll('.copy-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const text = btn.parentElement.innerText.replace(/^Copy\n?/, '');
@@ -627,6 +783,12 @@ document.querySelectorAll('.copy-btn').forEach(btn => {
     });
   });
 });
+
+// ───── Scroll reveal ─────
+const io = new IntersectionObserver(entries => {
+  entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+}, { threshold: .12 });
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
 </script>
 </body>
 </html>
