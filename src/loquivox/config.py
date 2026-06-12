@@ -22,6 +22,19 @@ from evdev import ecodes
 
 CONFIG_FILE: Path = Path.home() / ".config" / "loquivox" / "config.toml"
 
+# Default system prompt for the "reformulate" post-processing mode. Kept as a
+# module constant so it is the single source of truth shared by the dataclass
+# default and the settings UI's "reset to default" action. Deliberately
+# conservative: it polishes minimally and preserves the speaker's intent
+# (overridable via [postprocess] reformulate_prompt in config.toml).
+DEFAULT_REFORMULATE_PROMPT: str = (
+    "You lightly polish dictated text. Make the SMALLEST changes needed for "
+    "clarity, fluency and correct punctuation. Preserve the speaker's original "
+    "meaning, intent, tone, word choices and language. Do NOT rephrase "
+    "aggressively, and do NOT add, remove or reinterpret any content. "
+    "Output ONLY the resulting text, with no preamble."
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -138,6 +151,8 @@ class Config:
     POSTPROCESS_MODE: str = "none"
     # Target language for the "translate" mode (ISO-639-1 code or a language name).
     POSTPROCESS_TARGET_LANG: str = "en"
+    # Editable system prompt for the "reformulate" mode (see DEFAULT_REFORMULATE_PROMPT).
+    POSTPROCESS_REFORMULATE_PROMPT: str = DEFAULT_REFORMULATE_PROMPT
 
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
@@ -310,6 +325,10 @@ def _build_config() -> Config:
         overrides["POSTPROCESS_MODE"] = str(post["mode"])
     if "target_language" in post:
         overrides["POSTPROCESS_TARGET_LANG"] = str(post["target_language"])
+    if "reformulate_prompt" in post:
+        prompt = str(post["reformulate_prompt"]).strip()
+        if prompt:  # ignore an empty override → keep the (conservative) default
+            overrides["POSTPROCESS_REFORMULATE_PROMPT"] = prompt
 
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:

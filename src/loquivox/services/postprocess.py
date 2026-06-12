@@ -9,7 +9,9 @@ returns the original text unchanged.
 Modes (``[postprocess] mode`` in config.toml):
   - ``none``        — pass through (default)
   - ``correct``     — fix spelling/grammar/punctuation, same language
-  - ``reformulate`` — rewrite clearer/more fluent, same language
+  - ``reformulate`` — polish, same language; prompt is editable via
+                      ``[postprocess] reformulate_prompt`` (default is minimal,
+                      intent-preserving — see ``config.DEFAULT_REFORMULATE_PROMPT``)
   - ``translate``   — translate into ``[postprocess] target_language``
 
 Reads ``config.CFG`` through the module so settings changes apply live
@@ -23,18 +25,14 @@ import loquivox.config as config_module
 from loquivox.api import get_client
 from loquivox.decorators import safe_execute
 
-# Task system prompts. Each insists on returning ONLY the resulting text so the
-# output can be typed verbatim.
+# Static task prompts. "reformulate" is NOT here — its prompt is user-editable
+# and read live from config (config.POSTPROCESS_REFORMULATE_PROMPT). Each insists
+# on returning ONLY the resulting text so the output can be typed verbatim.
 _PROMPTS = {
     "correct": (
         "You fix dictated text: correct spelling, grammar, punctuation and "
         "capitalization. Keep the original language and meaning. Do not add or "
         "remove content. Output ONLY the corrected text, with no preamble."
-    ),
-    "reformulate": (
-        "You rewrite dictated text to be clear, fluent and well-structured, "
-        "keeping the original language and meaning. Output ONLY the rewritten "
-        "text, with no preamble."
     ),
     "translate": (
         "You are a translator. Translate the user's text into {lang}. Preserve "
@@ -42,6 +40,9 @@ _PROMPTS = {
         "preamble."
     ),
 }
+
+# Modes that trigger an LLM call (everything else, incl. "none", passes through).
+_VALID_MODES = frozenset({"correct", "reformulate", "translate"})
 
 # Minimal ISO-639-1 → English name map for nicer translate prompts; unknown
 # codes are passed through as-is (a full language name also works).
@@ -75,18 +76,23 @@ class PostProcessor:
         return out or None
 
     @classmethod
+    def _system_prompt(cls, mode: str) -> str:
+        """Resolve the system prompt for a mode (reformulate is user-editable)."""
+        if mode == "reformulate":
+            return config_module.CFG.POSTPROCESS_REFORMULATE_PROMPT
+        if mode == "translate":
+            return _PROMPTS["translate"].format(
+                lang=cls._lang_name(config_module.CFG.POSTPROCESS_TARGET_LANG)
+            )
+        return _PROMPTS["correct"]
+
+    @classmethod
     def process(cls, text: str) -> str:
         """Return post-processed text, or the original on none/failure."""
         mode = (config_module.CFG.POSTPROCESS_MODE or "none").strip().lower()
-        if not text or mode == "none" or mode not in _PROMPTS:
+        if not text or mode not in _VALID_MODES:
             return text
 
-        system_prompt = _PROMPTS[mode]
-        if mode == "translate":
-            system_prompt = system_prompt.format(
-                lang=cls._lang_name(config_module.CFG.POSTPROCESS_TARGET_LANG)
-            )
-
         print(f"✨ Post-processing ({mode})…")
-        result = cls._run(text, system_prompt)
+        result = cls._run(text, cls._system_prompt(mode))
         return result or text

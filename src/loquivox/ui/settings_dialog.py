@@ -74,6 +74,9 @@ class SettingsDialog:
     _pp_lang: Optional[Gtk.ComboBoxText] = None
     _pp_lang_label: Optional[Gtk.Label] = None
     _pp_status: Optional[Gtk.Label] = None
+    _pp_prompt_view: Optional[Gtk.TextView] = None
+    _pp_prompt_scroll: Optional[Gtk.ScrolledWindow] = None
+    _pp_prompt_label: Optional[Gtk.Label] = None
 
     # Post-processing modes offered in the UI/tray: (id, label)
     _POSTPROCESS_MODES = [
@@ -651,9 +654,31 @@ class SettingsDialog:
             cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
         grid.attach(cls._pp_lang, 1, 1, 1, 1)
         vbox.pack_start(grid, False, False, 0)
-        # "Translate to" only matters for the Translate mode — grey it out
-        # otherwise so it's clear the other modes keep the original language.
-        cls._update_pp_lang_sensitivity()
+
+        # Editable system prompt for the Reformulate mode — lets you tune how
+        # much it rewrites (the default is intentionally minimal).
+        cls._pp_prompt_label = Gtk.Label()
+        cls._pp_prompt_label.set_halign(Gtk.Align.START)
+        cls._pp_prompt_label.set_markup("<small><b>Reformulate prompt</b></small>")
+        vbox.pack_start(cls._pp_prompt_label, False, False, 2)
+
+        cls._pp_prompt_view = Gtk.TextView()
+        cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_REFORMULATE_PROMPT)
+        cls._pp_prompt_scroll = Gtk.ScrolledWindow()
+        cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        cls._pp_prompt_scroll.set_min_content_height(90)
+        cls._pp_prompt_scroll.add(cls._pp_prompt_view)
+        vbox.pack_start(cls._pp_prompt_scroll, False, False, 0)
+
+        reset_btn = Gtk.Button(label="Reset prompt to default")
+        reset_btn.set_halign(Gtk.Align.START)
+        reset_btn.connect("clicked", cls._on_reset_pp_prompt)
+        vbox.pack_start(reset_btn, False, False, 0)
+
+        # Grey out the lang (Translate) and prompt (Reformulate) widgets unless
+        # their mode is selected, so it's clear which control applies.
+        cls._update_pp_sensitivity()
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         apply_btn = Gtk.Button(label="Apply")
@@ -679,17 +704,32 @@ class SettingsDialog:
         return cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
 
     @classmethod
-    def _update_pp_lang_sensitivity(cls) -> None:
-        """Enable 'Translate to' only for the Translate mode."""
-        is_translate = cls._selected_pp_mode() == "translate"
-        if cls._pp_lang:
-            cls._pp_lang.set_sensitive(is_translate)
-        if cls._pp_lang_label:
-            cls._pp_lang_label.set_sensitive(is_translate)
+    def _update_pp_sensitivity(cls) -> None:
+        """Enable 'Translate to' for Translate, and the prompt editor for Reformulate."""
+        mode = cls._selected_pp_mode()
+        is_translate = mode == "translate"
+        for w in (cls._pp_lang, cls._pp_lang_label):
+            if w:
+                w.set_sensitive(is_translate)
+        is_reformulate = mode == "reformulate"
+        for w in (cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
+            if w:
+                w.set_sensitive(is_reformulate)
 
     @classmethod
     def _on_pp_mode_changed(cls, _combo: Gtk.ComboBoxText) -> None:
-        cls._update_pp_lang_sensitivity()
+        cls._update_pp_sensitivity()
+
+    @classmethod
+    def _pp_prompt_text(cls) -> str:
+        """Current text of the reformulate-prompt editor."""
+        buf = cls._pp_prompt_view.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
+
+    @classmethod
+    def _on_reset_pp_prompt(cls, _btn: Gtk.Button) -> None:
+        from loquivox.config import DEFAULT_REFORMULATE_PROMPT
+        cls._pp_prompt_view.get_buffer().set_text(DEFAULT_REFORMULATE_PROMPT)
 
     @classmethod
     def _on_apply_postprocess(cls, _btn: Gtk.Button) -> None:
@@ -701,7 +741,12 @@ class SettingsDialog:
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:
-            update_section("postprocess", {"mode": mode, "target_language": lang})
+            update_section("postprocess", {
+                "mode": mode,
+                "target_language": lang,
+                # None → not written (keeps the conservative default).
+                "reformulate_prompt": cls._pp_prompt_text() or None,
+            })
         except ConfigWriteError as e:
             cls._pp_status.set_markup(f"<small>❌ {e}</small>")
             return
