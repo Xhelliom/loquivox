@@ -101,11 +101,16 @@ class PostProcessor:
             label = f"translate → {cfg.POSTPROCESS_TARGET_LANG}"
         else:
             level = int(cfg.POSTPROCESS_LEVEL or 0)
-            if level <= 0 or level not in _LEVEL_PROMPTS:
-                return text
-            # A custom prompt overrides the level's built-in one.
-            prompt = (cfg.POSTPROCESS_CUSTOM_PROMPT or "").strip() or _LEVEL_PROMPTS[level]
-            label = f"level {level}"
+            if level == config_module.POSTPROCESS_CUSTOM_LEVEL:
+                prompt = (cfg.POSTPROCESS_CUSTOM_PROMPT or "").strip()
+                if not prompt:
+                    return text  # Custom selected but no prompt set → pass through
+                label = "custom"
+            elif level in _LEVEL_PROMPTS:
+                prompt = _LEVEL_PROMPTS[level]
+                label = f"level {level}"
+            else:
+                return text  # 0 = off
 
         print(f"✨ Post-processing ({label})…")
         result = cls._run(text, prompt)

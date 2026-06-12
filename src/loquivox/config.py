@@ -31,8 +31,10 @@ POSTPROCESS_LEVELS: tuple = (
     (2, "Light"),
     (3, "Medium"),
     (4, "Strong"),
+    (5, "Custom"),   # uses POSTPROCESS_CUSTOM_PROMPT
 )
-POSTPROCESS_MAX_LEVEL: int = 4
+POSTPROCESS_MAX_LEVEL: int = 5
+POSTPROCESS_CUSTOM_LEVEL: int = 5
 
 
 @dataclass(frozen=True)
@@ -152,8 +154,7 @@ class Config:
     POSTPROCESS_TRANSLATE: bool = False
     # Target language for translate (ISO-639-1 code or a language name).
     POSTPROCESS_TARGET_LANG: str = "en"
-    # Advanced: a custom system prompt that overrides the level's built-in prompt
-    # when non-empty (ignored for translate).
+    # System prompt used by the "Custom" level (POSTPROCESS_CUSTOM_LEVEL).
     POSTPROCESS_CUSTOM_PROMPT: str = ""
 
     # --- Transcription ---
@@ -405,6 +406,9 @@ def _build_config() -> Config:
         m = str(post["mode"]).strip().lower()
         if m == "translate":
             overrides["POSTPROCESS_TRANSLATE"] = True
+        elif m == "reformulate" and str(post.get("reformulate_prompt", "")).strip():
+            # old reformulate + a custom prompt → the new Custom level
+            overrides["POSTPROCESS_LEVEL"] = POSTPROCESS_CUSTOM_LEVEL
         else:
             overrides["POSTPROCESS_LEVEL"] = _mode_to_level.get(m, 0)
     if "translate" in post:

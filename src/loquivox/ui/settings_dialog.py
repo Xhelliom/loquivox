@@ -662,8 +662,8 @@ class SettingsDialog:
         cls._pp_prompt_label = Gtk.Label()
         cls._pp_prompt_label.set_halign(Gtk.Align.START)
         cls._pp_prompt_label.set_markup(
-            "<small><b>Custom prompt</b> — advanced; overrides the level "
-            "(leave empty to use it)</small>"
+            "<small><b>Custom level prompt</b> — used when the level is set to "
+            "<i>Custom</i></small>"
         )
         vbox.pack_start(cls._pp_prompt_label, False, False, 2)
 
