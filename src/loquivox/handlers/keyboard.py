@@ -15,8 +15,7 @@ import evdev
 from evdev import InputDevice, ecodes
 
 from loquivox.config import (
-    CFG, MODIFIER_CODES, POSTPROCESS_LEVELS, POSTPROCESS_MAX_LEVEL,
-    modifier_name, resolve_hotkeys,
+    CFG, MODIFIER_CODES, POSTPROCESS_MAX_LEVEL, modifier_name, resolve_hotkeys,
 )
 from loquivox.handlers.mode import ModeHandler
 from loquivox.managers.chat import ChatManager
@@ -365,11 +364,6 @@ class KeyboardHandler:
         else:
             OverlayManager.hide(generation)
 
-    @staticmethod
-    def _refine_overlay_text(level: int) -> str:
-        name = dict(POSTPROCESS_LEVELS).get(level, level)
-        return f"Refine: {name}  •  0-{POSTPROCESS_MAX_LEVEL} / ←→ / Enter"
-
     @classmethod
     def capture_refinement(cls, default_level: int, timeout: float = 12.0) -> Optional[int]:
         """
@@ -407,7 +401,7 @@ class KeyboardHandler:
             except Exception:
                 pass
 
-        OverlayManager.set_live_text(cls._refine_overlay_text(level))
+        OverlayManager.set_choosing(level)
         deadline = time.monotonic() + timeout
         try:
             while True:
@@ -438,7 +432,7 @@ class KeyboardHandler:
                         else:
                             continue
                         deadline = time.monotonic() + timeout  # keep alive on activity
-                        OverlayManager.set_live_text(cls._refine_overlay_text(level))
+                        OverlayManager.set_choosing(level)
         finally:
             for dev in grabbed:
                 try:

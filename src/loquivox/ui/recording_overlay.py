@@ -109,6 +109,13 @@ class GtkOverlay(Gtk.Window):
         self.transcribing = False
         self.paused = False
         self.live_text = ""
+        # Refinement chooser state (grows the overlay while picking a level).
+        from loquivox.config import POSTPROCESS_LEVELS
+        self.choosing = False
+        self.choose_level = 0
+        self._base_w, self._base_h = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
+        self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
+        self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         self._tick = 0
         self._last_audio_tick = 0
         self._opacity = 0.0           # eases 0→1 on show
@@ -129,8 +136,30 @@ class GtkOverlay(Gtk.Window):
 
     def set_transcribing(self) -> None:
         """Switch the overlay to the post-recording 'transcribing' state."""
+        if self.choosing:  # leaving the chooser → shrink back to normal size
+            self.choosing = False
+            self._resize(self._base_w, self._base_h)
         self.transcribing = True
         self.drawing_area.queue_draw()
+
+    def set_choosing(self, level: int) -> None:
+        """Enter the refinement chooser: grow taller and show the levels."""
+        self.choosing = True
+        self.transcribing = False
+        self.choose_level = int(level)
+        self._resize(self._choose_w, self._choose_h)
+        self.drawing_area.queue_draw()
+
+    def _resize(self, w: int, h: int) -> None:
+        """Resize the overlay window + drawing area, keeping it bottom-centered."""
+        self.drawing_area.set_size_request(w, h)
+        self.resize(w, h)
+        self.queue_resize()
+        if not (HAS_LAYER_SHELL and SESSION_TYPE == "wayland"):
+            display = Gdk.Display.get_default()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            g = monitor.get_geometry()
+            self.move((g.width - w) // 2, g.height - h - 80)
 
     def set_live_text(self, text: str) -> None:
         """Update the live partial-transcript text shown while streaming."""
@@ -216,6 +245,13 @@ class GtkOverlay(Gtk.Window):
         # Slide the content up as it fades in.
         cr.translate(0, (1.0 - a) * self.SLIDE_PX)
 
+        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+
+        # Refinement chooser takes over the (enlarged) overlay while picking.
+        if self.choosing:
+            self._draw_chooser(cr, w, h, scheme, a)
+            return
+
         # Live transcripts grow from the right, so we keep the full text and let
         # the renderer ellipsize the START — the latest words stay visible and
         # never spill onto the mic icon.
@@ -230,7 +266,6 @@ class GtkOverlay(Gtk.Window):
         else:
             text = self.config["text"]
 
-        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
         # Shared renderer → the settings preview looks identical to the real bubble.
         self.render_content(
             cr, w, h, scheme=scheme, mode=self.mode, text=text,
@@ -327,6 +362,56 @@ class GtkOverlay(Gtk.Window):
         else:
             tw, th = layout.get_pixel_size()
             cr.move_to(cx - tw / 2, cy - th / 2)
+        PangoCairo.show_layout(cr, layout)
+
+    def _draw_chooser(self, cr, w, h, scheme, a) -> None:
+        """Render the refinement-level chooser on the (enlarged) overlay."""
+        from loquivox.config import POSTPROCESS_LEVELS
+        bg = self._hex_to_rgb(scheme["bg"])
+        fg = self._hex_to_rgb(scheme.get("accent", scheme["text"]))
+        txt = self._hex_to_rgb(scheme["text"])
+
+        self._rounded_rect_path(cr, 0, 0, w, h, 16)
+        cr.set_source_rgba(*bg, 0.96 * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*fg, 0.30 * a)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        self._draw_text(cr, self._font_family, "Choose refinement", w / 2, 20, 9.5, fg, a)
+
+        top, row_h = 38, 22
+        for i, (lvl, label) in enumerate(POSTPROCESS_LEVELS):
+            y = top + i * row_h
+            selected = (lvl == self.choose_level)
+            if selected:
+                self._rounded_rect_path(cr, 10, y, w - 20, row_h - 3, 7)
+                cr.set_source_rgba(*fg, 0.92 * a)
+                cr.fill()
+                row_color, weight = bg, Pango.Weight.BOLD
+            else:
+                row_color, weight = txt, Pango.Weight.NORMAL
+            mid = y + (row_h - 3) / 2
+            self._draw_text_at(cr, self._font_family, str(lvl), 22, mid, 8.5, row_color, a, weight)
+            self._draw_text_at(cr, self._font_family, label, 48, mid, 8.5, row_color, a, weight)
+
+        self._draw_text(cr, self._font_family, "0-5 / ←→  ·  Enter ✓  ·  Esc ✗",
+                        w / 2, h - 13, 7.5, fg, a)
+
+    @staticmethod
+    def _draw_text_at(cr, font_family, text, x, cy, size, color, a,
+                      weight=Pango.Weight.NORMAL):
+        """Left-aligned text at x, vertically centered at cy."""
+        layout = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription()
+        fd.set_family(font_family)
+        fd.set_size(int(size * Pango.SCALE))
+        fd.set_weight(weight)
+        layout.set_font_description(fd)
+        layout.set_text(text, -1)
+        _, th = layout.get_pixel_size()
+        cr.set_source_rgba(*color, a)
+        cr.move_to(x, cy - th / 2)
         PangoCairo.show_layout(cr, layout)
 
     # --------------------------------------------------------------- icons

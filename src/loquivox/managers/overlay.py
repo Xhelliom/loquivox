@@ -65,6 +65,16 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
+    def set_choosing(level: int) -> None:
+        """Show the refinement-level chooser (enlarged) on the overlay (if shown)."""
+        if STATE.overlay_window:
+            try:
+                STATE.overlay_window.set_choosing(level)
+            except Exception:
+                pass
+
+    @staticmethod
+    @run_on_main_thread
     def hide(generation: Optional[int] = None) -> None:
         """
         Hide the overlay.
