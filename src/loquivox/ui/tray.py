@@ -117,39 +117,56 @@ class TrayManager:
 
     @staticmethod
     def _build_postprocess_item() -> Gtk.MenuItem:
-        """A 'Post-processing' menu entry with a radio submenu of modes."""
+        """A 'Refinement' entry: a radio submenu of levels + a Translate toggle."""
         import loquivox.config as config_module
-        from loquivox.ui.settings_dialog import SettingsDialog
 
-        current = (config_module.CFG.POSTPROCESS_MODE or "none").strip().lower()
-        modes = SettingsDialog._POSTPROCESS_MODES
+        cfg = config_module.CFG
+        current = int(cfg.POSTPROCESS_LEVEL or 0)
 
-        item = Gtk.MenuItem(label="Post-processing")
+        item = Gtk.MenuItem(label="Refinement")
         submenu = Gtk.Menu()
         group = None
-        for mid, label in modes:
+        for level, label in config_module.POSTPROCESS_LEVELS:
             radio = Gtk.RadioMenuItem(label=label, group=group)
             group = radio
-            radio.set_active(mid == current)
-            radio.connect("toggled", TrayManager._on_postprocess_selected, mid)
+            radio.set_active(level == current and not cfg.POSTPROCESS_TRANSLATE)
+            radio.connect("toggled", TrayManager._on_postprocess_level, level)
             submenu.append(radio)
+
+        submenu.append(Gtk.SeparatorMenuItem())
+        translate = Gtk.CheckMenuItem(label=f"Translate → {cfg.POSTPROCESS_TARGET_LANG}")
+        translate.set_active(bool(cfg.POSTPROCESS_TRANSLATE))
+        translate.connect("toggled", TrayManager._on_translate_toggled)
+        submenu.append(translate)
+
         item.set_submenu(submenu)
         return item
 
     @staticmethod
-    def _on_postprocess_selected(widget, mode: str) -> None:
-        """Apply a post-processing mode chosen from the tray (live + persisted)."""
-        if not widget.get_active():
-            return  # only the newly-selected radio acts
+    def _save_postprocess(values: dict) -> None:
+        """Persist [postprocess] changes and reload config live."""
         from loquivox import config as config_module
         from loquivox.config_io import ConfigWriteError, update_section
         try:
-            update_section("postprocess", {"mode": mode})
+            update_section("postprocess", values)
         except ConfigWriteError as e:
-            print(f"⚠️ Could not save post-processing mode: {e}")
+            print(f"⚠️ Could not save post-processing: {e}")
             return
         config_module.reload_config()  # PostProcessor reads config_module.CFG live
-        print(f"✨ Post-processing mode → {mode}")
+
+    @staticmethod
+    def _on_postprocess_level(widget, level: int) -> None:
+        """Pick a refinement level from the tray (also turns Translate off)."""
+        if not widget.get_active():
+            return  # only the newly-selected radio acts
+        TrayManager._save_postprocess({"level": level, "translate": False})
+        print(f"✨ Refinement level → {level}")
+
+    @staticmethod
+    def _on_translate_toggled(widget) -> None:
+        """Toggle Translate from the tray (takes precedence over the level)."""
+        TrayManager._save_postprocess({"translate": bool(widget.get_active())})
+        print(f"✨ Translate → {widget.get_active()}")
 
     @staticmethod
     def _make_history_callback(item: Dict[str, str], clipboard_service) -> Callable:

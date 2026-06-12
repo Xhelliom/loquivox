@@ -22,18 +22,17 @@ from evdev import ecodes
 
 CONFIG_FILE: Path = Path.home() / ".config" / "loquivox" / "config.toml"
 
-# Default system prompt for the "reformulate" post-processing mode. Kept as a
-# module constant so it is the single source of truth shared by the dataclass
-# default and the settings UI's "reset to default" action. Deliberately
-# conservative: it polishes minimally and preserves the speaker's intent
-# (overridable via [postprocess] reformulate_prompt in config.toml).
-DEFAULT_REFORMULATE_PROMPT: str = (
-    "You lightly polish dictated text. Make the SMALLEST changes needed for "
-    "clarity, fluency and correct punctuation. Preserve the speaker's original "
-    "meaning, intent, tone, word choices and language. Do NOT rephrase "
-    "aggressively, and do NOT add, remove or reinterpret any content. "
-    "Output ONLY the resulting text, with no preamble."
+# Refinement levels for post-processing — single source of truth for the
+# settings slider and the tray submenu. 0 = off; higher = more rewriting. The
+# per-level system prompts live in services.postprocess (_LEVEL_PROMPTS).
+POSTPROCESS_LEVELS: tuple = (
+    (0, "Off"),
+    (1, "Correct"),
+    (2, "Light"),
+    (3, "Medium"),
+    (4, "Strong"),
 )
+POSTPROCESS_MAX_LEVEL: int = 4
 
 
 @dataclass(frozen=True)
@@ -146,13 +145,16 @@ class Config:
     OPENAI_MODEL: str = "gpt-4o-transcribe"
     DEEPGRAM_MODEL: str = "nova-3"
 
-    # --- Post-processing (dictation text → LLM cleanup, opt-in) ---
-    # none | correct | reformulate | translate
-    POSTPROCESS_MODE: str = "none"
-    # Target language for the "translate" mode (ISO-639-1 code or a language name).
+    # --- Post-processing (dictation text → LLM, opt-in) ---
+    # Refinement intensity: 0 = off, 1 = correct … 4 = strong (POSTPROCESS_LEVELS).
+    POSTPROCESS_LEVEL: int = 0
+    # Translate instead of refine — a separate axis; uses POSTPROCESS_TARGET_LANG.
+    POSTPROCESS_TRANSLATE: bool = False
+    # Target language for translate (ISO-639-1 code or a language name).
     POSTPROCESS_TARGET_LANG: str = "en"
-    # Editable system prompt for the "reformulate" mode (see DEFAULT_REFORMULATE_PROMPT).
-    POSTPROCESS_REFORMULATE_PROMPT: str = DEFAULT_REFORMULATE_PROMPT
+    # Advanced: a custom system prompt that overrides the level's built-in prompt
+    # when non-empty (ignored for translate).
+    POSTPROCESS_CUSTOM_PROMPT: str = ""
 
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
@@ -394,14 +396,25 @@ def _build_config() -> Config:
         )
 
     post = data.get("postprocess", {})
-    if "mode" in post:
-        overrides["POSTPROCESS_MODE"] = str(post["mode"])
+    # Back-compat: map the old `mode` (none/correct/reformulate/translate) onto
+    # the new level + translate axes when the new keys aren't present.
+    _mode_to_level = {"none": 0, "correct": 1, "reformulate": 2}
+    if "level" in post:
+        overrides["POSTPROCESS_LEVEL"] = max(0, min(POSTPROCESS_MAX_LEVEL, int(post["level"])))
+    elif "mode" in post:
+        m = str(post["mode"]).strip().lower()
+        if m == "translate":
+            overrides["POSTPROCESS_TRANSLATE"] = True
+        else:
+            overrides["POSTPROCESS_LEVEL"] = _mode_to_level.get(m, 0)
+    if "translate" in post:
+        overrides["POSTPROCESS_TRANSLATE"] = bool(post["translate"])
     if "target_language" in post:
         overrides["POSTPROCESS_TARGET_LANG"] = str(post["target_language"])
-    if "reformulate_prompt" in post:
-        prompt = str(post["reformulate_prompt"]).strip()
-        if prompt:  # ignore an empty override → keep the (conservative) default
-            overrides["POSTPROCESS_REFORMULATE_PROMPT"] = prompt
+    # `reformulate_prompt` is the old name for the custom override.
+    custom = post.get("custom_prompt", post.get("reformulate_prompt"))
+    if custom is not None:
+        overrides["POSTPROCESS_CUSTOM_PROMPT"] = str(custom).strip()
 
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:

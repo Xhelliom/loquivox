@@ -70,21 +70,14 @@ class SettingsDialog:
     _hotkey_capture_btns: Optional[list] = None
     _key_entries: Optional[dict] = None
     _key_status: Optional[Gtk.Label] = None
-    _pp_combo: Optional[Gtk.ComboBoxText] = None
+    _pp_scale: Optional[Gtk.Scale] = None
+    _pp_scale_label: Optional[Gtk.Label] = None
+    _pp_translate_check: Optional[Gtk.CheckButton] = None
     _pp_lang: Optional[Gtk.ComboBoxText] = None
-    _pp_lang_label: Optional[Gtk.Label] = None
     _pp_status: Optional[Gtk.Label] = None
     _pp_prompt_view: Optional[Gtk.TextView] = None
     _pp_prompt_scroll: Optional[Gtk.ScrolledWindow] = None
     _pp_prompt_label: Optional[Gtk.Label] = None
-
-    # Post-processing modes offered in the UI/tray: (id, label)
-    _POSTPROCESS_MODES = [
-        ("none",        "Off"),
-        ("correct",     "Correct (spelling/grammar/punctuation)"),
-        ("reformulate", "Reformulate (clearer phrasing)"),
-        ("translate",   "Translate to…"),
-    ]
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -619,65 +612,71 @@ class SettingsDialog:
         return text  # assume the user typed a raw code
 
     # -----------------------------------------------------------------
-    # Post-processing section (correct / reformulate / translate)
+    # Post-processing: one Refinement level (0-4) + optional Translate
     # -----------------------------------------------------------------
     @classmethod
     def _build_postprocess_section(cls, vbox: Gtk.Box) -> None:
+        from loquivox.config import POSTPROCESS_LEVELS, POSTPROCESS_MAX_LEVEL
+
         header = Gtk.Label()
         header.set_halign(Gtk.Align.START)
         header.set_markup("<b>Post-processing</b> <small>(dictation → LLM)</small>")
         vbox.pack_start(header, False, False, 6)
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(6)
+        # Refinement intensity: Off → Correct → Light → Medium → Strong.
+        cls._pp_scale_label = Gtk.Label()
+        cls._pp_scale_label.set_halign(Gtk.Align.START)
+        cls._pp_scale_label.set_markup("<small><b>Refinement level</b></small>")
+        vbox.pack_start(cls._pp_scale_label, False, False, 2)
 
-        grid.attach(cls._row_label("Mode:"), 0, 0, 1, 1)
-        cls._pp_combo = Gtk.ComboBoxText()
-        current = (CFG.POSTPROCESS_MODE or "none").strip().lower()
-        active_idx = 0
-        for i, (mid, label) in enumerate(cls._POSTPROCESS_MODES):
-            cls._pp_combo.append_text(label)
-            if mid == current:
-                active_idx = i
-        cls._pp_combo.set_active(active_idx)
-        cls._pp_combo.connect("changed", cls._on_pp_mode_changed)
-        grid.attach(cls._pp_combo, 1, 0, 1, 1)
+        cls._pp_scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, POSTPROCESS_MAX_LEVEL, 1)
+        cls._pp_scale.set_digits(0)
+        cls._pp_scale.set_draw_value(False)
+        cls._pp_scale.set_hexpand(True)
+        for level, label in POSTPROCESS_LEVELS:
+            cls._pp_scale.add_mark(level, Gtk.PositionType.BOTTOM, label)
+        cls._pp_scale.set_value(int(CFG.POSTPROCESS_LEVEL or 0))
+        vbox.pack_start(cls._pp_scale, False, False, 0)
 
-        cls._pp_lang_label = cls._row_label("Translate to:")
-        grid.attach(cls._pp_lang_label, 0, 1, 1, 1)
+        # Translate — a separate axis; when on it overrides the level.
+        trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cls._pp_translate_check = Gtk.CheckButton(label="Translate to")
+        cls._pp_translate_check.set_active(bool(CFG.POSTPROCESS_TRANSLATE))
+        cls._pp_translate_check.connect("toggled", cls._on_pp_translate_toggled)
+        trow.pack_start(cls._pp_translate_check, False, False, 0)
         cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
-            if code:  # skip "Autodetect" — translation needs a real target
+            if code:  # translation needs a real target
                 cls._pp_lang.append(code, f"{label} ({code})")
         if not cls._pp_lang.set_active_id(CFG.POSTPROCESS_TARGET_LANG):
             cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
-        grid.attach(cls._pp_lang, 1, 1, 1, 1)
-        vbox.pack_start(grid, False, False, 0)
+        trow.pack_start(cls._pp_lang, True, True, 0)
+        vbox.pack_start(trow, False, False, 0)
 
-        # Editable system prompt for the Reformulate mode — lets you tune how
-        # much it rewrites (the default is intentionally minimal).
+        # Advanced: a custom prompt that overrides the level's built-in prompt.
         cls._pp_prompt_label = Gtk.Label()
         cls._pp_prompt_label.set_halign(Gtk.Align.START)
-        cls._pp_prompt_label.set_markup("<small><b>Reformulate prompt</b></small>")
+        cls._pp_prompt_label.set_markup(
+            "<small><b>Custom prompt</b> — advanced; overrides the level "
+            "(leave empty to use it)</small>"
+        )
         vbox.pack_start(cls._pp_prompt_label, False, False, 2)
 
         cls._pp_prompt_view = Gtk.TextView()
         cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
-        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_REFORMULATE_PROMPT)
+        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_CUSTOM_PROMPT)
         cls._pp_prompt_scroll = Gtk.ScrolledWindow()
         cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        cls._pp_prompt_scroll.set_min_content_height(90)
+        cls._pp_prompt_scroll.set_min_content_height(80)
         cls._pp_prompt_scroll.add(cls._pp_prompt_view)
         vbox.pack_start(cls._pp_prompt_scroll, False, False, 0)
 
-        reset_btn = Gtk.Button(label="Reset prompt to default")
-        reset_btn.set_halign(Gtk.Align.START)
-        reset_btn.connect("clicked", cls._on_reset_pp_prompt)
-        vbox.pack_start(reset_btn, False, False, 0)
+        clear_btn = Gtk.Button(label="Clear custom prompt")
+        clear_btn.set_halign(Gtk.Align.START)
+        clear_btn.connect("clicked", cls._on_reset_pp_prompt)
+        vbox.pack_start(clear_btn, False, False, 0)
 
-        # Grey out the lang (Translate) and prompt (Reformulate) widgets unless
-        # their mode is selected, so it's clear which control applies.
         cls._update_pp_sensitivity()
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -699,62 +698,60 @@ class SettingsDialog:
         vbox.pack_start(hint, False, False, 0)
 
     @classmethod
-    def _selected_pp_mode(cls) -> str:
-        idx = cls._pp_combo.get_active() if cls._pp_combo else 0
-        return cls._POSTPROCESS_MODES[idx][0] if 0 <= idx < len(cls._POSTPROCESS_MODES) else "none"
-
-    @classmethod
     def _update_pp_sensitivity(cls) -> None:
-        """Enable 'Translate to' for Translate, and the prompt editor for Reformulate."""
-        mode = cls._selected_pp_mode()
-        is_translate = mode == "translate"
-        for w in (cls._pp_lang, cls._pp_lang_label):
+        """Translate on → only the language matters; off → the level + prompt do."""
+        translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
+        if cls._pp_lang:
+            cls._pp_lang.set_sensitive(translate)
+        for w in (cls._pp_scale, cls._pp_scale_label,
+                  cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
             if w:
-                w.set_sensitive(is_translate)
-        is_reformulate = mode == "reformulate"
-        for w in (cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
-            if w:
-                w.set_sensitive(is_reformulate)
+                w.set_sensitive(not translate)
 
     @classmethod
-    def _on_pp_mode_changed(cls, _combo: Gtk.ComboBoxText) -> None:
+    def _on_pp_translate_toggled(cls, _chk: Gtk.CheckButton) -> None:
         cls._update_pp_sensitivity()
 
     @classmethod
     def _pp_prompt_text(cls) -> str:
-        """Current text of the reformulate-prompt editor."""
+        """Current custom-prompt text (empty = use the level's built-in prompt)."""
         buf = cls._pp_prompt_view.get_buffer()
         return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False).strip()
 
     @classmethod
     def _on_reset_pp_prompt(cls, _btn: Gtk.Button) -> None:
-        from loquivox.config import DEFAULT_REFORMULATE_PROMPT
-        cls._pp_prompt_view.get_buffer().set_text(DEFAULT_REFORMULATE_PROMPT)
+        cls._pp_prompt_view.get_buffer().set_text("")
 
     @classmethod
     def _on_apply_postprocess(cls, _btn: Gtk.Button) -> None:
-        mode = cls._selected_pp_mode()
+        from loquivox.config import POSTPROCESS_LEVELS
+
+        level = int(cls._pp_scale.get_value()) if cls._pp_scale else 0
+        translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
         lang = cls._pp_lang.get_active_id() or cls._combo_text(cls._pp_lang)
-        # If a "Name (code)" row was typed, extract the code.
-        if "(" in lang and lang.endswith(")"):
+        if "(" in lang and lang.endswith(")"):  # a "Name (code)" row was typed
             lang = lang[lang.rfind("(") + 1:-1].strip()
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:
             update_section("postprocess", {
-                "mode": mode,
+                "level": level,
+                "translate": translate,
                 "target_language": lang,
-                # None → not written (keeps the conservative default).
-                "reformulate_prompt": cls._pp_prompt_text() or None,
+                # Written verbatim (empty string clears any prior override).
+                "custom_prompt": cls._pp_prompt_text(),
             })
         except ConfigWriteError as e:
             cls._pp_status.set_markup(f"<small>❌ {e}</small>")
             return
         from loquivox import config as config_module
         config_module.reload_config()  # PostProcessor reads config_module.CFG live
-        desc = "off" if mode == "none" else (f"translate → {lang}" if mode == "translate" else mode)
+        if translate:
+            desc = f"translate → {lang}"
+        else:
+            desc = f"level {level} ({dict(POSTPROCESS_LEVELS).get(level, level)})"
         cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
-        print(f"✨ Post-processing set: mode={mode} lang={lang}")
+        print(f"✨ Post-processing: level={level} translate={translate} lang={lang}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)
