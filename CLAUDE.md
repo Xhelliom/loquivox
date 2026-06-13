@@ -60,7 +60,8 @@ transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
 services/         audio (record+transcribe), ai (chat+vision), tts (Orpheus),
                   clipboard, image, postprocess (LLM refinement of dictation)
 managers/         history, chat (overlay state + auto-hide), overlay (recording indicator)
-ui/               recording_overlay, chat_overlay (WebKit2), settings_dialog, tray
+ui/               recording_overlay, chat_overlay (WebKit2; voice + typed input via
+                  JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray
 handlers/         mode.py (routes a transcript per mode), keyboard.py (evdev listener)
 ```
 

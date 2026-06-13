@@ -56,7 +56,7 @@ The app auto-detects your session type (X11 or Wayland) and uses the appropriate
 | Key | Action | Purpose |
 |:---:|:---|:---|
 | `R-Alt` / `F3` | **Dictate** | Transcribe voice to text at cursor |
-| `F4` | **Chat** | Speak a question → AI answers (typed + chat overlay) |
+| `F4` | **Chat** | Speak a question — or type it in the chat overlay — and the AI answers |
 | `F7` | **Rewrite** | Highlight text → Speak to modify |
 | `F8` | **Vision** | Screenshot + Intelligent Analysis |
 | `F9` | **Pin** | Toggle "Always on Top" for chat |

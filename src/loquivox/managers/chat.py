@@ -78,6 +78,21 @@ class ChatManager:
             )
 
     @staticmethod
+    def set_keepalive(active: bool) -> None:
+        """
+        Pause the auto-hide timer while the chat input box is focused, and
+        resume it on blur. Without this, an unpinned overlay would vanish out
+        from under the user mid-typing. No-op when pinned. Main thread only.
+        """
+        if active:
+            ChatManager._cancel_timer()
+        elif not STATE.chat_pinned and STATE.chat_overlay_window:
+            ChatManager._cancel_timer()
+            STATE.chat_hide_timer = GLib.timeout_add_seconds(
+                CFG.CHAT_AUTO_HIDE_SEC, ChatManager._auto_hide
+            )
+
+    @staticmethod
     def _auto_hide() -> bool:
         """Auto-hide callback."""
         STATE.chat_hide_timer = None
