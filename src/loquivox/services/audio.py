@@ -9,10 +9,50 @@ from typing import Any, Optional
 import numpy as np
 import sounddevice as sd
 
+from loquivox import config as config_module
 from loquivox.config import CFG
 from loquivox.decorators import safe_execute
 from loquivox.state import STATE
 from loquivox.transcription import get_dispatcher
+
+
+def list_input_devices() -> list[str]:
+    """Names of the available capture devices (those with input channels).
+
+    De-duplicated, capture order preserved. Returns ``[]`` if PortAudio can't be
+    queried (no audio backend, headless, …) — callers fall back to the default.
+    """
+    names: list[str] = []
+    try:
+        seen = set()
+        for dev in sd.query_devices():
+            if dev.get("max_input_channels", 0) > 0:
+                name = (dev.get("name") or "").strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    names.append(name)
+    except Exception:
+        pass
+    return names
+
+
+def _resolve_input_device():
+    """Map the configured device NAME to a PortAudio index, or ``None`` (default).
+
+    Read from the live config module (not the import-time ``CFG``) so a change in
+    the settings dialog takes effect on the next recording without a restart.
+    An empty/unknown/disconnected name resolves to ``None`` = system default.
+    """
+    name = (config_module.CFG.INPUT_DEVICE or "").strip()
+    if not name:
+        return None
+    try:
+        for idx, dev in enumerate(sd.query_devices()):
+            if dev.get("max_input_channels", 0) > 0 and (dev.get("name") or "").strip() == name:
+                return idx
+    except Exception:
+        pass
+    return None
 
 
 class AudioService:
@@ -65,6 +105,7 @@ class AudioService:
             samplerate=rate,
             channels=1,
             dtype='float32',
+            device=_resolve_input_device(),  # None = system default mic
             callback=AudioService.audio_callback
         )
         STATE.stream.start()

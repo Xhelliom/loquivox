@@ -52,6 +52,7 @@ class SettingsManager:
             CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "color_scheme": state.color_scheme,
+                "overlay_style": state.overlay_style,
                 "tts_voice": state.tts_voice,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
@@ -123,6 +124,8 @@ class AppState:
 
     # --- UI Theme ---
     color_scheme: str = CFG.DEFAULT_SCHEME
+    # Recording overlay look: "pill" (default) or "classic". See CFG.OVERLAY_STYLES.
+    overlay_style: str = CFG.DEFAULT_OVERLAY_STYLE
 
     # --- System Tray ---
     indicator: Optional[Any] = None  # AppIndicator.Indicator or None
@@ -136,6 +139,8 @@ class AppState:
         saved = SettingsManager.load()
         if "color_scheme" in saved:
             self.color_scheme = saved["color_scheme"]
+        if "overlay_style" in saved:
+            self.overlay_style = saved["overlay_style"]
         if "tts_voice" in saved:
             self.tts_voice = saved["tts_voice"]
         if "tts_enabled" in saved:

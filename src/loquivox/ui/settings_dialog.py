@@ -83,6 +83,7 @@ class SettingsDialog:
     _backend_combo: Optional[Gtk.ComboBoxText] = None
     _model_entry: Optional[Gtk.Entry] = None
     _lang_entry: Optional[Gtk.Entry] = None
+    _mic_combo: Optional[Gtk.ComboBoxText] = None
     _fallback_check: Optional[Gtk.CheckButton] = None
     _trans_status: Optional[Gtk.Label] = None
 
@@ -100,7 +101,7 @@ class SettingsDialog:
     def _create_dialog(cls) -> Gtk.Window:
         """Create the settings dialog window (tabbed)."""
         dialog = Gtk.Window(title="Loquivox Settings")
-        dialog.set_default_size(470, 640)
+        dialog.set_default_size(470, 690)
         dialog.set_resizable(False)
         dialog.set_position(Gtk.WindowPosition.CENTER)
         dialog.set_keep_above(True)
@@ -194,6 +195,24 @@ class SettingsDialog:
         voice_combo.set_active(CFG.TTS_VOICES.index(STATE.tts_voice) if STATE.tts_voice in CFG.TTS_VOICES else 0)
         voice_combo.connect("changed", cls._on_voice_changed)
         vbox.pack_start(voice_combo, False, False, 0)
+
+        # Overlay style (pill vs classic) — shown live in the preview below.
+        style_label = Gtk.Label()
+        style_label.set_halign(Gtk.Align.START)
+        style_label.set_markup("<b>Overlay style</b>")
+        vbox.pack_start(style_label, False, False, 0)
+
+        style_combo = Gtk.ComboBoxText()
+        _STYLE_LABELS = {
+            "pill": "Pill — waveform capsule",
+            "classic": "Classic — icon + bars",
+        }
+        for sid in CFG.OVERLAY_STYLES:
+            style_combo.append(sid, _STYLE_LABELS.get(sid, sid.title()))
+        active_style = STATE.overlay_style if STATE.overlay_style in CFG.OVERLAY_STYLES else CFG.DEFAULT_OVERLAY_STYLE
+        style_combo.set_active_id(active_style)
+        style_combo.connect("changed", cls._on_overlay_style_changed)
+        vbox.pack_start(style_combo, False, False, 0)
 
         # Colour scheme gallery
         scheme_label = Gtk.Label()
@@ -298,6 +317,23 @@ class SettingsDialog:
         if not cls._lang_entry.set_active_id(CFG.WHISPER_LANGUAGE):
             cls._lang_entry.get_child().set_text(CFG.WHISPER_LANGUAGE)
         grid.attach(cls._lang_entry, 1, 2, 1, 1)
+
+        # Microphone: "System default" + every detected capture device.
+        grid.attach(cls._row_label("Microphone:"), 0, 3, 1, 1)
+        cls._mic_combo = Gtk.ComboBoxText()
+        cls._mic_combo.append("", "System default")
+        from loquivox.services.audio import list_input_devices
+        for name in list_input_devices():
+            cls._mic_combo.append(name, name)
+        # Restore the saved choice; if it's set but not currently present
+        # (mic unplugged), still show it so the selection isn't silently lost.
+        if not cls._mic_combo.set_active_id(CFG.INPUT_DEVICE):
+            if CFG.INPUT_DEVICE:
+                cls._mic_combo.append(CFG.INPUT_DEVICE, f"{CFG.INPUT_DEVICE} (not connected)")
+                cls._mic_combo.set_active_id(CFG.INPUT_DEVICE)
+            else:
+                cls._mic_combo.set_active(0)
+        grid.attach(cls._mic_combo, 1, 3, 1, 1)
 
         vbox.pack_start(grid, False, False, 0)
 
@@ -446,7 +482,9 @@ class SettingsDialog:
         language = cls._resolve_language()
         fallback = "whispercpp" if cls._fallback_check.get_active() else ""
 
-        values = {"backend": bid, "language": language, "fallback": fallback}
+        mic = cls._mic_combo.get_active_id() or ""  # "" = system default
+        values = {"backend": bid, "language": language, "fallback": fallback,
+                  "input_device": mic}
         if model_key is not None:
             model = cls._combo_text(cls._model_entry)
             if model:
@@ -999,6 +1037,23 @@ class SettingsDialog:
         STATE.tts_voice = voice
         print(f"🎙️ Voice changed to: {voice}")
         SettingsManager.save(STATE)
+
+    @classmethod
+    def _on_overlay_style_changed(cls, combo: Gtk.ComboBoxText) -> None:
+        """Persist the overlay style and refresh the preview + any live overlay."""
+        sid = combo.get_active_id()
+        if not sid:
+            return
+        STATE.overlay_style = sid
+        print(f"🎚️ Overlay style changed to: {sid}")
+        SettingsManager.save(STATE)
+        if cls._preview_area:
+            cls._preview_area.queue_draw()
+        if STATE.overlay_window is not None:
+            try:
+                STATE.overlay_window.drawing_area.queue_draw()
+            except Exception:
+                pass
 
     @classmethod
     def _on_scheme_selected(cls, listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
