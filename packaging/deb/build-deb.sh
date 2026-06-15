@@ -39,18 +39,28 @@ python3 -m venv --system-site-packages "$REAL_OPT/venv"
 "$REAL_OPT/venv/bin/pip" install --quiet --no-deps .
 "$REAL_OPT/venv/bin/pip" install --quiet groq sounddevice deepgram-sdk
 
-# 2) offline engine: static, portable whisper-cli
-git clone --depth 1 --branch "$WHISPER_VER" \
-  https://github.com/ggml-org/whisper.cpp.git "$STAGE/wcpp"
-cmake -S "$STAGE/wcpp" -B "$STAGE/wcpp/build" \
-  -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
-  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=OFF
-cmake --build "$STAGE/wcpp/build" -j"$(nproc)" --target whisper-cli
+# 2) offline engine: static, portable whisper-cli.
+#    Reuse a prebuilt binary when one is supplied (CI passes the artifact from
+#    the whisper-engine release via LOQUIVOX_PREBUILT_WHISPER_CLI); otherwise
+#    build it from source here so a plain local run stays self-contained.
+if [[ -n "${LOQUIVOX_PREBUILT_WHISPER_CLI:-}" && -x "${LOQUIVOX_PREBUILT_WHISPER_CLI}" ]]; then
+  echo "▶ Using prebuilt whisper-cli: $LOQUIVOX_PREBUILT_WHISPER_CLI"
+  WHISPER_CLI_BIN="$LOQUIVOX_PREBUILT_WHISPER_CLI"
+else
+  echo "▶ Building whisper-cli from source (whisper.cpp $WHISPER_VER)"
+  git clone --depth 1 --branch "$WHISPER_VER" \
+    https://github.com/ggml-org/whisper.cpp.git "$STAGE/wcpp"
+  cmake -S "$STAGE/wcpp" -B "$STAGE/wcpp/build" \
+    -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
+    -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON -DWHISPER_BUILD_SERVER=OFF
+  cmake --build "$STAGE/wcpp/build" -j"$(nproc)" --target whisper-cli
+  WHISPER_CLI_BIN="$STAGE/wcpp/build/bin/whisper-cli"
+fi
 
 # 3) stage the package tree
 mkdir -p "$PKGROOT/opt" "$PKGROOT/usr/bin" "$PKGROOT/DEBIAN"
 cp -a "$REAL_OPT" "$PKGROOT/opt/"
-install -Dm755 "$STAGE/wcpp/build/bin/whisper-cli" \
+install -Dm755 "$WHISPER_CLI_BIN" \
   "$PKGROOT/usr/lib/loquivox/whisper-cli"
 install -Dm644 packaging/loquivox.desktop \
   "$PKGROOT/usr/share/applications/loquivox.desktop"
