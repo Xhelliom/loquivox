@@ -34,6 +34,11 @@ model = "whisper-large-v3"
 # Force a transcription language as an ISO-639-1 code, e.g. "en", "fr", "de".
 # Omit or leave "" to let Whisper autodetect.
 language = ""
+# Microphone to record from, by device NAME (see the "Microphone" dropdown in
+# Settings, or run `python -c "import sounddevice; print(sounddevice.query_devices())"`).
+# Leave "" to use the system default input. An unknown/disconnected name falls
+# back to the default.
+input_device = ""
 # Capture sample rate in Hz.
 sample_rate = 44100
 # Resample to this rate before upload (Whisper runs at 16 kHz → smaller upload,

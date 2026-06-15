@@ -276,12 +276,23 @@ class GtkOverlay(Gtk.Window):
     @classmethod
     def render_content(cls, cr, w, h, *, scheme, mode, text, bars, tick,
                        font_family, transcribing=False, a=1.0,
-                       ellipsize_start=False):
+                       ellipsize_start=False, style=None):
         """
         Paint the overlay bubble at (0, 0, w, h). Pure of widget state so the
         settings dialog can render an identical preview by passing its own
         scheme / looping bars.
+
+        ``style`` picks the look ("pill" or "classic"); when None it follows the
+        user's current STATE.overlay_style, so the live overlay and the settings
+        preview stay in sync.
         """
+        if (style or STATE.overlay_style) == "pill":
+            cls._render_pill(cr, w, h, scheme=scheme, mode=mode, text=text,
+                             bars=bars, tick=tick, font_family=font_family,
+                             transcribing=transcribing, a=a,
+                             ellipsize_start=ellipsize_start)
+            return
+
         config = CFG.MODES.get(mode, CFG.MODES["dictation"])
         bg_rgb = cls._hex_to_rgb(scheme.get(config["bg"], scheme["bg"]))
         fg_rgb = cls._hex_to_rgb(scheme.get(config["fg"], scheme["accent"]))
@@ -313,6 +324,85 @@ class GtkOverlay(Gtk.Window):
             cls._draw_pulse(cr, 58, w - 8, 42, fg_rgb, a, tick)
         else:
             cls._draw_bars(cr, 58, w - 8, 42, fg_rgb, a, bars)
+
+    # ---------------------------------------------------------------- pill
+    @classmethod
+    def _render_pill(cls, cr, w, h, *, scheme, mode, text, bars, tick,
+                     font_family, transcribing, a, ellipsize_start):
+        """
+        Capsule look (mirrors the landing-page mock-up): a pulsing red dot, a
+        horizontal waveform, and the state label — laid out left→right inside a
+        fully-rounded pill with a soft accent glow. Theme-aware via ``scheme``.
+        """
+        bg_rgb = cls._hex_to_rgb(scheme["bg"])
+        accent = cls._hex_to_rgb(scheme.get("accent", scheme["text"]))
+        txt_rgb = cls._hex_to_rgb(scheme.get("text", scheme["accent"]))
+
+        # Inset the capsule so the glow has room to bleed toward the edges.
+        pad = 7
+        px, py, pw, ph = pad, pad, w - 2 * pad, h - 2 * pad
+        r = ph / 2  # fully rounded → capsule
+
+        # Soft glow: a few translucent, expanding strokes fake a box-shadow
+        # (cairo has no blur). Accent-tinted, like the mock-up's coloured halo.
+        for grow, alpha in ((7, 0.05), (4.5, 0.07), (2.5, 0.10)):
+            cls._rounded_rect_path(cr, px - grow, py - grow,
+                                   pw + 2 * grow, ph + 2 * grow, r + grow)
+            cr.set_source_rgba(*accent, alpha * a)
+            cr.set_line_width(grow)
+            cr.stroke()
+
+        # Capsule body + thin accent rim.
+        cls._rounded_rect_path(cr, px, py, pw, ph, r)
+        cr.set_source_rgba(*bg_rgb, 0.92 * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*accent, 0.35 * a)
+        cr.set_line_width(1.2)
+        cr.stroke()
+
+        cy = py + ph / 2
+        dot_x = px + 18
+
+        # Left indicator: rotating spinner while transcribing, else a pulsing
+        # red record dot (the universal "recording" cue from the mock-up).
+        if transcribing:
+            cls._icon_spinner(cr, dot_x, cy, accent, a, tick)
+        else:
+            pulse = 0.5 + 0.5 * math.sin(tick * 0.12)
+            cr.set_source_rgba(0.937, 0.267, 0.267, (0.55 + 0.45 * pulse) * a)  # #ef4444
+            cr.arc(dot_x, cy, 5, 0, 2 * math.pi)
+            cr.fill()
+
+        # Right: the state label, measured first so the waveform fills the gap.
+        layout = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription()
+        fd.set_family(font_family)
+        fd.set_size(int(8.5 * Pango.SCALE))
+        fd.set_weight(Pango.Weight.SEMIBOLD)
+        layout.set_font_description(fd)
+        layout.set_text(text, -1)
+        lw, lh = layout.get_pixel_size()
+        max_label = pw * 0.55
+        if lw > max_label:
+            layout.set_width(int(max_label * Pango.SCALE))
+            layout.set_ellipsize(
+                Pango.EllipsizeMode.START if ellipsize_start else Pango.EllipsizeMode.END
+            )
+            lw, lh = layout.get_pixel_size()
+        label_x = px + pw - 16 - lw
+
+        # Waveform between the dot and the label (pulse dots while transcribing).
+        bars_x1 = dot_x + 12
+        bars_x2 = label_x - 12
+        if bars_x2 - bars_x1 > 14:
+            if transcribing:
+                cls._draw_pulse(cr, bars_x1, bars_x2, cy, accent, a, tick)
+            else:
+                cls._draw_bars(cr, bars_x1, bars_x2, cy, accent, a, bars)
+
+        cr.set_source_rgba(*txt_rgb, 0.9 * a)
+        cr.move_to(label_x, cy - lh / 2)
+        PangoCairo.show_layout(cr, layout)
 
     # ---------------------------------------------------------------- text
     @staticmethod

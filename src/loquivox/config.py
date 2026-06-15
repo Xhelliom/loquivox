@@ -117,6 +117,10 @@ class Config:
 
     # --- Audio Settings ---
     SAMPLE_RATE: int = 44100
+    # Input device (microphone) NAME as reported by PortAudio. Empty string ("")
+    # = use the system default input. Stored by name (not index) so it survives
+    # device reordering; an unknown/disconnected name falls back to the default.
+    INPUT_DEVICE: str = ""
 
     # --- History Limits ---
     MAX_TOKENS: int = 32000
@@ -193,6 +197,11 @@ class Config:
     # --- Recording Overlay Geometry ---
     OVERLAY_WIDTH: int = 220
     OVERLAY_HEIGHT: int = 60
+    # Overlay visual style (user-selectable in Settings → Appearance):
+    #   "pill"    — capsule with a pulsing dot + horizontal waveform (default)
+    #   "classic" — icon + centered text + mirrored EQ bars (the original look)
+    OVERLAY_STYLES: Tuple[str, ...] = ("pill", "classic")
+    DEFAULT_OVERLAY_STYLE: str = "pill"
 
     # --- Temp File Paths ---
     TEMP_SCREEN_PATH: str = f"/tmp/temp_screen_{os.getuid()}.png"
@@ -388,6 +397,8 @@ def _build_config() -> Config:
         overrides["MODEL_WHISPER"] = str(trans["model"])
     if "language" in trans:
         overrides["WHISPER_LANGUAGE"] = str(trans["language"])
+    if "input_device" in trans:
+        overrides["INPUT_DEVICE"] = str(trans["input_device"])
     if "sample_rate" in trans:
         overrides["SAMPLE_RATE"] = int(trans["sample_rate"])
     if "min_audio_sec" in trans:
