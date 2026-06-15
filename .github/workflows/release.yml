@@ -1,0 +1,121 @@
+name: Release packages
+
+# Builds the distributable packages whenever a GitHub Release is published and
+# attaches/publishes them:
+#   • .deb  (x86_64 + aarch64) → uploaded as release assets
+#   • AUR   (loquivox)         → pushed to aur.archlinux.org
+#
+# The version comes from the release tag (a leading "v" is stripped, so the tag
+# "v1.2.0" yields version 1.2.0). Create the release from a tag like that.
+#
+# Required repository secrets for the AUR job:
+#   AUR_SSH_PRIVATE_KEY  — private half of an SSH key registered on your AUR
+#                          account (the package must be created on the AUR once
+#                          by hand before the first automated push).
+#   AUR_USERNAME         — commit author name for the AUR git history.
+#   AUR_EMAIL            — commit author email for the AUR git history.
+
+on:
+  release:
+    types: [published]
+  # Allows a manual re-run against an existing tag/release from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to (re)build, e.g. v1.2.0'
+        required: true
+
+permissions:
+  contents: write   # upload .deb assets onto the release
+
+jobs:
+  # ----------------------------------------------------------------- .deb
+  deb:
+    name: deb (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-24.04,     arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, arch: aarch64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version + tag
+        id: meta
+        run: |
+          tag='${{ github.event.release.tag_name || github.event.inputs.tag }}'
+          echo "tag=$tag"               >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}"       >> "$GITHUB_OUTPUT"
+
+      # Runtime apt deps so the --system-site-packages venv can see them, plus
+      # the .deb build tooling. (cmake/build-essential land in the fallback only.)
+      - name: Install build + runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-venv python3-pip dpkg-dev \
+            python3-numpy python3-scipy python3-evdev python3-gi python3-cairo \
+            python3-tomlkit python3-openai \
+            gir1.2-gtk-3.0 gir1.2-webkit2-4.1 gir1.2-ayatanaappindicator3-0.1 \
+            libspeexdsp1 libportaudio2
+
+      # Prefer the already-published static engine binary; fall back to building
+      # it from source if that release/asset doesn't exist for the pinned version.
+      - name: Fetch prebuilt whisper-cli (fallback → build from source)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="$(tr -d '[:space:]' < packaging/whisper-cpp.version)"
+          if gh release download "whisper-engine-$ver" \
+               --repo "$GITHUB_REPOSITORY" \
+               --pattern "whisper-cli-${{ matrix.arch }}" \
+               --output "$PWD/whisper-cli" 2>/dev/null; then
+            chmod +x "$PWD/whisper-cli"
+            echo "LOQUIVOX_PREBUILT_WHISPER_CLI=$PWD/whisper-cli" >> "$GITHUB_ENV"
+            echo "✓ Reusing prebuilt engine $ver for ${{ matrix.arch }}"
+          else
+            echo "⚠ No prebuilt engine $ver/${{ matrix.arch }} — building from source"
+            sudo apt-get install -y cmake build-essential git
+          fi
+
+      - name: Build .deb
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: sudo --preserve-env=VERSION,LOQUIVOX_PREBUILT_WHISPER_CLI packaging/deb/build-deb.sh
+
+      - name: Upload .deb to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          files: dist/loquivox_*_*.deb
+
+  # ----------------------------------------------------------------- AUR
+  aur:
+    name: Publish to AUR
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pin pkgver to the release tag
+        run: |
+          tag='${{ github.event.release.tag_name || github.event.inputs.tag }}'
+          ver="${tag#v}"
+          sed -i -E "s/^pkgver=.*/pkgver=$ver/"  packaging/aur/PKGBUILD
+          sed -i -E "s/^pkgrel=.*/pkgrel=1/"     packaging/aur/PKGBUILD
+          grep -E '^(pkgver|pkgrel)=' packaging/aur/PKGBUILD
+
+      # Runs makepkg in an Arch container: recomputes sha256sums (updpkgsums),
+      # regenerates .SRCINFO, then commits + pushes to the AUR over SSH.
+      - name: Deploy to the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: loquivox
+          pkgbuild: packaging/aur/PKGBUILD
+          updpkgsums: true
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          ssh_keyscan_types: rsa,ed25519
