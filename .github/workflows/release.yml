@@ -92,30 +92,79 @@ jobs:
           files: dist/loquivox_*_*.deb
 
   # ----------------------------------------------------------------- AUR
+  # Runs inline inside an Arch container (full control over the SSH handshake)
+  # instead of a third-party action, so the connectivity probe below surfaces
+  # exactly why a push is (or isn't) accepted. updpkgsums/makepkg refuse to run
+  # as root, hence the unprivileged `builder` user.
   aur:
     name: Publish to AUR
     runs-on: ubuntu-24.04
+    container:
+      image: archlinux:latest
+    env:
+      PKGNAME: loquivox
     steps:
+      - name: Install Arch packaging + SSH tooling
+        run: |
+          pacman -Syu --noconfirm --needed base-devel git openssh pacman-contrib
+          useradd -m builder
+
       - uses: actions/checkout@v4
 
-      - name: Pin pkgver to the release tag
+      - name: Resolve version + tag
+        id: meta
         run: |
           tag='${{ github.event.release.tag_name || github.event.inputs.tag }}'
-          ver="${tag#v}"
-          sed -i -E "s/^pkgver=.*/pkgver=$ver/"  packaging/aur/PKGBUILD
-          sed -i -E "s/^pkgrel=.*/pkgrel=1/"     packaging/aur/PKGBUILD
-          grep -E '^(pkgver|pkgrel)=' packaging/aur/PKGBUILD
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
-      # Runs makepkg in an Arch container: recomputes sha256sums (updpkgsums),
-      # regenerates .SRCINFO, then commits + pushes to the AUR over SSH.
-      - name: Deploy to the AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
-        with:
-          pkgname: loquivox
-          pkgbuild: packaging/aur/PKGBUILD
-          updpkgsums: true
-          commit_username: ${{ secrets.AUR_USERNAME }}
-          commit_email: ${{ secrets.AUR_EMAIL }}
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to ${{ github.event.release.tag_name || github.event.inputs.tag }}"
-          ssh_keyscan_types: rsa,ed25519
+      - name: Build package files, probe AUR, push
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # --- stage the SSH identity + workdir for the unprivileged builder ---
+          install -dm700 /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          ssh-keyscan -t rsa,ed25519 aur.archlinux.org > /home/builder/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile /home/builder/.ssh/aur\n  IdentitiesOnly yes\n' \
+            > /home/builder/.ssh/config
+          chmod 600 /home/builder/.ssh/aur /home/builder/.ssh/config
+          install -dm755 /home/builder/work
+          cp packaging/aur/PKGBUILD /home/builder/work/
+          chown -R builder:builder /home/builder
+
+          # --- everything that follows runs as builder (env is inherited) ---
+          runuser -u builder -- bash -euo pipefail -c '
+            cd /home/builder/work
+
+            echo "::group::SSH key fingerprint the runner will offer"
+            ssh-keygen -l -f ~/.ssh/aur
+            echo "::endgroup::"
+
+            echo "::group::Verbose AUR connectivity probe (diagnostic, non-fatal)"
+            ssh -v aur@aur.archlinux.org help || true
+            echo "::endgroup::"
+
+            sed -i -E "s/^pkgver=.*/pkgver=$VERSION/; s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+            grep -E "^(pkgver|pkgrel)=" PKGBUILD
+            updpkgsums
+            makepkg --printsrcinfo > .SRCINFO
+
+            git config --global user.name  "$AUR_USERNAME"
+            git config --global user.email "$AUR_EMAIL"
+            git init -q -b master
+            git remote add origin "ssh://aur@aur.archlinux.org/$PKGNAME.git"
+            # base our commit on the existing AUR tree when the package already exists
+            if git fetch -q origin master 2>/dev/null; then
+              git reset --soft FETCH_HEAD
+            fi
+            git add PKGBUILD .SRCINFO
+            git commit -q -m "Update to $TAG" || echo "nothing to commit — pushing current state"
+            GIT_SSH_COMMAND="ssh -v" git push origin HEAD:master
+          '
