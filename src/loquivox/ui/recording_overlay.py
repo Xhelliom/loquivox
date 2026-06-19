@@ -373,7 +373,16 @@ class GtkOverlay(Gtk.Window):
             cr.arc(dot_x, cy, 5, 0, 2 * math.pi)
             cr.fill()
 
-        # Right: the state label, measured first so the waveform fills the gap.
+        # Layout is [dot] [waveform] [label]. The waveform gets a FIXED region so
+        # a growing live transcript never shrinks it — the label lives in the
+        # remaining right-hand strip and ellipsizes there instead of eating into
+        # the bars.
+        bars_x1 = dot_x + 12
+        bars_x2 = px + pw * 0.52          # fixed right edge of the waveform
+        region_right = px + pw - 16
+        max_label = max(24, region_right - (bars_x2 + 12))
+
+        # Right: the state label, ellipsized to fit its fixed strip.
         layout = PangoCairo.create_layout(cr)
         fd = Pango.FontDescription()
         fd.set_family(font_family)
@@ -382,18 +391,15 @@ class GtkOverlay(Gtk.Window):
         layout.set_font_description(fd)
         layout.set_text(text, -1)
         lw, lh = layout.get_pixel_size()
-        max_label = pw * 0.55
         if lw > max_label:
             layout.set_width(int(max_label * Pango.SCALE))
             layout.set_ellipsize(
                 Pango.EllipsizeMode.START if ellipsize_start else Pango.EllipsizeMode.END
             )
             lw, lh = layout.get_pixel_size()
-        label_x = px + pw - 16 - lw
+        label_x = region_right - lw       # right-aligned within its strip
 
-        # Waveform between the dot and the label (pulse dots while transcribing).
-        bars_x1 = dot_x + 12
-        bars_x2 = label_x - 12
+        # Waveform in its fixed region (pulse dots while transcribing).
         if bars_x2 - bars_x1 > 14:
             if transcribing:
                 cls._draw_pulse(cr, bars_x1, bars_x2, cy, accent, a, tick)
