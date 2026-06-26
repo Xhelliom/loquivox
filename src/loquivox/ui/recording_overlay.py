@@ -116,6 +116,13 @@ class GtkOverlay(Gtk.Window):
         self._base_w, self._base_h = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
         self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
         self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
+        # AI action panel (rewrite/vision): enlarged, two phases.
+        self.ai_panel = False
+        self.ai_phase = "thinking"      # "thinking" | "review"
+        self.ai_instruction = ""
+        self.ai_result = ""
+        self._panel_w = max(CFG.OVERLAY_WIDTH, 440)
+        self._panel_h = 210
         self._tick = 0
         self._last_audio_tick = 0
         self._opacity = 0.0           # eases 0→1 on show
@@ -148,6 +155,23 @@ class GtkOverlay(Gtk.Window):
         self.transcribing = False
         self.choose_level = int(level)
         self._resize(self._choose_w, self._choose_h)
+        self.drawing_area.queue_draw()
+
+    def set_ai_panel(self, phase: str, instruction: str, result: str = "") -> None:
+        """
+        Enter/refresh the AI action panel (rewrite/vision).
+
+        ``phase`` is "thinking" (spinner + instruction, while the model runs) or
+        "review" (shows the result, awaiting Enter/Esc/R/V). Grows the overlay to
+        the panel size and takes over the surface, like the refinement chooser.
+        """
+        self.ai_panel = True
+        self.ai_phase = phase
+        self.ai_instruction = instruction or ""
+        self.ai_result = result or ""
+        self.transcribing = False
+        self.choosing = False
+        self._resize(self._panel_w, self._panel_h)
         self.drawing_area.queue_draw()
 
     def _resize(self, w: int, h: int) -> None:
@@ -246,6 +270,11 @@ class GtkOverlay(Gtk.Window):
         cr.translate(0, (1.0 - a) * self.SLIDE_PX)
 
         scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+
+        # AI action panel (rewrite/vision) takes over the (enlarged) overlay.
+        if self.ai_panel:
+            self._draw_ai_panel(cr, w, h, scheme, a)
+            return
 
         # Refinement chooser takes over the (enlarged) overlay while picking.
         if self.choosing:
@@ -493,6 +522,68 @@ class GtkOverlay(Gtk.Window):
 
         self._draw_text(cr, self._font_family, "0-5 / ↑↓  ·  Enter ✓  ·  Esc ✗",
                         w / 2, h - 13, 7.5, fg, a)
+
+    def _draw_ai_panel(self, cr, w, h, scheme, a) -> None:
+        """Render the AI action panel (rewrite/vision): thinking or review phase."""
+        bg = self._hex_to_rgb(scheme["bg"])
+        fg = self._hex_to_rgb(scheme.get("accent", scheme["text"]))
+        txt = self._hex_to_rgb(scheme["text"])
+        thinking = (self.ai_phase == "thinking")
+
+        # Panel frame (same recipe as the chooser).
+        self._rounded_rect_path(cr, 0, 0, w, h, 16)
+        cr.set_source_rgba(*bg, 0.96 * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*fg, 0.30 * a)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        # Row 1: spinner (thinking) or mode glyph (review) + label.
+        if thinking:
+            self._icon_spinner(cr, 24, 24, fg, a, self._tick)
+        else:
+            self._draw_icon(cr, self.mode, 24, 24, fg, a)
+        label = {"ai_rewrite": "Rewrite", "vision": "Vision"}.get(self.mode, "AI")
+        self._draw_text_at(cr, self._font_family, label, 42, 24, 10.0, fg, a,
+                           Pango.Weight.BOLD)
+
+        # Row 2: the transcribed instruction echo (ellipsized to one line).
+        icon = self.config.get("icon", "")
+        instr = f"{icon} {self.ai_instruction}".strip()
+        self._draw_block(cr, self._font_family, instr, 16, 42, w - 30, 18, 8.5,
+                         txt, a)
+
+        # Body: "Réflexion…" while thinking, else the (wrapped) result block.
+        if thinking:
+            self._draw_text(cr, self._font_family, "Réflexion…", w / 2, h / 2 + 4,
+                            11.0, fg, a)
+        else:
+            self._draw_block(cr, self._font_family, self.ai_result, 16, 66,
+                             w - 30, h - 92, 9.0, txt, a)
+
+        # Bottom hint line.
+        hint = ("Échap pour annuler" if thinking
+                else "Entrée ✓   ·   Échap ✗   ·   R ↻   ·   V 🎤")
+        self._draw_text(cr, self._font_family, hint, w / 2, h - 15, 7.5, fg, a)
+
+    @staticmethod
+    def _draw_block(cr, font_family, text, x, y, width, max_height, size,
+                    color, a, weight=Pango.Weight.NORMAL):
+        """Left-aligned wrapped text block at (x, y), clipped to max_height with END ellipsis."""
+        layout = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription()
+        fd.set_family(font_family)
+        fd.set_size(int(size * Pango.SCALE))
+        fd.set_weight(weight)
+        layout.set_font_description(fd)
+        layout.set_text(text, -1)
+        layout.set_width(int(width * Pango.SCALE))
+        layout.set_wrap(Pango.WrapMode.WORD_CHAR)
+        layout.set_height(int(max_height * Pango.SCALE))
+        layout.set_ellipsize(Pango.EllipsizeMode.END)
+        cr.set_source_rgba(*color, a)
+        cr.move_to(x, y)
+        PangoCairo.show_layout(cr, layout)
 
     @staticmethod
     def _draw_text_at(cr, font_family, text, x, cy, size, color, a,

@@ -220,48 +220,56 @@ class ModeHandler:
         )
 
     @staticmethod
-    def _handle_ai_rewrite(text: str) -> None:
-        """Handle AI rewrite mode: rewrite selected text based on instruction."""
-        clipboard = get_clipboard()
-        original = clipboard.paste().strip()
-        prompt = (
-            f"INSTRUCTION:\n{text}\n\n"
+    def _rewrite_prompt(instruction: str, original: str) -> str:
+        """The rewrite prompt — extracted so redo/re-dictate can rebuild it."""
+        return (
+            f"INSTRUCTION:\n{instruction}\n\n"
             f"ORIGINAL TEXT:\n{original}\n\n"
             "Rewrite the original text based on the instruction. "
             "Output ONLY the finished text, without introduction or formatting."
         )
 
-        response = AIService.chat(prompt)
-        if not response:
-            return
-        ModeHandler._deliver_response(
-            response,
-            history_user=f"[Rewrite] {text}\nOriginal: {original[:200]}...",
-            chat_user_text=f"✍️ {text}",
-            output="paste",
-        )
+    @staticmethod
+    def _handle_ai_rewrite(text: str) -> None:
+        """
+        Rewrite the selected text per the dictated instruction, with a review
+        panel. The selection (captured up-front on the main thread) and the AI
+        call are handed to the shared worker so the GTK loop never freezes.
+        """
+        original = get_clipboard().paste().strip()
+        generation = STATE.recording_generation
+        threading.Thread(
+            target=ModeHandler._ai_action_worker,
+            args=("ai_rewrite", text, generation,
+                  lambda instr: AIService.chat(ModeHandler._rewrite_prompt(instr, original))),
+            kwargs=dict(
+                output="paste",
+                history_fmt=lambda i: f"[Rewrite] {i}\nOriginal: {original[:200]}...",
+                chat_fmt=lambda i: f"✍️ {i}",
+            ),
+            daemon=True,
+        ).start()
 
     @staticmethod
     def _handle_vision(text: str) -> None:
         """
-        Handle vision mode: screenshot + AI analysis.
+        Handle vision mode: screenshot + AI analysis, with a review panel.
 
         Runs on the GTK main thread. The recording overlay is torn down
         *immediately* (no fade) so it never lands in the screenshot, then the
-        blocking capture + vision call are handed to a worker thread.
+        blocking capture + vision call + review are handed to a worker thread.
         """
         OverlayManager.hide_immediate()
         # Capture the generation now (process() already validated it) so a late
-        # vision answer from a superseded/cancelled recording is dropped on
-        # delivery instead of being typed into a newer session.
+        # vision answer from a superseded/cancelled recording is dropped.
         generation = STATE.recording_generation
         threading.Thread(
-            target=ModeHandler._vision_worker, args=(text, generation), daemon=True
+            target=ModeHandler._vision_action_worker, args=(text, generation), daemon=True
         ).start()
 
     @staticmethod
-    def _vision_worker(text: str, generation: int) -> None:
-        """Worker: wait out the compositor repaint, capture, then ask the model."""
+    def _vision_action_worker(text: str, generation: int) -> None:
+        """Worker: wait out the compositor repaint, capture, then run the panel flow."""
         import time
 
         # Give the compositor a frame to drop the just-destroyed overlay before
@@ -270,17 +278,68 @@ class ModeHandler:
 
         image_b64 = ImageService.take_screenshot()
         if not image_b64:
+            OverlayManager.hide(generation)
             return
-        response = AIService.vision(text, image_b64)
-        if not response:
-            return
-        GLib.idle_add(lambda: ModeHandler._deliver_response(
-            response,
-            history_user=f"[Screenshot] {text}",
-            chat_user_text=f"📸 {text}",
-            generation=generation,
+        # The same screenshot is reused across redo/re-dictate (no re-capture).
+        ModeHandler._ai_action_worker(
+            "vision", text, generation,
+            lambda instr: AIService.vision(instr, image_b64),
             output="type",
-        ))
+            history_fmt=lambda i: f"[Screenshot] {i}",
+            chat_fmt=lambda i: f"📸 {i}",
+        )
+
+    @staticmethod
+    def _ai_action_worker(mode: str, instruction: str, generation: int, run_ai,
+                          *, output: str, history_fmt, chat_fmt,
+                          max_redos: int = 5) -> None:
+        """
+        Shared rewrite/vision flow on a worker thread: show the thinking panel,
+        run the AI call off the GTK loop, present the result for review, then
+        deliver (accept) / loop (redo) / re-record the instruction (redict) /
+        drop (reject or timeout). Generation-guarded throughout so a superseded
+        recording never shows a panel or inserts text.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
+
+        redos = 0
+        try:
+            while True:
+                if generation != STATE.recording_generation:
+                    return
+                OverlayManager.set_ai_panel(mode, instruction, generation=generation)
+                response = run_ai(instruction)
+                if not response:
+                    return
+                if generation != STATE.recording_generation:
+                    return
+                OverlayManager.set_ai_panel(mode, instruction, result=response,
+                                            generation=generation)
+
+                action = KeyboardHandler.capture_review(mode)
+                if action == "accept":
+                    resp, instr, gen = response, instruction, generation
+                    GLib.idle_add(lambda: ModeHandler._deliver_response(
+                        resp, history_user=history_fmt(instr),
+                        chat_user_text=chat_fmt(instr),
+                        generation=gen, output=output))
+                    return
+                if action == "redo":
+                    redos += 1
+                    if redos > max_redos:
+                        return
+                    continue
+                if action == "redict":
+                    new = KeyboardHandler.record_instruction(mode)
+                    # start_recording bumped the generation — adopt the new one.
+                    generation = STATE.recording_generation
+                    if not new:
+                        return
+                    instruction = new
+                    continue
+                return  # reject
+        finally:
+            OverlayManager.hide(generation)
 
     @staticmethod
     def _deliver_response(response: str, *, history_user: str,

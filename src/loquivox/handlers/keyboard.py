@@ -73,6 +73,25 @@ class KeyboardHandler:
         # Require some function/letter keys to filter out mice, lid switches, etc.
         return ecodes.KEY_F1 in key_caps or ecodes.KEY_A in key_caps
 
+    @staticmethod
+    def _is_pointer(dev: InputDevice) -> bool:
+        """
+        True if the device also drives a pointer (mouse / touchpad).
+
+        Some keyboards-with-extra-keys are really mice (e.g. a Logitech G900
+        exposes keyboard-mapped G-keys): they pass ``_is_keyboard`` but carry the
+        cursor, so ``grab()``-ing them freezes the mouse. We read them (their keys
+        still work) but must never grab them.
+        """
+        try:
+            caps = dev.capabilities()
+        except Exception:
+            return False
+        if ecodes.EV_REL in caps or ecodes.EV_ABS in caps:
+            return True
+        keys = caps.get(ecodes.EV_KEY, [])
+        return any(b in keys for b in (ecodes.BTN_LEFT, ecodes.BTN_MOUSE, ecodes.BTN_TOUCH))
+
     @classmethod
     def _find_keyboards(cls) -> List[InputDevice]:
         """Discover all keyboard input devices (opens a fresh handle each)."""
@@ -395,6 +414,8 @@ class KeyboardHandler:
                 sel.register(dev, selectors.EVENT_READ)
             except Exception:
                 continue
+            if cls._is_pointer(dev):
+                continue  # read it, but never grab a pointer (would freeze the cursor)
             try:
                 dev.grab()
                 grabbed.append(dev)
@@ -448,6 +469,172 @@ class KeyboardHandler:
                     dev.close()
                 except Exception:
                     pass
+
+    # --- AI action panel review (rewrite/vision) -----------------------------
+
+    @staticmethod
+    def _review_action(code: int) -> Optional[str]:
+        """Map an evdev keycode to a review action (pure → testable without a device)."""
+        if code in (ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)):
+            return "accept"
+        if code == ecodes.KEY_ESC:
+            return "reject"
+        if code == ecodes.KEY_R:
+            return "redo"
+        if code == ecodes.KEY_V:
+            return "redict"
+        return None
+
+    @classmethod
+    def capture_review(cls, mode: str, timeout: float = 90.0) -> str:
+        """
+        Grab the keyboard and wait for the user's decision on the AI result shown
+        in the review panel. Returns "accept" / "reject" / "redo" / "redict".
+
+        Mirrors ``capture_refinement``'s grab/select/ungrab loop. Times out to
+        "reject" (a review must NEVER auto-insert unreviewed text). Always
+        ungrabs. MUST run on a worker thread — it blocks.
+        """
+        import time
+
+        devices = cls._find_keyboards()
+        if not devices:
+            return "reject"
+        sel = selectors.DefaultSelector()
+        grabbed: List[InputDevice] = []
+        for dev in devices:
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+            if cls._is_pointer(dev):
+                continue  # read it, but never grab a pointer (would freeze the cursor)
+            try:
+                dev.grab()
+                grabbed.append(dev)
+            except Exception:
+                pass
+
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return "reject"  # auto-reject on timeout
+                for key_obj, _ in sel.select(timeout=remaining):
+                    try:
+                        events = list(key_obj.fileobj.read())
+                    except Exception:
+                        continue
+                    for event in events:
+                        if event.type != ecodes.EV_KEY or event.value != 1:
+                            continue
+                        action = cls._review_action(event.code)
+                        if action is not None:
+                            return action
+        finally:
+            for dev in grabbed:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
+            for dev in devices:
+                try:
+                    sel.unregister(dev)
+                except Exception:
+                    pass
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
+    @classmethod
+    def record_instruction(cls, mode: str, timeout: float = 12.0) -> Optional[str]:
+        """
+        Re-record an instruction for the panel's 're-dictate' (V) action and
+        return its transcription, or None if cancelled / empty.
+
+        Reuses thread-safe primitives (``AudioService`` start/stop/transcribe are
+        not GTK calls). Grabs the keyboard like ``capture_review``: the mode's own
+        trigger (or Enter) stops the recording, Esc cancels. Runs on the worker
+        thread. NOTE: ``start_recording`` bumps ``recording_generation`` — the
+        caller must re-read it afterwards.
+        """
+        import time
+
+        devices = cls._find_keyboards()
+        if not devices:
+            return None
+        stop_codes = {trig for trig, _ in resolve_hotkeys(CFG).get(mode, [])}
+        stop_codes |= {ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)}
+
+        OverlayManager.show(mode)
+        AudioService.start_recording()
+
+        sel = selectors.DefaultSelector()
+        grabbed: List[InputDevice] = []
+        for dev in devices:
+            try:
+                sel.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+            if cls._is_pointer(dev):
+                continue  # read it, but never grab a pointer (would freeze the cursor)
+            try:
+                dev.grab()
+                grabbed.append(dev)
+            except Exception:
+                pass
+
+        cancelled = False
+        deadline = time.monotonic() + timeout
+        try:
+            done = False
+            while not done:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break  # auto-stop → transcribe whatever was captured
+                for key_obj, _ in sel.select(timeout=remaining):
+                    try:
+                        events = list(key_obj.fileobj.read())
+                    except Exception:
+                        continue
+                    for event in events:
+                        if event.type != ecodes.EV_KEY or event.value != 1:
+                            continue
+                        if event.code == ecodes.KEY_ESC:
+                            cancelled = True
+                            done = True
+                            break
+                        if event.code in stop_codes:
+                            done = True
+                            break
+                    if done:
+                        break
+        finally:
+            for dev in grabbed:
+                try:
+                    dev.ungrab()
+                except Exception:
+                    pass
+            for dev in devices:
+                try:
+                    sel.unregister(dev)
+                except Exception:
+                    pass
+                try:
+                    dev.close()
+                except Exception:
+                    pass
+
+        audio = AudioService.stop_recording()
+        if cancelled or audio is None:
+            return None
+        OverlayManager.set_transcribing()
+        try:
+            return (AudioService.transcribe(audio) or "").strip() or None
+        except Exception:
+            return None
 
     # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
     # after resume from suspend or USB hotplug.
@@ -573,3 +760,14 @@ class KeyboardHandler:
 
 # Populate the keycode→mode map from the config loaded at import time.
 KeyboardHandler.reload_hotkeys()
+
+
+if __name__ == "__main__":
+    # Self-check for the pure review-key mapping (no device / GTK needed).
+    _ra = KeyboardHandler._review_action
+    assert _ra(ecodes.KEY_ENTER) == "accept"
+    assert _ra(ecodes.KEY_ESC) == "reject"
+    assert _ra(ecodes.KEY_R) == "redo"
+    assert _ra(ecodes.KEY_V) == "redict"
+    assert _ra(ecodes.KEY_A) is None
+    print("✓ _review_action mapping OK")
