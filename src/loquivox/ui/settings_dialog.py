@@ -73,6 +73,7 @@ class SettingsDialog:
     _pp_scale: Optional[Gtk.Scale] = None
     _pp_scale_label: Optional[Gtk.Label] = None
     _pp_translate_check: Optional[Gtk.CheckButton] = None
+    _pp_format_check: Optional[Gtk.CheckButton] = None
     _pp_lang: Optional[Gtk.ComboBoxText] = None
     _pp_status: Optional[Gtk.Label] = None
     _pp_prompt_view: Optional[Gtk.TextView] = None
@@ -696,6 +697,15 @@ class SettingsDialog:
         trow.pack_start(cls._pp_lang, True, True, 0)
         vbox.pack_start(trow, False, False, 0)
 
+        # Format — a separate axis that COMBINES with the level / translate.
+        cls._pp_format_check = Gtk.CheckButton(
+            label="Format as structured text (paragraphs + bullet lists)")
+        cls._pp_format_check.set_active(bool(CFG.POSTPROCESS_FORMAT))
+        cls._pp_format_check.set_tooltip_text(
+            "Lays the result out in plain-text paragraphs and lists. Combines "
+            "with the refinement level (or works alone when level is Off).")
+        vbox.pack_start(cls._pp_format_check, False, False, 0)
+
         # Advanced: a custom prompt that overrides the level's built-in prompt.
         cls._pp_prompt_label = Gtk.Label()
         cls._pp_prompt_label.set_halign(Gtk.Align.START)
@@ -786,6 +796,7 @@ class SettingsDialog:
 
         level = int(cls._pp_scale.get_value()) if cls._pp_scale else 0
         translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
+        fmt = bool(cls._pp_format_check.get_active()) if cls._pp_format_check else False
         lang = cls._pp_lang.get_active_id() or cls._combo_text(cls._pp_lang)
         if "(" in lang and lang.endswith(")"):  # a "Name (code)" row was typed
             lang = lang[lang.rfind("(") + 1:-1].strip()
@@ -795,6 +806,7 @@ class SettingsDialog:
             update_section("postprocess", {
                 "level": level,
                 "translate": translate,
+                "format": fmt,
                 "target_language": lang,
                 # Written verbatim (empty string clears any prior override).
                 "custom_prompt": cls._pp_prompt_text(),
@@ -808,8 +820,10 @@ class SettingsDialog:
             desc = f"translate → {lang}"
         else:
             desc = f"level {level} ({dict(POSTPROCESS_LEVELS).get(level, level)})"
+        if fmt:
+            desc += " + format"
         cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
-        print(f"✨ Post-processing: level={level} translate={translate} lang={lang}")
+        print(f"✨ Post-processing: level={level} translate={translate} format={fmt} lang={lang}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)

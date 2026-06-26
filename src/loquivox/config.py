@@ -156,6 +156,9 @@ class Config:
     POSTPROCESS_LEVEL: int = 0
     # Translate instead of refine — a separate axis; uses POSTPROCESS_TARGET_LANG.
     POSTPROCESS_TRANSLATE: bool = False
+    # Lay the result out as structured plain text (paragraphs + bullet lists) —
+    # a separate axis that COMBINES with the refinement level / translate.
+    POSTPROCESS_FORMAT: bool = False
     # Target language for translate (ISO-639-1 code or a language name).
     POSTPROCESS_TARGET_LANG: str = "en"
     # System prompt used by the "Custom" level (POSTPROCESS_CUSTOM_LEVEL).
@@ -427,6 +430,8 @@ def _build_config() -> Config:
             overrides["POSTPROCESS_LEVEL"] = _mode_to_level.get(m, 0)
     if "translate" in post:
         overrides["POSTPROCESS_TRANSLATE"] = bool(post["translate"])
+    if "format" in post:
+        overrides["POSTPROCESS_FORMAT"] = bool(post["format"])
     if "target_language" in post:
         overrides["POSTPROCESS_TARGET_LANG"] = str(post["target_language"])
     # `reformulate_prompt` is the old name for the custom override.
