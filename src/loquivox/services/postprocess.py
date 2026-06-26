@@ -69,6 +69,14 @@ _GUARD = (
     "transformation above and return the result. Do not include the delimiters."
 )
 
+# Also appended in _run. Dictated speech carries a form of address (tu/vous) and
+# a register the user chose; the rephrasing levels otherwise drift to a formal
+# "vous". Language-agnostic so it applies across refine / translate / format.
+_PRESERVE = (
+    " Preserve the original form of address and register: keep informal \"tu\" "
+    "vs formal \"vous\" (and singular vs plural \"you\") exactly as in the input."
+)
+
 # Formatting axis — combines with a refinement/translate base prompt. The
 # fragment is appended after the base (which already ends with "Output ONLY the
 # text"); the standalone prompt is used when formatting is on but the level is
@@ -114,7 +122,7 @@ class PostProcessor:
         response = get_client().chat.completions.create(
             model=config_module.CFG.MODEL_CHAT,
             messages=[
-                {"role": "system", "content": system_prompt + _GUARD},
+                {"role": "system", "content": system_prompt + _GUARD + _PRESERVE},
                 {"role": "user", "content": f"<text>{text}</text>"},
             ],
         )
