@@ -85,6 +85,7 @@ class SettingsDialog:
     _model_entry: Optional[Gtk.Entry] = None
     _lang_entry: Optional[Gtk.Entry] = None
     _mic_combo: Optional[Gtk.ComboBoxText] = None
+    _vocab_entry: Optional[Gtk.Entry] = None
     _fallback_check: Optional[Gtk.CheckButton] = None
     _trans_status: Optional[Gtk.Label] = None
 
@@ -215,6 +216,14 @@ class SettingsDialog:
         style_combo.connect("changed", cls._on_overlay_style_changed)
         vbox.pack_start(style_combo, False, False, 0)
 
+        # Hotkey hints column (widens the overlay). Applies to the next recording.
+        hints_check = Gtk.CheckButton(
+            label="Show available hotkeys next to the waveform"
+        )
+        hints_check.set_active(STATE.show_hints)
+        hints_check.connect("toggled", cls._on_hints_toggled)
+        vbox.pack_start(hints_check, False, False, 0)
+
         # Colour scheme gallery
         scheme_label = Gtk.Label()
         scheme_label.set_halign(Gtk.Align.START)
@@ -255,7 +264,7 @@ class SettingsDialog:
         from loquivox.ui.recording_overlay import GtkOverlay
 
         scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
-        bw, bh = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
+        bw, bh = GtkOverlay.width(), CFG.OVERLAY_HEIGHT
         aw, ah = widget.get_allocated_width(), widget.get_allocated_height()
 
         # Looping, calm waveform like the overlay's idle/recording motion.
@@ -272,6 +281,7 @@ class SettingsDialog:
         GtkOverlay.render_content(
             cr, bw, bh, scheme=scheme, mode="dictation", text="Listening…",
             bars=bars, tick=t, font_family=family, transcribing=False, a=1.0,
+            hints=GtkOverlay.hint_items(False, False) if STATE.show_hints else (),
         )
         return True
 
@@ -335,6 +345,23 @@ class SettingsDialog:
             else:
                 cls._mic_combo.set_active(0)
         grid.attach(cls._mic_combo, 1, 3, 1, 1)
+
+        # Vocabulary: each engine's own way to stop dropping/mangling words it
+        # doesn't expect (Whisper `prompt`, Deepgram `keyterm`).
+        grid.attach(cls._row_label("Vocabulary:"), 0, 4, 1, 1)
+        cls._vocab_entry = Gtk.Entry()
+        cls._vocab_entry.set_hexpand(True)
+        cls._vocab_entry.set_text(CFG.VOCABULARY)
+        cls._vocab_entry.set_placeholder_text("proper nouns, jargon, foreign words…")
+        cls._vocab_entry.set_tooltip_text(
+            "Comma-separated words the engine tends to drop or misspell — "
+            "proper nouns, technical terms, foreign words. Write them in the "
+            "dictation language, e.g. “Loquivox, Wayland, pull request, deploy”.\n\n"
+            "Groq / whisper.cpp: sent as Whisper's prompt. "
+            "Deepgram: sent as keyterms (nova-3 only). "
+            "OpenAI Realtime: not supported."
+        )
+        grid.attach(cls._vocab_entry, 1, 4, 1, 1)
 
         vbox.pack_start(grid, False, False, 0)
 
@@ -485,7 +512,8 @@ class SettingsDialog:
 
         mic = cls._mic_combo.get_active_id() or ""  # "" = system default
         values = {"backend": bid, "language": language, "fallback": fallback,
-                  "input_device": mic}
+                  "input_device": mic,
+                  "vocabulary": cls._vocab_entry.get_text().strip()}
         if model_key is not None:
             model = cls._combo_text(cls._model_entry)
             if model:
@@ -1068,6 +1096,20 @@ class SettingsDialog:
                 STATE.overlay_window.drawing_area.queue_draw()
             except Exception:
                 pass
+
+    @classmethod
+    def _on_hints_toggled(cls, check: Gtk.CheckButton) -> None:
+        """
+        Persist the hotkey-hints column and refresh the preview.
+
+        A live overlay keeps its current width — the column is sized when the
+        window is created, so the change lands on the next recording.
+        """
+        STATE.show_hints = check.get_active()
+        print(f"⌨️  Overlay hotkey hints: {'on' if STATE.show_hints else 'off'}")
+        SettingsManager.save(STATE)
+        if cls._preview_area:
+            cls._preview_area.queue_draw()
 
     @classmethod
     def _on_scheme_selected(cls, listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
