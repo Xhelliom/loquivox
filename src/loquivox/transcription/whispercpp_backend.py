@@ -82,9 +82,10 @@ class WhisperCppBackend(TranscriptionBackend):
     _binary_probed: bool = False
     _probe_lock = threading.Lock()
 
-    def __init__(self, model: str, n_threads: int = 4) -> None:
+    def __init__(self, model: str, n_threads: int = 4, prompt: str = "") -> None:
         self._model_name = model
         self._n_threads = n_threads
+        self._prompt = prompt
 
     # -- engine / model discovery --------------------------------------------
 
@@ -172,6 +173,8 @@ class WhisperCppBackend(TranscriptionBackend):
             "-t", str(self._n_threads),
             "-l", language or "auto",
         ]
+        if self._prompt:  # vocabulary hint (same role as Groq's `prompt`)
+            cmd += ["--prompt", self._prompt]
         return cmd
 
     @staticmethod

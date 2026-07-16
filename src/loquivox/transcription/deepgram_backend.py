@@ -33,7 +33,8 @@ class DeepgramSession(StreamingSession):
     """A single live Deepgram WebSocket transcription session."""
 
     def __init__(self, client, model: str, language: str, sample_rate: int,
-                 on_partial: Optional[PartialCallback]) -> None:
+                 on_partial: Optional[PartialCallback],
+                 keyterms: Optional[list] = None) -> None:
         self._queue: "queue.Queue" = queue.Queue()
         self._on_partial = on_partial
         self._finals: list[str] = []
@@ -41,11 +42,13 @@ class DeepgramSession(StreamingSession):
         self._error: Optional[Exception] = None
         self._done = threading.Event()
         self._thread = threading.Thread(
-            target=self._run, args=(client, model, language, sample_rate), daemon=True
+            target=self._run, args=(client, model, language, sample_rate, keyterms),
+            daemon=True,
         )
         self._thread.start()
 
-    def _run(self, client, model: str, language: str, sample_rate: int) -> None:
+    def _run(self, client, model: str, language: str, sample_rate: int,
+             keyterms: Optional[list]) -> None:
         try:
             from deepgram.core.events import EventType
 
@@ -60,6 +63,11 @@ class DeepgramSession(StreamingSession):
                 # (nova-3) so e.g. French stays French. A forced language wins.
                 "language": language or "multi",
             }
+            if keyterms:
+                # Keyterm prompting: boosts rare words the model would otherwise
+                # drop. nova-3 only (nova-2 and older reject it); supported on
+                # language=multi since Nov 2025, up to 500 tokens.
+                opts["keyterm"] = keyterms
 
             with client.listen.v1.connect(**opts) as conn:
                 conn.on(EventType.MESSAGE, self._on_message)
@@ -143,8 +151,21 @@ class DeepgramBackend(TranscriptionBackend):
     supports_streaming = True
     stream_sample_rate = 16000
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, vocabulary: str = "") -> None:
         self._model = model
+        self._keyterms = self._parse_keyterms(model, vocabulary)
+
+    @staticmethod
+    def _parse_keyterms(model: str, vocabulary: str) -> list:
+        """
+        Split the comma-separated vocabulary into Deepgram keyterms.
+
+        Only nova-3 accepts `keyterm` — older models reject the request outright,
+        so anything else transcribes without it rather than failing.
+        """
+        if not vocabulary or not model.startswith("nova-3"):
+            return []
+        return [term.strip() for term in vocabulary.split(",") if term.strip()]
 
     def is_available(self) -> bool:
         if not os.environ.get("DEEPGRAM_API_KEY"):
@@ -166,8 +187,18 @@ class DeepgramBackend(TranscriptionBackend):
 
     def start_stream(self, sample_rate: int, language: str,
                      on_partial: PartialCallback) -> StreamingSession:
-        return DeepgramSession(self._client(), self._model, language, sample_rate, on_partial)
+        return DeepgramSession(self._client(), self._model, language, sample_rate,
+                               on_partial, self._keyterms)
 
     def transcribe(self, audio: np.ndarray, sample_rate: int, language: str) -> Optional[str]:
         # Streaming-only here: force the dispatcher's offline batch fallback.
         raise BackendUnavailable("deepgram is streaming-only; use start_stream")
+
+
+if __name__ == "__main__":
+    # Self-check for the pure keyterm parsing (no SDK / key / network needed).
+    parse = DeepgramBackend._parse_keyterms
+    assert parse("nova-3", "Loquivox, pull request ,, ") == ["Loquivox", "pull request"]
+    assert parse("nova-2", "Loquivox") == []   # older models reject keyterm outright
+    assert parse("nova-3", "") == []
+    print("✓ _parse_keyterms OK")

@@ -32,15 +32,16 @@ def make_backend(name: str, cfg) -> Optional[TranscriptionBackend]:
         name = _resolve_auto()
 
     if name == "groq":
-        return GroqBackend(model=cfg.MODEL_WHISPER, upload_sample_rate=cfg.UPLOAD_SAMPLE_RATE)
+        return GroqBackend(model=cfg.MODEL_WHISPER, upload_sample_rate=cfg.UPLOAD_SAMPLE_RATE,
+                           prompt=cfg.VOCABULARY)
     if name in ("whispercpp", "whisper.cpp", "local"):
-        return WhisperCppBackend(model=cfg.WHISPERCPP_MODEL)
+        return WhisperCppBackend(model=cfg.WHISPERCPP_MODEL, prompt=cfg.VOCABULARY)
     if name in ("openai_realtime", "openai"):
         from .openai_realtime_backend import OpenAIRealtimeBackend
         return OpenAIRealtimeBackend(model=cfg.OPENAI_MODEL)
     if name == "deepgram":
         from .deepgram_backend import DeepgramBackend
-        return DeepgramBackend(model=cfg.DEEPGRAM_MODEL)
+        return DeepgramBackend(model=cfg.DEEPGRAM_MODEL, vocabulary=cfg.VOCABULARY)
 
     print(f"⚠️ Unknown transcription backend '{name}' — ignored.")
     return None

@@ -34,6 +34,11 @@ model = "whisper-large-v3"
 # Force a transcription language as an ISO-639-1 code, e.g. "en", "fr", "de".
 # Omit or leave "" to let Whisper autodetect.
 language = ""
+# Comma-separated words the engine tends to DROP or misspell — proper nouns,
+# technical terms, foreign words. Write them in the dictation language. Each
+# backend receives it natively: Whisper's `prompt` (groq, whispercpp),
+# Deepgram's `keyterm` (nova-3 only). openai_realtime ignores it.
+# vocabulary = "Loquivox, Wayland, pull request, deploy, workflow"
 # Microphone to record from, by device NAME (see the "Microphone" dropdown in
 # Settings, or run `python -c "import sounddevice; print(sounddevice.query_devices())"`).
 # Leave "" to use the system default input. An unknown/disconnected name falls

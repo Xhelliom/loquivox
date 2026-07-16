@@ -167,6 +167,11 @@ class Config:
     # --- Transcription ---
     # ISO-639-1 code (e.g. "en", "fr"). Empty string = Whisper autodetects.
     WHISPER_LANGUAGE: str = ""
+    # Words the engine tends to drop or mangle — proper nouns, jargon, foreign
+    # terms — as a comma-separated list. Each backend gets it in its own native
+    # form: Whisper's `prompt` (groq) / `--prompt` (whispercpp), Deepgram's
+    # `keyterm` (nova-3 only). Write it in the dictation language.
+    VOCABULARY: str = ""
     # Skip transcription (and the API call) for clips shorter than this, in
     # seconds — filters accidental key-clicks. 0 disables the check.
     MIN_AUDIO_SEC: float = 0.5
@@ -400,6 +405,8 @@ def _build_config() -> Config:
         overrides["MODEL_WHISPER"] = str(trans["model"])
     if "language" in trans:
         overrides["WHISPER_LANGUAGE"] = str(trans["language"])
+    if "vocabulary" in trans:
+        overrides["VOCABULARY"] = str(trans["vocabulary"]).strip()
     if "input_device" in trans:
         overrides["INPUT_DEVICE"] = str(trans["input_device"])
     if "sample_rate" in trans:

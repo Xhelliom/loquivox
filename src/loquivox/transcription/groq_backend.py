@@ -24,9 +24,10 @@ class GroqBackend(TranscriptionBackend):
     name = "groq"
     supports_streaming = False
 
-    def __init__(self, model: str, upload_sample_rate: int) -> None:
+    def __init__(self, model: str, upload_sample_rate: int, prompt: str = "") -> None:
         self._model = model
         self._upload_sample_rate = upload_sample_rate
+        self._prompt = prompt
 
     def is_available(self) -> bool:
         return has_api_key()
@@ -40,6 +41,8 @@ class GroqBackend(TranscriptionBackend):
         params: dict = {"model": self._model, "file": wav_buffer}
         if language:  # empty string = autodetect
             params["language"] = language
+        if self._prompt:  # vocabulary hint — keeps rare/foreign words from being dropped
+            params["prompt"] = self._prompt
 
         try:
             transcript = get_client().audio.transcriptions.create(**params)
