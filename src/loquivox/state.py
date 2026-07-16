@@ -53,6 +53,7 @@ class SettingsManager:
             data = {
                 "color_scheme": state.color_scheme,
                 "overlay_style": state.overlay_style,
+                "show_hints": state.show_hints,
                 "tts_voice": state.tts_voice,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
@@ -126,6 +127,9 @@ class AppState:
     color_scheme: str = CFG.DEFAULT_SCHEME
     # Recording overlay look: "pill" (default) or "classic". See CFG.OVERLAY_STYLES.
     overlay_style: str = CFG.DEFAULT_OVERLAY_STYLE
+    # Widen the recording overlay with a column listing the hotkeys available
+    # right now (pause / refine / cancel). Read when the overlay is created.
+    show_hints: bool = True
 
     # --- System Tray ---
     indicator: Optional[Any] = None  # AppIndicator.Indicator or None
@@ -141,6 +145,8 @@ class AppState:
             self.color_scheme = saved["color_scheme"]
         if "overlay_style" in saved:
             self.overlay_style = saved["overlay_style"]
+        if "show_hints" in saved:
+            self.show_hints = saved["show_hints"]
         if "tts_voice" in saved:
             self.tts_voice = saved["tts_voice"]
         if "tts_enabled" in saved:

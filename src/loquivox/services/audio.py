@@ -78,11 +78,12 @@ class AudioService:
             except Exception:
                 pass
 
-        # Send downsampled data to visualization queue (skip if full)
+        # Feed the visualization queue (skip if full). Sent whole, NOT
+        # downsampled: PortAudio blocks are small and vary wildly (4–139 frames
+        # at 16 kHz), so thinning them left the overlay with near-empty chunks.
         try:
             if STATE.viz_queue.qsize() < 5:
-                flat_data = data_copy[:, 0][::10]  # Downsample
-                STATE.viz_queue.put_nowait(flat_data)
+                STATE.viz_queue.put_nowait(data_copy[:, 0])
         except Exception:
             pass
 

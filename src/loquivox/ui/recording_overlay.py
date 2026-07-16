@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import queue
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import cairo
 import numpy as np
@@ -49,6 +49,43 @@ class GtkOverlay(Gtk.Window):
                           # text band above can grow to two lines within OVERLAY_HEIGHT)
     FRAME_MS = 16         # ~60 fps
     SLIDE_PX = 10         # how far the content slides up while fading in
+    # Waveform sensitivity — the calibration knob, since no two mics read alike.
+    # Applied to the RMS of each frame's audio, NOT its peak: a real mic idles
+    # around rms 0.02 yet peaks past 0.5 on room noise alone, so peak-driven
+    # bars sit pegged at full height and never move. Raise if your waveform
+    # stays flat, lower if it saturates while you talk normally.
+    VIZ_GAIN = 6.0
+    # Hotkey-hints strip (STATE.show_hints): keycap pills laid out in one row.
+    HINT_KEY_H = 15       # keycap height
+    HINT_PAD_X = 12       # margin on each side of the strip
+    HINT_GAP = 13         # space between two hotkeys
+
+    @staticmethod
+    def _ui_font_family() -> str:
+        """The desktop's UI font family (portable, nothing to install)."""
+        settings = Gtk.Settings.get_default()
+        fontname = (settings.get_property("gtk-font-name") if settings else None) or "Sans 10"
+        return Pango.FontDescription(fontname).get_family() or "Sans"
+
+    @classmethod
+    def width(cls) -> int:
+        """
+        Overlay width: the configured one, plus the hints strip when enabled.
+
+        Measured on the WIDEST state (recording — every hotkey is listed), so the
+        window is sized once and never resizes as hints come and go mid-session.
+        """
+        if not STATE.show_hints:
+            return CFG.OVERLAY_WIDTH
+        items = cls.hint_items(transcribing=False, paused=False)
+        if not items:
+            return CFG.OVERLAY_WIDTH
+        # Measure by laying the strip out on a throwaway 1x1 surface — same code
+        # path as the real paint, so the window can never be a few px too small.
+        cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
+        scheme = CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME]
+        strip = cls._render_hints(cr, 0, 0, items, cls._ui_font_family(), scheme, 1.0)
+        return CFG.OVERLAY_WIDTH + int(math.ceil(strip))
 
     def __init__(self, mode: str):
         # Layer-shell requires TOPLEVEL; X11 uses POPUP
@@ -74,7 +111,7 @@ class GtkOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        w, h = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
+        w, h = self.width(), CFG.OVERLAY_HEIGHT
 
         if HAS_LAYER_SHELL and SESSION_TYPE == "wayland":
             # --- Wayland: gtk-layer-shell ---
@@ -113,7 +150,7 @@ class GtkOverlay(Gtk.Window):
         from loquivox.config import POSTPROCESS_LEVELS
         self.choosing = False
         self.choose_level = 0
-        self._base_w, self._base_h = CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT
+        self._base_w, self._base_h = self.width(), CFG.OVERLAY_HEIGHT
         self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
         self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         # AI action panel (rewrite/vision): enlarged, two phases.
@@ -128,15 +165,12 @@ class GtkOverlay(Gtk.Window):
         self._opacity = 0.0           # eases 0→1 on show
         self._closing = False
         self._bars: List[float] = [0.0] * self.NUM_BARS
-        self._targets: List[float] = [0.0] * self.NUM_BARS
+        self._level = 0.0             # newest eased level, shifted in each frame
 
-        # Use the desktop's UI font (portable, no font dependency to install).
-        settings = Gtk.Settings.get_default()
-        fontname = (settings.get_property("gtk-font-name") if settings else None) or "Sans 10"
-        self._font_family = Pango.FontDescription(fontname).get_family() or "Sans"
+        self._font_family = self._ui_font_family()
 
         self.drawing_area = Gtk.DrawingArea()
-        self.drawing_area.set_size_request(CFG.OVERLAY_WIDTH, CFG.OVERLAY_HEIGHT)
+        self.drawing_area.set_size_request(self._base_w, self._base_h)
         self.drawing_area.connect("draw", self._on_draw)
         self.add(self.drawing_area)
         self.timeout_id = GLib.timeout_add(self.FRAME_MS, self._animate)
@@ -215,39 +249,44 @@ class GtkOverlay(Gtk.Window):
         return True
 
     def _update_bars(self) -> None:
-        """Compute new bar targets from the latest audio, then ease toward them."""
-        data = None
+        """
+        Push one level per FRAME onto the bar history, so the waveform scrolls
+        right→left with the newest sound at the right edge.
+
+        Deliberately NOT "one audio block spread across the bars": PortAudio
+        hands us blocks of wildly varying size (4–139 frames at 16 kHz), far
+        fewer than NUM_BARS, which left most bars pinned at zero — only the
+        left of the waveform ever moved. Peak is taken across every block
+        drained this frame, so no captured audio is skipped.
+        """
+        chunks = []
         while not STATE.viz_queue.empty():
             try:
                 data = STATE.viz_queue.get_nowait()
             except queue.Empty:
                 break
+            if len(data):
+                chunks.append(data)
 
-        n = self.NUM_BARS
-        if data is not None and len(data) > 0:
+        if chunks:
             self._last_audio_tick = self._tick
-            step = max(1, len(data) // n)
-            for i in range(n):
-                seg = data[i * step:(i + 1) * step]
-                amp = float(np.max(np.abs(seg))) if len(seg) else 0.0
-                # Perceptual shaping: sqrt-ish so quiet speech is visible and
-                # loud peaks saturate gracefully instead of clipping hard.
-                self._targets[i] = min(1.0, (amp * 6.0) ** 0.6)
+            block = chunks[0] if len(chunks) == 1 else np.concatenate(chunks)
+            rms = float(np.sqrt(np.mean(np.square(block))))
+            # Perceptual shaping: sqrt-ish so quiet speech is visible and loud
+            # passages saturate gracefully instead of clipping hard.
+            target = min(1.0, (rms * self.VIZ_GAIN) ** 0.6)
         elif self._tick - self._last_audio_tick > 14:
-            # Idle → slow, gentle breathing wave across the bars.
-            for i in range(n):
-                self._targets[i] = 0.05 + 0.04 * (0.5 + 0.5 * math.sin(self._tick * 0.045 + i * 0.45))
+            # Idle → slow, gentle breathing wave.
+            target = 0.05 + 0.04 * (0.5 + 0.5 * math.sin(self._tick * 0.045))
         else:
-            # Between audio frames: let targets drift down softly.
-            for i in range(n):
-                self._targets[i] *= 0.93
+            target = self._level * 0.93  # between blocks: drift down softly
 
-        # Ease each bar toward its target. Low coefficients = calm, unhurried
-        # motion (gentle rise, slow graceful fall).
-        for i in range(n):
-            t = self._targets[i]
-            coef = 0.28 if t > self._bars[i] else 0.08
-            self._bars[i] += (t - self._bars[i]) * coef
+        # Ease the incoming level (fast attack, slow decay) so the scroll stays
+        # calm, then shift it in at the right edge.
+        coef = 0.28 if target > self._level else 0.08
+        self._level += (target - self._level) * coef
+        self._bars.pop(0)
+        self._bars.append(self._level)
 
     @staticmethod
     def _smoothstep(x: float) -> float:
@@ -300,12 +339,114 @@ class GtkOverlay(Gtk.Window):
             cr, w, h, scheme=scheme, mode=self.mode, text=text,
             bars=self._bars, tick=self._tick, font_family=self._font_family,
             transcribing=self.transcribing, a=a, ellipsize_start=live,
+            hints=self.hint_items(self.transcribing, self.paused) if STATE.show_hints else (),
         )
+
+    @staticmethod
+    def hint_items(transcribing: bool, paused: bool) -> List[Tuple[List[str], str]]:
+        """
+        The hotkeys that actually do something right now, as
+        ``([key, …], action)`` — e.g. ``(["Ctrl", "Space"], "refine")``.
+
+        Keys come from the live HOTKEY_DEFS (first spec = primary), so a rebound
+        — or unbound, e.g. 'refine' by default — action stays truthful. Once
+        transcribing, only cancel is left: pause/refine act on capture, which is
+        already over.
+        """
+        def keys(action: str) -> Optional[List[str]]:
+            specs = CFG.HOTKEY_DEFS.get(action, ("", []))[1]
+            if not specs:
+                return None
+            return [part.title() for part in specs[0].split("+") if part]
+
+        items: List[Tuple[List[str], str]] = []
+        if not transcribing:
+            k = keys("pause")
+            if k:
+                items.append((k, "resume" if paused else "pause"))
+            k = keys("refine")
+            if k:
+                items.append((k, "refine"))
+        k = keys("cancel")
+        if k:
+            items.append((k, "cancel"))
+        return items
+
+    @classmethod
+    def _render_hints(cls, cr, x, cy, items, font_family, scheme, a) -> float:
+        """
+        Lay the hotkey strip out left→right at (x, cy) — keycap pills then the
+        action they trigger — and return the width it takes.
+
+        Draws and measures in one pass (``width()`` calls it on a throwaway
+        surface), so the reserved strip always matches what gets painted.
+        """
+        base = cls._hex_to_rgb(scheme.get("surface", scheme["bg"]))
+        txt = cls._hex_to_rgb(scheme["text"])
+        cx = x + cls.HINT_PAD_X
+        for i, (keys, action) in enumerate(items):
+            if i:
+                cx += cls.HINT_GAP
+            for j, key in enumerate(keys):
+                if j:  # chord: a dim "+" between the caps
+                    cx += 2 + cls._draw_text_at(cr, font_family, "+", cx + 2, cy,
+                                                6.5, txt, 0.45 * a) + 4
+                cx += cls._draw_keycap(cr, cx, cy, key, base, txt, a)
+            cx += 5 + cls._draw_text_at(cr, font_family, action, cx + 5, cy,
+                                        7.5, txt, 0.8 * a)
+        return cx - x + cls.HINT_PAD_X
+
+    @classmethod
+    def _draw_keycap(cls, cr, x, cy, label, base, text_rgb, a) -> float:
+        """
+        One physical-looking key pill: a shadow lip peeking below a gradient
+        face (cairo has no box-shadow), monospace label. Returns its width.
+        """
+        layout = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription()
+        fd.set_family("Monospace")
+        fd.set_size(int(6.5 * Pango.SCALE))
+        fd.set_weight(Pango.Weight.BOLD)
+        layout.set_font_description(fd)
+        layout.set_text(label, -1)
+        tw, th = layout.get_pixel_size()
+        w, h = tw + 12, cls.HINT_KEY_H
+        top = cy - h / 2
+
+        cls._rounded_rect_path(cr, x, top + 2, w, h, 4)   # lip → the 3D feel
+        cr.set_source_rgba(*cls._shade(base, 0.45), 0.9 * a)
+        cr.fill()
+
+        grad = cairo.LinearGradient(0, top, 0, top + h)   # lit from above
+        grad.add_color_stop_rgba(0, *cls._shade(base, 1.7), a)
+        grad.add_color_stop_rgba(1, *cls._shade(base, 1.05), a)
+        cls._rounded_rect_path(cr, x, top, w, h, 4)
+        cr.set_source(grad)
+        cr.fill()
+
+        cr.set_source_rgba(*text_rgb, 0.95 * a)
+        cr.move_to(x + 6, cy - th / 2)
+        PangoCairo.show_layout(cr, layout)
+        return w
+
+    @staticmethod
+    def _shade(rgb, factor: float):
+        """Lighten (factor > 1) or darken (< 1) an RGB triple, clamped to 0..1."""
+        return tuple(max(0.0, min(1.0, c * factor)) for c in rgb)
+
+    @staticmethod
+    def _draw_separator(cr, x, cy, color, a) -> None:
+        """Hairline splitting the overlay content from the hints strip."""
+        cr.set_source_rgba(*color, 0.20 * a)
+        cr.set_line_width(1)
+        cr.move_to(x, cy - 13)
+        cr.line_to(x, cy + 13)
+        cr.stroke()
 
     @classmethod
     def render_content(cls, cr, w, h, *, scheme, mode, text, bars, tick,
                        font_family, transcribing=False, a=1.0,
-                       ellipsize_start=False, style=None):
+                       ellipsize_start=False, style=None, hints=()):
         """
         Paint the overlay bubble at (0, 0, w, h). Pure of widget state so the
         settings dialog can render an identical preview by passing its own
@@ -313,13 +454,14 @@ class GtkOverlay(Gtk.Window):
 
         ``style`` picks the look ("pill" or "classic"); when None it follows the
         user's current STATE.overlay_style, so the live overlay and the settings
-        preview stay in sync.
+        preview stay in sync. ``hints`` (see ``hint_items``) claims the right
+        strip — ``w`` is expected to already include it (see ``width()``).
         """
         if (style or STATE.overlay_style) == "pill":
             cls._render_pill(cr, w, h, scheme=scheme, mode=mode, text=text,
                              bars=bars, tick=tick, font_family=font_family,
                              transcribing=transcribing, a=a,
-                             ellipsize_start=ellipsize_start)
+                             ellipsize_start=ellipsize_start, hints=hints)
             return
 
         config = CFG.MODES.get(mode, CFG.MODES["dictation"])
@@ -341,6 +483,11 @@ class GtkOverlay(Gtk.Window):
             cls._icon_spinner(cr, 30, h / 2, fg_rgb, a, tick)
         else:
             cls._draw_icon(cr, mode, 30, h / 2, fg_rgb, a)
+        # The hints strip claims the extra width; content lays out to its left.
+        if hints:
+            w = CFG.OVERLAY_WIDTH
+            cls._draw_separator(cr, w, h / 2, fg_rgb, a)
+            cls._render_hints(cr, w, h / 2, hints, font_family, scheme, a)
         text_left, text_right = 46, w - 8
         text_w = max(40, text_right - text_left)
         # cy is the *center* of the text band; a one-line label sits centered,
@@ -357,11 +504,15 @@ class GtkOverlay(Gtk.Window):
     # ---------------------------------------------------------------- pill
     @classmethod
     def _render_pill(cls, cr, w, h, *, scheme, mode, text, bars, tick,
-                     font_family, transcribing, a, ellipsize_start):
+                     font_family, transcribing, a, ellipsize_start, hints=()):
         """
         Capsule look (mirrors the landing-page mock-up): a pulsing red dot, a
         horizontal waveform, and the state label — laid out left→right inside a
         fully-rounded pill with a soft accent glow. Theme-aware via ``scheme``.
+
+        With ``hints``, the capsule keeps the full width but its dot/waveform/
+        label layout is confined to the configured OVERLAY_WIDTH, leaving the
+        surplus on the right to the hotkey strip.
         """
         bg_rgb = cls._hex_to_rgb(scheme["bg"])
         accent = cls._hex_to_rgb(scheme.get("accent", scheme["text"]))
@@ -391,6 +542,12 @@ class GtkOverlay(Gtk.Window):
 
         cy = py + ph / 2
         dot_x = px + 18
+        # Width left for the dot/waveform/label once the hints strip is carved
+        # off the right — so the waveform keeps its size instead of stretching.
+        cw = pw - (w - CFG.OVERLAY_WIDTH) if hints else pw
+        if hints:
+            cls._draw_separator(cr, px + cw, cy, accent, a)
+            cls._render_hints(cr, px + cw, cy, hints, font_family, scheme, a)
 
         # Left indicator: rotating spinner while transcribing, else a pulsing
         # red record dot (the universal "recording" cue from the mock-up).
@@ -407,8 +564,8 @@ class GtkOverlay(Gtk.Window):
         # remaining right-hand strip and ellipsizes there instead of eating into
         # the bars.
         bars_x1 = dot_x + 12
-        bars_x2 = px + pw * 0.52          # fixed right edge of the waveform
-        region_right = px + pw - 16
+        bars_x2 = px + cw * 0.52          # fixed right edge of the waveform
+        region_right = px + cw - 16
         max_label = max(24, region_right - (bars_x2 + 12))
 
         # Right: the state label, ellipsized to fit its fixed strip.
@@ -587,8 +744,8 @@ class GtkOverlay(Gtk.Window):
 
     @staticmethod
     def _draw_text_at(cr, font_family, text, x, cy, size, color, a,
-                      weight=Pango.Weight.NORMAL):
-        """Left-aligned text at x, vertically centered at cy."""
+                      weight=Pango.Weight.NORMAL) -> float:
+        """Left-aligned text at x, vertically centered at cy. Returns its width."""
         layout = PangoCairo.create_layout(cr)
         fd = Pango.FontDescription()
         fd.set_family(font_family)
@@ -596,10 +753,11 @@ class GtkOverlay(Gtk.Window):
         fd.set_weight(weight)
         layout.set_font_description(fd)
         layout.set_text(text, -1)
-        _, th = layout.get_pixel_size()
+        tw, th = layout.get_pixel_size()
         cr.set_source_rgba(*color, a)
         cr.move_to(x, cy - th / 2)
         PangoCairo.show_layout(cr, layout)
+        return tw
 
     # --------------------------------------------------------------- icons
     @classmethod
@@ -675,6 +833,9 @@ class GtkOverlay(Gtk.Window):
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         start = (tick * 0.12) % (2 * math.pi)
         cr.set_source_rgba(*color, a)
+        # new_sub_path: arc() would otherwise join a leftover current point (e.g.
+        # from a preceding text layout) to the arc — a stray diagonal.
+        cr.new_sub_path()
         cr.arc(cx, cy, 7, start, start + math.radians(270))
         cr.stroke()
 
@@ -746,3 +907,37 @@ class GtkOverlay(Gtk.Window):
             self.destroy()
         except Exception:
             pass
+
+
+if __name__ == "__main__":
+    # Self-check for the pure hints logic (no window / audio device needed).
+    # Reads the live bindings, so it asserts on shape, not on specific keys —
+    # 'refine' is unbound by default but may be bound in the user's config.toml.
+    recording = GtkOverlay.hint_items(transcribing=False, paused=False)
+    actions = [action for _keys, action in recording]
+    assert "pause" in actions, recording
+    assert "cancel" in actions, recording
+    assert all(keys for keys, _ in recording), recording   # every hint has a key
+    assert "resume" in [a for _k, a in GtkOverlay.hint_items(False, True)]
+    # Once transcribing, capture is over: pause/refine go, cancel stays.
+    assert GtkOverlay.hint_items(True, False) == [
+        item for item in recording if item[1] == "cancel"
+    ]
+    assert GtkOverlay.width() > CFG.OVERLAY_WIDTH   # strip measured, non-zero
+    print(f"✓ hint_items OK — {recording} → width {GtkOverlay.width()}px")
+
+    # Waveform: drive _update_bars with the block sizes PortAudio really hands
+    # us (139/32/4 frames at 16 kHz) — the shapes that used to leave 20 of the
+    # 28 bars pinned at zero. __new__ skips __init__, so no GTK window is made.
+    o = GtkOverlay.__new__(GtkOverlay)
+    o._tick, o._last_audio_tick, o._level = 0, 0, 0.0
+    o._bars = [0.0] * GtkOverlay.NUM_BARS
+    rng = np.random.default_rng(7)
+    for frame in range(90):                      # 1.5 s at 60 fps of normal speech
+        o._tick = frame
+        for size in (139, 32, 4):
+            STATE.viz_queue.put(rng.normal(0, 0.09, size).astype(np.float32))
+        o._update_bars()
+    assert min(o._bars) > 0.2, o._bars           # no dead zone: the whole width lives
+    assert max(o._bars) < 0.99, o._bars          # normal speech doesn't peg the meter
+    print(f"✓ waveform OK — bars {min(o._bars):.2f}–{max(o._bars):.2f}, none dead")
