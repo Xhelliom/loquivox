@@ -67,6 +67,9 @@ The app auto-detects your session type (X11 or Wayland) and uses the appropriate
 
 > All keys are remappable in **Settings → Hotkeys**, including combos like `Alt+Space`. The `Refine` action has no default key — assign one to use it.
 
+> [!TIP]
+> Forgot a key? A thin tab sits at the top-center of the screen — hover it and the full list drops down. Turn it off in **Settings → Appearance**.
+
 ---
 
 ## 🛠️ Quick Start
@@ -153,6 +156,7 @@ src/loquivox/
 │   ├── recording_overlay.py  # GtkOverlay (waveform + gtk-layer-shell)
 │   ├── chat_overlay.py       # ChatOverlay (WebKit2 + gtk-layer-shell)
 │   ├── settings_dialog.py    # SettingsDialog (voice, schemes, hotkeys)
+│   ├── hotkey_bar.py         # HotkeyBar (top-edge hover cheat sheet)
 │   └── tray.py               # TrayManager (AppIndicator)
 └── handlers/
     ├── mode.py           # ModeHandler (dictation/AI/rewrite/vision)

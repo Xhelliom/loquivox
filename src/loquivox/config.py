@@ -36,6 +36,20 @@ POSTPROCESS_LEVELS: tuple = (
 POSTPROCESS_MAX_LEVEL: int = 5
 POSTPROCESS_CUSTOM_LEVEL: int = 5
 
+# One-line description per hotkey action — single source of truth for the
+# startup banner and the hover hotkey bar. Keys match HOTKEY_DEFS.
+HOTKEY_DESCRIPTIONS: Dict[str, str] = {
+    "dictation":  "Dictate at the cursor",
+    "ai":         "Ask the AI",
+    "ai_rewrite": "Rewrite the selected text",
+    "vision":     "Screenshot + ask about it",
+    "pin":        "Pin the chat overlay on top",
+    "tts":        "Read AI answers aloud",
+    "cancel":     "Cancel recording / transcription",
+    "pause":      "Pause / resume the recording",
+    "refine":     "Stop & pick this dictation's refinement",
+}
+
 
 @dataclass(frozen=True)
 class Config:

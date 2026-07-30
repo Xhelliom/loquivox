@@ -54,6 +54,8 @@ class SettingsManager:
                 "color_scheme": state.color_scheme,
                 "overlay_style": state.overlay_style,
                 "show_hints": state.show_hints,
+                "show_refine_badge": state.show_refine_badge,
+                "show_hotkey_bar": state.show_hotkey_bar,
                 "tts_voice": state.tts_voice,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
@@ -99,6 +101,7 @@ class AppState:
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance
     chat_overlay_window: Optional[Any] = None  # ChatOverlay instance
+    hotkey_bar_window: Optional[Any] = None    # HotkeyBar instance
 
     # --- Chat State ---
     chat_messages: List[Dict[str, str]] = field(default_factory=list)
@@ -130,6 +133,12 @@ class AppState:
     # Widen the recording overlay with a column listing the hotkeys available
     # right now (pause / refine / cancel). Read when the overlay is created.
     show_hints: bool = True
+    # Show which refinement level the current dictation will get, as a chip on
+    # the recording overlay (PostProcessor.current_label).
+    show_refine_badge: bool = True
+    # Screen-edge tab at the top of the display that expands on hover into the
+    # full hotkey cheat sheet (ui/hotkey_bar.py).
+    show_hotkey_bar: bool = True
 
     # --- System Tray ---
     indicator: Optional[Any] = None  # AppIndicator.Indicator or None
@@ -147,6 +156,10 @@ class AppState:
             self.overlay_style = saved["overlay_style"]
         if "show_hints" in saved:
             self.show_hints = saved["show_hints"]
+        if "show_refine_badge" in saved:
+            self.show_refine_badge = saved["show_refine_badge"]
+        if "show_hotkey_bar" in saved:
+            self.show_hotkey_bar = saved["show_hotkey_bar"]
         if "tts_voice" in saved:
             self.tts_voice = saved["tts_voice"]
         if "tts_enabled" in saved:

@@ -224,6 +224,22 @@ class SettingsDialog:
         hints_check.connect("toggled", cls._on_hints_toggled)
         vbox.pack_start(hints_check, False, False, 0)
 
+        # Refinement chip (dictation only). Applies to the next recording.
+        badge_check = Gtk.CheckButton(
+            label="Show the refinement level applied to the dictation"
+        )
+        badge_check.set_active(STATE.show_refine_badge)
+        badge_check.connect("toggled", cls._on_refine_badge_toggled)
+        vbox.pack_start(badge_check, False, False, 0)
+
+        # Screen-edge hotkey cheat sheet (applies immediately).
+        bar_check = Gtk.CheckButton(
+            label="Hotkey tab at the top of the screen (hover to expand)"
+        )
+        bar_check.set_active(STATE.show_hotkey_bar)
+        bar_check.connect("toggled", cls._on_hotkey_bar_toggled)
+        vbox.pack_start(bar_check, False, False, 0)
+
         # Colour scheme gallery
         scheme_label = Gtk.Label()
         scheme_label.set_halign(Gtk.Align.START)
@@ -264,7 +280,8 @@ class SettingsDialog:
         from loquivox.ui.recording_overlay import GtkOverlay
 
         scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
-        bw, bh = GtkOverlay.width(), CFG.OVERLAY_HEIGHT
+        badge = GtkOverlay.refine_badge_for("dictation")
+        bw, bh = GtkOverlay.width(badge), CFG.OVERLAY_HEIGHT
         aw, ah = widget.get_allocated_width(), widget.get_allocated_height()
 
         # Looping, calm waveform like the overlay's idle/recording motion.
@@ -282,6 +299,7 @@ class SettingsDialog:
             cr, bw, bh, scheme=scheme, mode="dictation", text="Listening…",
             bars=bars, tick=t, font_family=family, transcribing=False, a=1.0,
             hints=GtkOverlay.hint_items(False, False) if STATE.show_hints else (),
+            badge=badge,
         )
         return True
 
@@ -1110,6 +1128,25 @@ class SettingsDialog:
         SettingsManager.save(STATE)
         if cls._preview_area:
             cls._preview_area.queue_draw()
+
+    @classmethod
+    def _on_refine_badge_toggled(cls, check: Gtk.CheckButton) -> None:
+        """Persist the refinement chip and refresh the preview (next recording)."""
+        STATE.show_refine_badge = check.get_active()
+        print(f"✨ Overlay refinement badge: {'on' if STATE.show_refine_badge else 'off'}")
+        SettingsManager.save(STATE)
+        if cls._preview_area:
+            cls._preview_area.queue_draw()
+
+    @staticmethod
+    def _on_hotkey_bar_toggled(check: Gtk.CheckButton) -> None:
+        """Show/hide the screen-edge hotkey tab right away, and persist it."""
+        from loquivox.ui.hotkey_bar import HotkeyBar
+
+        STATE.show_hotkey_bar = check.get_active()
+        print(f"⌨️  Hotkey bar: {'on' if STATE.show_hotkey_bar else 'off'}")
+        SettingsManager.save(STATE)
+        HotkeyBar.start() if STATE.show_hotkey_bar else HotkeyBar.stop()
 
     @classmethod
     def _on_scheme_selected(cls, listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:

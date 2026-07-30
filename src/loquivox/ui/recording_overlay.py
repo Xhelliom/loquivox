@@ -68,24 +68,38 @@ class GtkOverlay(Gtk.Window):
         return Pango.FontDescription(fontname).get_family() or "Sans"
 
     @classmethod
-    def width(cls) -> int:
+    def width(cls, badge: Optional[str] = None) -> int:
         """
-        Overlay width: the configured one, plus the hints strip when enabled.
+        Overlay width: the configured one, plus the strips carved off its right
+        — the refinement badge, then the hotkey hints — when they're on.
 
-        Measured on the WIDEST state (recording — every hotkey is listed), so the
-        window is sized once and never resizes as hints come and go mid-session.
+        Hints are measured on the WIDEST state (recording — every hotkey is
+        listed), so the window is sized once and never resizes as they come and
+        go mid-session.
         """
-        if not STATE.show_hints:
+        items = cls.hint_items(transcribing=False, paused=False) if STATE.show_hints else ()
+        if not items and not badge:
             return CFG.OVERLAY_WIDTH
-        items = cls.hint_items(transcribing=False, paused=False)
-        if not items:
-            return CFG.OVERLAY_WIDTH
-        # Measure by laying the strip out on a throwaway 1x1 surface — same code
+        # Measure by laying the strips out on a throwaway 1x1 surface — same code
         # path as the real paint, so the window can never be a few px too small.
         cr = cairo.Context(cairo.ImageSurface(cairo.FORMAT_ARGB32, 1, 1))
         scheme = CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME]
-        strip = cls._render_hints(cr, 0, 0, items, cls._ui_font_family(), scheme, 1.0)
-        return CFG.OVERLAY_WIDTH + int(math.ceil(strip))
+        font = cls._ui_font_family()
+        strips = cls._render_badge(cr, 0, 0, badge, font, scheme, 1.0) if badge else 0.0
+        if items:
+            strips += cls._render_hints(cr, 0, 0, items, font, scheme, 1.0)
+        return CFG.OVERLAY_WIDTH + int(math.ceil(strips))
+
+    @staticmethod
+    def refine_badge_for(mode: str) -> Optional[str]:
+        """
+        The refinement label to show for ``mode`` ("Medium", "→ EN", …), or None
+        when off, opted out, or the mode isn't post-processed (dictation only).
+        """
+        if mode != "dictation" or not STATE.show_refine_badge:
+            return None
+        from loquivox.services.postprocess import PostProcessor
+        return PostProcessor.current_label()
 
     def __init__(self, mode: str):
         # Layer-shell requires TOPLEVEL; X11 uses POPUP
@@ -96,6 +110,10 @@ class GtkOverlay(Gtk.Window):
 
         self.mode = mode
         self.config = CFG.MODES.get(mode, CFG.MODES["dictation"])
+        # What post-processing this dictation will get ("Medium", "→ EN", …).
+        # Read once, when the recording starts — that's what will apply — and
+        # before _setup_window, which sizes the window around it.
+        self.refine_badge = self.refine_badge_for(mode)
         self._setup_window()
         self._setup_ui()
         self.show_all()
@@ -111,7 +129,7 @@ class GtkOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        w, h = self.width(), CFG.OVERLAY_HEIGHT
+        w, h = self.width(self.refine_badge), CFG.OVERLAY_HEIGHT
 
         if HAS_LAYER_SHELL and SESSION_TYPE == "wayland":
             # --- Wayland: gtk-layer-shell ---
@@ -150,7 +168,7 @@ class GtkOverlay(Gtk.Window):
         from loquivox.config import POSTPROCESS_LEVELS
         self.choosing = False
         self.choose_level = 0
-        self._base_w, self._base_h = self.width(), CFG.OVERLAY_HEIGHT
+        self._base_w, self._base_h = self.width(self.refine_badge), CFG.OVERLAY_HEIGHT
         self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
         self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         # AI action panel (rewrite/vision): enlarged, two phases.
@@ -178,7 +196,15 @@ class GtkOverlay(Gtk.Window):
     def set_transcribing(self) -> None:
         """Switch the overlay to the post-recording 'transcribing' state."""
         if self.choosing:  # leaving the chooser → shrink back to normal size
+            from loquivox.config import POSTPROCESS_LEVELS
             self.choosing = False
+            # The on-the-fly chooser overrides the configured level for this
+            # dictation, so the badge must follow what was actually picked —
+            # and the window must be re-measured around the new label.
+            if STATE.show_refine_badge:
+                self.refine_badge = dict(POSTPROCESS_LEVELS).get(self.choose_level) \
+                    if self.choose_level else None
+                self._base_w = self.width(self.refine_badge)
             self._resize(self._base_w, self._base_h)
         self.transcribing = True
         self.drawing_area.queue_draw()
@@ -340,10 +366,22 @@ class GtkOverlay(Gtk.Window):
             bars=self._bars, tick=self._tick, font_family=self._font_family,
             transcribing=self.transcribing, a=a, ellipsize_start=live,
             hints=self.hint_items(self.transcribing, self.paused) if STATE.show_hints else (),
+            badge=self.refine_badge,
         )
 
     @staticmethod
-    def hint_items(transcribing: bool, paused: bool) -> List[Tuple[List[str], str]]:
+    def primary_keys(action: str) -> Optional[List[str]]:
+        """
+        The keycap labels of an action's primary binding — ``["Ctrl", "Space"]``
+        — read from the live HOTKEY_DEFS (first spec wins), or None if unbound.
+        """
+        specs = CFG.HOTKEY_DEFS.get(action, ("", []))[1]
+        if not specs:
+            return None
+        return [part.title() for part in specs[0].split("+") if part]
+
+    @classmethod
+    def hint_items(cls, transcribing: bool, paused: bool) -> List[Tuple[List[str], str]]:
         """
         The hotkeys that actually do something right now, as
         ``([key, …], action)`` — e.g. ``(["Ctrl", "Space"], "refine")``.
@@ -353,12 +391,7 @@ class GtkOverlay(Gtk.Window):
         transcribing, only cancel is left: pause/refine act on capture, which is
         already over.
         """
-        def keys(action: str) -> Optional[List[str]]:
-            specs = CFG.HOTKEY_DEFS.get(action, ("", []))[1]
-            if not specs:
-                return None
-            return [part.title() for part in specs[0].split("+") if part]
-
+        keys = cls.primary_keys
         items: List[Tuple[List[str], str]] = []
         if not transcribing:
             k = keys("pause")
@@ -395,6 +428,42 @@ class GtkOverlay(Gtk.Window):
             cx += 5 + cls._draw_text_at(cr, font_family, action, cx + 5, cy,
                                         7.5, txt, 0.8 * a)
         return cx - x + cls.HINT_PAD_X
+
+    @classmethod
+    def _render_badge(cls, cr, x, cy, badge, font_family, scheme, a) -> float:
+        """
+        Refinement chip ("✨ Medium +fmt") in its own strip at (x, cy), and the
+        width it takes.
+
+        It gets a strip of its own rather than sharing the state label: the
+        label is taken over by the live transcript and by "Transcription…", and
+        the refinement is exactly what one wants to see at those moments.
+        Draws and measures in one pass, like ``_render_hints``.
+        """
+        accent = cls._hex_to_rgb(scheme.get("accent", scheme["text"]))
+        txt = cls._hex_to_rgb(scheme["text"])
+        pad = 9
+        layout = PangoCairo.create_layout(cr)
+        fd = Pango.FontDescription()
+        fd.set_family(font_family)
+        fd.set_size(int(7.5 * Pango.SCALE))
+        fd.set_weight(Pango.Weight.SEMIBOLD)
+        layout.set_font_description(fd)
+        layout.set_text(f"✨ {badge}", -1)
+        tw, th = layout.get_pixel_size()
+
+        chip_x, chip_w, chip_h = x + cls.HINT_PAD_X, tw + 2 * pad, 20
+        cls._rounded_rect_path(cr, chip_x, cy - chip_h / 2, chip_w, chip_h, chip_h / 2)
+        cr.set_source_rgba(*accent, 0.16 * a)
+        cr.fill_preserve()
+        cr.set_source_rgba(*accent, 0.35 * a)
+        cr.set_line_width(1)
+        cr.stroke()
+
+        cr.set_source_rgba(*txt, 0.92 * a)
+        cr.move_to(chip_x + pad, cy - th / 2)
+        PangoCairo.show_layout(cr, layout)
+        return chip_w + 2 * cls.HINT_PAD_X
 
     @classmethod
     def _draw_keycap(cls, cr, x, cy, label, base, text_rgb, a) -> float:
@@ -446,7 +515,7 @@ class GtkOverlay(Gtk.Window):
     @classmethod
     def render_content(cls, cr, w, h, *, scheme, mode, text, bars, tick,
                        font_family, transcribing=False, a=1.0,
-                       ellipsize_start=False, style=None, hints=()):
+                       ellipsize_start=False, style=None, hints=(), badge=None):
         """
         Paint the overlay bubble at (0, 0, w, h). Pure of widget state so the
         settings dialog can render an identical preview by passing its own
@@ -454,14 +523,16 @@ class GtkOverlay(Gtk.Window):
 
         ``style`` picks the look ("pill" or "classic"); when None it follows the
         user's current STATE.overlay_style, so the live overlay and the settings
-        preview stay in sync. ``hints`` (see ``hint_items``) claims the right
-        strip — ``w`` is expected to already include it (see ``width()``).
+        preview stay in sync. ``badge`` (refinement level) and ``hints`` (see
+        ``hint_items``) each claim a strip on the right — ``w`` is expected to
+        already include them (see ``width()``).
         """
         if (style or STATE.overlay_style) == "pill":
             cls._render_pill(cr, w, h, scheme=scheme, mode=mode, text=text,
                              bars=bars, tick=tick, font_family=font_family,
                              transcribing=transcribing, a=a,
-                             ellipsize_start=ellipsize_start, hints=hints)
+                             ellipsize_start=ellipsize_start, hints=hints,
+                             badge=badge)
             return
 
         config = CFG.MODES.get(mode, CFG.MODES["dictation"])
@@ -483,11 +554,16 @@ class GtkOverlay(Gtk.Window):
             cls._icon_spinner(cr, 30, h / 2, fg_rgb, a, tick)
         else:
             cls._draw_icon(cr, mode, 30, h / 2, fg_rgb, a)
-        # The hints strip claims the extra width; content lays out to its left.
-        if hints:
-            w = CFG.OVERLAY_WIDTH
-            cls._draw_separator(cr, w, h / 2, fg_rgb, a)
-            cls._render_hints(cr, w, h / 2, hints, font_family, scheme, a)
+        # The badge + hints strips claim the extra width; content lays out to
+        # their left, inside the configured overlay width.
+        if badge or hints:
+            x = w = CFG.OVERLAY_WIDTH
+            if badge:
+                cls._draw_separator(cr, x, h / 2, fg_rgb, a)
+                x += cls._render_badge(cr, x, h / 2, badge, font_family, scheme, a)
+            if hints:
+                cls._draw_separator(cr, x, h / 2, fg_rgb, a)
+                cls._render_hints(cr, x, h / 2, hints, font_family, scheme, a)
         text_left, text_right = 46, w - 8
         text_w = max(40, text_right - text_left)
         # cy is the *center* of the text band; a one-line label sits centered,
@@ -504,15 +580,16 @@ class GtkOverlay(Gtk.Window):
     # ---------------------------------------------------------------- pill
     @classmethod
     def _render_pill(cls, cr, w, h, *, scheme, mode, text, bars, tick,
-                     font_family, transcribing, a, ellipsize_start, hints=()):
+                     font_family, transcribing, a, ellipsize_start, hints=(),
+                     badge=None):
         """
         Capsule look (mirrors the landing-page mock-up): a pulsing red dot, a
         horizontal waveform, and the state label — laid out left→right inside a
         fully-rounded pill with a soft accent glow. Theme-aware via ``scheme``.
 
-        With ``hints``, the capsule keeps the full width but its dot/waveform/
-        label layout is confined to the configured OVERLAY_WIDTH, leaving the
-        surplus on the right to the hotkey strip.
+        With ``badge`` / ``hints``, the capsule keeps the full width but its
+        dot/waveform/label layout is confined to the configured OVERLAY_WIDTH,
+        leaving the surplus on the right to those strips.
         """
         bg_rgb = cls._hex_to_rgb(scheme["bg"])
         accent = cls._hex_to_rgb(scheme.get("accent", scheme["text"]))
@@ -542,12 +619,16 @@ class GtkOverlay(Gtk.Window):
 
         cy = py + ph / 2
         dot_x = px + 18
-        # Width left for the dot/waveform/label once the hints strip is carved
-        # off the right — so the waveform keeps its size instead of stretching.
-        cw = pw - (w - CFG.OVERLAY_WIDTH) if hints else pw
+        # Width left for the dot/waveform/label once the right-hand strips are
+        # carved off — so the waveform keeps its size instead of stretching.
+        cw = pw - (w - CFG.OVERLAY_WIDTH) if (hints or badge) else pw
+        x = px + cw
+        if badge:
+            cls._draw_separator(cr, x, cy, accent, a)
+            x += cls._render_badge(cr, x, cy, badge, font_family, scheme, a)
         if hints:
-            cls._draw_separator(cr, px + cw, cy, accent, a)
-            cls._render_hints(cr, px + cw, cy, hints, font_family, scheme, a)
+            cls._draw_separator(cr, x, cy, accent, a)
+            cls._render_hints(cr, x, cy, hints, font_family, scheme, a)
 
         # Left indicator: rotating spinner while transcribing, else a pulsing
         # red record dot (the universal "recording" cue from the mock-up).
@@ -566,9 +647,8 @@ class GtkOverlay(Gtk.Window):
         bars_x1 = dot_x + 12
         bars_x2 = px + cw * 0.52          # fixed right edge of the waveform
         region_right = px + cw - 16
-        max_label = max(24, region_right - (bars_x2 + 12))
 
-        # Right: the state label, ellipsized to fit its fixed strip.
+        # Right: the state label, ellipsized to fit its strip.
         layout = PangoCairo.create_layout(cr)
         fd = Pango.FontDescription()
         fd.set_family(font_family)
@@ -577,6 +657,7 @@ class GtkOverlay(Gtk.Window):
         layout.set_font_description(fd)
         layout.set_text(text, -1)
         lw, lh = layout.get_pixel_size()
+        max_label = max(24, region_right - (bars_x2 + 12))
         if lw > max_label:
             layout.set_width(int(max_label * Pango.SCALE))
             layout.set_ellipsize(
@@ -925,6 +1006,14 @@ if __name__ == "__main__":
     ]
     assert GtkOverlay.width() > CFG.OVERLAY_WIDTH   # strip measured, non-zero
     print(f"✓ hint_items OK — {recording} → width {GtkOverlay.width()}px")
+
+    # The refinement badge only applies to dictation, and claims its own strip
+    # (so the live transcript can never paint over it).
+    assert GtkOverlay.refine_badge_for("ai") is None
+    assert GtkOverlay.width("Medium +fmt") > GtkOverlay.width()
+    badge = GtkOverlay.refine_badge_for("dictation")
+    print(f"✓ refine badge OK — dictation → {badge!r}, "
+          f"width {GtkOverlay.width(badge)}px")
 
     # Waveform: drive _update_bars with the block sizes PortAudio really hands
     # us (139/32/4 frames at 16 kHz) — the shapes that used to leave 20 of the

@@ -40,9 +40,11 @@ shown in a GTK overlay, with optional TTS read-back.
   the Settings dialog (which calls `KeyboardHandler.reload_hotkeys()`).
 
 When you add or rename a hotkey/mode, update **all** of: `config.py`
-(`HOTKEY_DEFS`, `MODES`), the dispatch table in `handlers/mode.py` `process()`,
-the descriptions in `app.py`, `settings_dialog.py`, `README.md`, and the landing
-page `docs/index.html` (its `ACTIONS`/feature cards). These drift easily.
+(`HOTKEY_DEFS`, `HOTKEY_DESCRIPTIONS`, `MODES`), the dispatch table in
+`handlers/mode.py` `process()`, `settings_dialog.py`, `README.md`, and the
+landing page `docs/index.html` (its `ACTIONS`/feature cards). These drift
+easily. The startup banner and the hover hotkey bar both read
+`HOTKEY_DESCRIPTIONS`, so they follow on their own.
 
 ## Architecture (`src/loquivox/`)
 
@@ -61,7 +63,8 @@ services/         audio (record+transcribe), ai (chat+vision), tts (Orpheus),
                   clipboard, image, postprocess (LLM refinement of dictation)
 managers/         history, chat (overlay state + auto-hide), overlay (recording indicator)
 ui/               recording_overlay, chat_overlay (WebKit2; voice + typed input via
-                  JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray
+                  JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray,
+                  hotkey_bar (top-edge tab that expands on hover into the hotkey list)
 handlers/         mode.py (routes a transcript per mode), keyboard.py (evdev listener)
 ```
 

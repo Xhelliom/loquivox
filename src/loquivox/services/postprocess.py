@@ -116,6 +116,27 @@ class PostProcessor:
         code = (code or "").strip()
         return _LANG_NAMES.get(code.lower(), code or "English")
 
+    @classmethod
+    def current_label(cls) -> Optional[str]:
+        """
+        Short label of what the next dictation will get — "Medium", "→ EN",
+        "Light +fmt" — or None when nothing would be applied.
+
+        Same axes (and same precedence) as ``process()``, for the recording
+        overlay to show before a word is spoken. Kept terse on purpose: it has
+        to fit the overlay's narrow label strip.
+        """
+        cfg = config_module.CFG
+        if cfg.POSTPROCESS_TRANSLATE:
+            base = f"→ {(cfg.POSTPROCESS_TARGET_LANG or 'en').upper()}"
+        else:
+            level = int(cfg.POSTPROCESS_LEVEL or 0)
+            base = "" if cls._prompt_for_level(level) is None \
+                else dict(config_module.POSTPROCESS_LEVELS).get(level, f"level {level}")
+        if not base:
+            return "Format" if cfg.POSTPROCESS_FORMAT else None
+        return f"{base} +fmt" if cfg.POSTPROCESS_FORMAT else base
+
     @staticmethod
     @safe_execute("PostProcess")
     def _run(text: str, system_prompt: str) -> Optional[str]:
@@ -178,3 +199,30 @@ class PostProcessor:
         print(f"✨ Post-processing ({label})…")
         result = cls._run(text, prompt)
         return result or text
+
+
+if __name__ == "__main__":
+    # Self-check for current_label (pure config logic — no API call).
+    from dataclasses import replace
+
+    live = config_module.CFG
+    neutral = replace(live, POSTPROCESS_LEVEL=0, POSTPROCESS_FORMAT=False,
+                      POSTPROCESS_TRANSLATE=False, POSTPROCESS_CUSTOM_PROMPT="",
+                      POSTPROCESS_TARGET_LANG="en")
+    cases = [
+        ({}, None),                                                   # off
+        ({"POSTPROCESS_LEVEL": 3}, "Medium"),
+        ({"POSTPROCESS_LEVEL": 3, "POSTPROCESS_FORMAT": True}, "Medium +fmt"),
+        ({"POSTPROCESS_FORMAT": True}, "Format"),                     # format alone
+        ({"POSTPROCESS_TRANSLATE": True}, "→ EN"),
+        ({"POSTPROCESS_LEVEL": 5}, None),                             # Custom, no prompt
+        ({"POSTPROCESS_LEVEL": 5, "POSTPROCESS_CUSTOM_PROMPT": "x"}, "Custom"),
+        ({"POSTPROCESS_LEVEL": 3, "POSTPROCESS_TRANSLATE": True}, "→ EN"),  # translate wins
+    ]
+    for over, want in cases:
+        config_module.CFG = replace(neutral, **over)
+        got = PostProcessor.current_label()
+        assert got == want, (over, got, want)
+    config_module.CFG = live
+    print(f"✓ current_label OK on {len(cases)} cases — "
+          f"live config → {PostProcessor.current_label()!r}")
