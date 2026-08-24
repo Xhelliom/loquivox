@@ -92,8 +92,41 @@ dictation  = ["RIGHTALT", "F3", "F13"]
 ai         = ["F4", "F14"]
 ai_rewrite = ["F7"]
 vision     = ["F8"]
+talk       = ["F6"]
 pin        = ["F9"]
 tts        = ["F10"]
+
+[talk]
+# Talk mode (F6): a spoken conversation with the AI that ends in ONE generated
+# text, typed at the cursor and left on the clipboard.
+
+# Turn detection. With vad = true a pause ends your turn on its own (like the
+# Realtime API's server_vad, but computed locally so every backend has it);
+# Space — or the talk key — always ends it immediately.
+vad = true
+# Activation level (RMS of the captured audio). Raise it in a noisy room, lower
+# it if your turns end while you are still speaking. The detector also
+# calibrates against the room noise on top of this floor.
+vad_threshold = 0.02
+# How long a pause has to last to end a turn, and how much speech there must
+# have been before a pause can end anything (milliseconds).
+silence_ms = 900
+min_speech_ms = 300
+# A turn stops after this long no matter what (seconds).
+turn_timeout = 60.0
+# Nothing said at all for this long ends the conversation and writes the text.
+idle_timeout = 15.0
+# Hard stop on the conversation length (your turns).
+max_turns = 30
+# How long the generated text waits for a verdict before being left on the
+# clipboard (seconds). It is never typed without an explicit Enter.
+review_timeout = 120.0
+# Read the assistant's spoken replies aloud even when TTS is toggled off.
+speak_replies = true
+# Override the two prompts: the conversation phase (understand, don't write)
+# and the generation phase (write the final text). Empty = keep the built-ins.
+# system_prompt = ""
+# generate_prompt = ""
 
 [overlay]
 # Recording overlay size in pixels.

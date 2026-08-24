@@ -70,6 +70,14 @@ class AudioService:
         # streaming path falls back to if the live session fails.
         STATE.audio_buffer.append(data_copy)
 
+        # Feed the turn detector, if talk mode is listening.
+        detector = STATE.vad
+        if detector is not None:
+            try:
+                detector.feed(data_copy[:, 0])
+            except Exception:
+                pass
+
         # Feed the live streaming session, if one is active.
         session = STATE.stream_session
         if session is not None:

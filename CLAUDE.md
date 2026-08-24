@@ -24,6 +24,7 @@ shown in a GTK overlay, with optional TTS read-back.
 | `F4`             | `ai`         | Ask the AI, answer typed + shown in chat overlay         |
 | `F7`             | `ai_rewrite` | Copy selected text, speak an instruction, paste rewrite  |
 | `F8`             | `vision`     | Screenshot + spoken question → Llama 4 vision answer     |
+| `F6`             | `talk`       | Spoken conversation → one ready-to-paste generated text  |
 | `F9`             | `pin`        | Toggle chat overlay "always on top"                      |
 | `F10`            | `tts`        | Toggle TTS read-back of AI answers                       |
 | `Esc`            | `cancel`     | Abort active recording / in-flight transcription         |
@@ -35,6 +36,9 @@ shown in a GTK overlay, with optional TTS read-back.
 - Recording modes are `dictation`, `ai`, `ai_rewrite`, `vision` (see
   `CFG.MODES`). The rest (`pin`, `tts`, `cancel`, `pause`, `refine`) are
   non-recording session actions — see `KeyboardHandler._NON_RECORDING_ACTIONS`.
+- `talk` is in both lists: it has a `CFG.MODES` entry (overlay look) but its key
+  only *starts* a session, so the listener treats it as non-recording. It never
+  goes through `ModeHandler.process()` — see the talk-mode section below.
 - Hold-to-talk by default; `STATE.toggle_mode` switches to press-to-start/stop.
 - Hotkeys are user-overridable in `config.toml` `[hotkeys]` and live-editable in
   the Settings dialog (which calls `KeyboardHandler.reload_hotkeys()`).
@@ -60,7 +64,8 @@ platform/         Session detect + backend factory; X11 (xdotool/xclip/gnome-scr
 transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
                   groq, whispercpp (local), deepgram, openai_realtime; streaming.py
 services/         audio (record+transcribe), ai (chat+vision), tts (Orpheus),
-                  clipboard, image, postprocess (LLM refinement of dictation)
+                  clipboard, image, postprocess (LLM refinement of dictation),
+                  talk (conversation → one text), vad (local end-of-turn detect)
 managers/         history, chat (overlay state + auto-hide), overlay (recording indicator)
 ui/               recording_overlay, chat_overlay (WebKit2; voice + typed input via
                   JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray,
@@ -75,6 +80,31 @@ handlers/         mode.py (routes a transcript per mode), keyboard.py (evdev lis
 marshalled to the GTK main loop via `GLib.idle_add` → `ModeHandler.process()`
 applies stale-guard + hallucination-guard, then dispatches to
 `_handle_dictation/_handle_ai/_handle_ai_rewrite/_handle_vision`.
+
+## Talk mode (`handlers/mode.py`, `services/talk.py`, `services/vad.py`)
+
+A whole conversation, not a single utterance — so it does NOT use the
+`process_audio_async` → `process()` path. `KeyboardHandler._on_press("talk")`
+spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
+
+1. `GrabbedKeys` (keyboard.py) keeps the input devices open for the *entire*
+   session — a key pressed while the model is thinking is still queued when the
+   next wait starts — but takes the exclusive grab only inside
+   `with keys.exclusive():`, around the waits themselves. Never hold a grab
+   across a network call: a hung request would freeze the user's keyboard.
+2. Each turn: `_talk_listen` records and ends on the local VAD's silence (or
+   Space / Enter / Esc / timeout), `_talk_transcribe` transcribes (streaming
+   backends included) and applies the hallucination guard, `TalkSession.reply`
+   answers, and the reply is spoken with `wait=True` — blocking is deliberate,
+   the next turn must not record the assistant's own voice.
+3. `_talk_generate` turns the conversation into one text and shows it in the
+   review panel; `_deliver_talk_text` types it (accept only) and leaves it on
+   the clipboard.
+
+The conversation lives in the `TalkSession`, never in `STATE.conversation_history`
+— a long spoken briefing must not pollute the F4 chat context. `STATE.vad` is the
+detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
+guards against a second session. Knobs live under `[talk]` in config.toml.
 
 ## Threading rules (important)
 

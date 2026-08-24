@@ -4,10 +4,12 @@ Unified handler for all recording modes.
 from __future__ import annotations
 
 import threading
-from typing import Optional
+import time
+from typing import Optional, Tuple
 
 import numpy as np
 
+import loquivox.config as config_module
 from loquivox.config import CFG
 from loquivox.decorators import run_on_main_thread
 from loquivox.managers.chat import ChatManager
@@ -324,6 +326,10 @@ class ModeHandler:
                         chat_user_text=chat_fmt(instr),
                         generation=gen, output=output))
                     return
+                if action == "copy":
+                    get_clipboard().copy(response)
+                    print("📋 Result copied to the clipboard")
+                    return
                 if action == "redo":
                     redos += 1
                     if redos > max_redos:
@@ -375,6 +381,257 @@ class ModeHandler:
         elif output == "paste":
             ClipboardService.paste_text(response)
         TTSService.speak(response)
+
+    # --- Talk mode (spoken conversation → one generated text) ---------------
+
+    @staticmethod
+    def start_talk_session() -> None:
+        """
+        Open a talk session: several spoken turns to work out what the text
+        should say, then one generation pass that writes it.
+
+        Called from the keyboard listener thread on the 'talk' hotkey. The
+        session itself runs in its own worker (it blocks on recording,
+        transcription, the model and the user's keys), and holds the keyboard
+        for its whole life — see ``GrabbedKeys``.
+        """
+        if STATE.talk_active or STATE.recording:
+            return
+        STATE.talk_active = True
+        threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
+
+    @staticmethod
+    def _talk_worker() -> None:
+        """
+        Worker thread: converse, then write the text, until the user is done.
+
+        'Keep talking' from the review panel loops back into the conversation
+        with everything already said still in the brief, so a wrong result is
+        one sentence away from being right.
+        """
+        from loquivox.handlers.keyboard import GrabbedKeys  # lazy: avoid import cycle
+        from loquivox.services.talk import TalkSession
+
+        session = TalkSession()
+        try:
+            with GrabbedKeys() as keys:
+                if not keys.alive:
+                    print("⚠️  Talk mode needs keyboard access — is your user in "
+                          "the 'input' group?")
+                    return
+                print("🗣️  Talk mode — speak freely. Enter: write the text · "
+                      "Space: end this turn · Esc: drop the conversation")
+                while True:
+                    if ModeHandler._talk_converse(session, keys) == "cancel":
+                        print("✖️  Talk mode cancelled — nothing written")
+                        return
+                    if ModeHandler._talk_generate(session, keys) != "talk":
+                        return
+        finally:
+            STATE.vad = None
+            if STATE.recording:  # a turn died mid-flight — close the stream
+                try:
+                    AudioService.stop_recording()
+                except Exception:
+                    pass
+            STATE.stream_session = None
+            STATE.audio_buffer = []
+            STATE.current_mode = None
+            STATE.talk_active = False
+            OverlayManager.hide()
+
+    @staticmethod
+    def _talk_converse(session, keys) -> str:
+        """
+        Run spoken turns until the user asks for the text ("finish"), drops the
+        conversation ("cancel"), or the turn budget runs out.
+        """
+        cfg = config_module.CFG
+        while session.user_turns < cfg.TALK_MAX_TURNS:
+            idle_action = "finish" if session.user_turns else "cancel"
+            audio, action = ModeHandler._talk_listen(keys, idle_action)
+            if action == "cancel":
+                return "cancel"
+
+            text = ModeHandler._talk_transcribe(audio)
+            if action == "finish":
+                # Whatever was being said when Enter came still counts as brief.
+                if text:
+                    ChatManager.add_message("user", f"🗣️ {text}")
+                    session.add_user(text)
+                return "finish"
+            if not text:
+                continue  # nothing said (or a hallucination) — just listen again
+
+            ChatManager.add_message("user", f"🗣️ {text}")
+            OverlayManager.set_status("Thinking…")
+            reply = session.reply(text)
+            if not reply:
+                continue
+            ChatManager.add_message("assistant", reply)
+            OverlayManager.set_status("Speaking…")
+            # Blocking on purpose: the next turn starts recording the moment
+            # this returns, and must not capture the assistant's own voice.
+            TTSService.speak(reply, wait=True, force=cfg.TALK_SPEAK_REPLIES)
+        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
+        return "finish"
+
+    @staticmethod
+    def _talk_listen(keys, idle_action: str) -> Tuple[Optional[np.ndarray], str]:
+        """
+        Record one spoken turn and return ``(audio, action)``.
+
+        The turn ends on its own when the local VAD hears a long enough pause
+        (that is talk mode's whole point — no key to hold), and otherwise on
+        Space / the talk key, on the turn timeout, or on Enter/Esc, which end
+        the conversation. A turn where nothing at all was said for
+        ``TALK_IDLE_TIMEOUT`` yields ``idle_action``: the user has walked away
+        from the microphone, not paused mid-sentence.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
+        from loquivox.services.vad import VoiceActivityDetector
+
+        cfg = config_module.CFG
+        STATE.vad = None
+        STATE.current_mode = "talk"
+        OverlayManager.show("talk")
+        AudioService.start_recording()
+        if cfg.TALK_VAD:
+            STATE.vad = VoiceActivityDetector(
+                STATE.capture_rate,
+                threshold=cfg.TALK_VAD_THRESHOLD,
+                silence_ms=cfg.TALK_VAD_SILENCE_MS,
+                min_speech_ms=cfg.TALK_VAD_MIN_SPEECH_MS,
+            )
+
+        mapping = KeyboardHandler.talk_listen_keys()
+        action = "send"
+        deadline = time.monotonic() + cfg.TALK_TURN_TIMEOUT
+        # Exclusive only while we wait on the user: no keystroke of this turn
+        # reaches the app underneath, and nothing here can block on the network.
+        with keys.exclusive():
+            while True:
+                pressed = keys.poll(mapping, 0.1)
+                if pressed is not None:
+                    action = pressed
+                    break
+                vad = STATE.vad
+                if vad is not None:
+                    if vad.ended:
+                        break
+                    if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
+                        action = idle_action
+                        break
+                if time.monotonic() >= deadline:
+                    break
+
+        STATE.vad = None
+        audio = AudioService.stop_recording()
+        if action == "cancel":
+            # Nothing will be transcribed — close the live session by hand,
+            # since only _talk_transcribe would have finalized it.
+            stream, STATE.stream_session = STATE.stream_session, None
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+        else:
+            OverlayManager.set_transcribing()
+        return audio, action
+
+    @staticmethod
+    def _talk_transcribe(audio: Optional[np.ndarray]) -> Optional[str]:
+        """
+        Turn a recorded talk turn into text, or None if it held no usable speech.
+
+        Finalizes the live session when a streaming backend is in use (with the
+        buffered audio as its fallback), exactly like ``_stream_worker``, and
+        applies ``process()``'s hallucination guard — a spoken conversation
+        would otherwise happily reply to Whisper's "Merci" on silence.
+        """
+        from loquivox.transcription import get_dispatcher
+
+        stream = STATE.stream_session
+        STATE.stream_session = None
+        text = None
+        try:
+            if stream is not None:
+                text = get_dispatcher().finish_stream(stream, audio, STATE.capture_rate)
+            elif audio is not None:
+                text = AudioService.transcribe(audio)
+        except Exception:
+            text = None
+
+        text = (text or "").strip()
+        if not text:
+            return None
+        clean = text.lower().rstrip(".!?")
+        if clean in CFG.HALLUCINATIONS or len(clean) < 2:
+            print(f"⚠️ Talk mode ignored: '{text}'")
+            return None
+        return text
+
+    @staticmethod
+    def _talk_generate(session, keys) -> str:
+        """
+        Write the final text from the conversation and put it up for review.
+
+        Returns "talk" to go back to the conversation (V), or "done" once the
+        text has been delivered, dropped, or left on the clipboard. Nothing is
+        ever typed without an explicit accept — on timeout the text lands on the
+        clipboard instead, so the conversation is never wasted.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
+
+        if not session.user_turns:
+            print("✖️  Nothing was said — talk mode closed")
+            return "done"
+
+        cfg = config_module.CFG
+        brief = session.brief()
+        mapping = KeyboardHandler.talk_review_keys()
+        while True:
+            OverlayManager.set_ai_panel("talk", brief)
+            text = session.generate()
+            if not text:
+                print("⚠️  Talk mode: no text was produced")
+                return "done"
+
+            OverlayManager.set_ai_panel("talk", brief, result=text)
+            with keys.exclusive():
+                action = keys.poll(mapping, cfg.TALK_REVIEW_TIMEOUT) or "timeout"
+            if action == "redo":
+                continue
+            if action == "talk":
+                return "talk"
+            if action == "reject":
+                print("✖️  Generated text discarded")
+                return "done"
+            if action == "accept":
+                ModeHandler._deliver_talk_text(text, typed=True)
+            else:  # copy, or the review timing out
+                ModeHandler._deliver_talk_text(text, typed=False)
+            return "done"
+
+    @staticmethod
+    @run_on_main_thread
+    def _deliver_talk_text(text: str, *, typed: bool) -> None:
+        """
+        Hand the generated text over: at the cursor when accepted, and on the
+        clipboard either way (that is what "ready to paste" means here).
+
+        ``type_text`` restores whatever the clipboard held before it borrowed
+        it, so the result is copied *after* — it is what the user wants to have
+        in hand. Runs on the GTK main thread, like every other delivery.
+        """
+        if typed:
+            ClipboardService.type_text(text)
+        get_clipboard().copy(text)
+        HistoryManager.add_answer(text)
+        ChatManager.add_message("assistant", text)
+        print("📋 Talk mode: text typed and copied" if typed
+              else "📋 Talk mode: text copied to the clipboard")
 
     # --- Typed chat (from the chat overlay input box) ------------------------
 

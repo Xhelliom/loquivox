@@ -68,16 +68,17 @@ class GtkOverlay(Gtk.Window):
         return Pango.FontDescription(fontname).get_family() or "Sans"
 
     @classmethod
-    def width(cls, badge: Optional[str] = None) -> int:
+    def width(cls, badge: Optional[str] = None, mode: Optional[str] = None) -> int:
         """
         Overlay width: the configured one, plus the strips carved off its right
         — the refinement badge, then the hotkey hints — when they're on.
 
         Hints are measured on the WIDEST state (recording — every hotkey is
-        listed), so the window is sized once and never resizes as they come and
-        go mid-session.
+        listed) for the mode about to be shown, so the window is sized once and
+        never resizes as they come and go mid-session.
         """
-        items = cls.hint_items(transcribing=False, paused=False) if STATE.show_hints else ()
+        items = (cls.hint_items(transcribing=False, paused=False, mode=mode)
+                 if STATE.show_hints else ())
         if not items and not badge:
             return CFG.OVERLAY_WIDTH
         # Measure by laying the strips out on a throwaway 1x1 surface — same code
@@ -129,7 +130,7 @@ class GtkOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        w, h = self.width(self.refine_badge), CFG.OVERLAY_HEIGHT
+        w, h = self.width(self.refine_badge, self.mode), CFG.OVERLAY_HEIGHT
 
         if HAS_LAYER_SHELL and SESSION_TYPE == "wayland":
             # --- Wayland: gtk-layer-shell ---
@@ -164,11 +165,13 @@ class GtkOverlay(Gtk.Window):
         self.transcribing = False
         self.paused = False
         self.live_text = ""
+        # Free-form state label (talk mode: "Thinking…", "Speaking…").
+        self.status_text = ""
         # Refinement chooser state (grows the overlay while picking a level).
         from loquivox.config import POSTPROCESS_LEVELS
         self.choosing = False
         self.choose_level = 0
-        self._base_w, self._base_h = self.width(self.refine_badge), CFG.OVERLAY_HEIGHT
+        self._base_w, self._base_h = self.width(self.refine_badge, self.mode), CFG.OVERLAY_HEIGHT
         self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
         self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         # AI action panel (rewrite/vision): enlarged, two phases.
@@ -193,6 +196,13 @@ class GtkOverlay(Gtk.Window):
         self.add(self.drawing_area)
         self.timeout_id = GLib.timeout_add(self.FRAME_MS, self._animate)
 
+    def set_status(self, text: str) -> None:
+        """Show a free-form state label (talk mode's thinking / speaking beats)."""
+        self.status_text = text or ""
+        self.transcribing = False
+        self.live_text = ""
+        self.drawing_area.queue_draw()
+
     def set_transcribing(self) -> None:
         """Switch the overlay to the post-recording 'transcribing' state."""
         if self.choosing:  # leaving the chooser → shrink back to normal size
@@ -204,9 +214,10 @@ class GtkOverlay(Gtk.Window):
             if STATE.show_refine_badge:
                 self.refine_badge = dict(POSTPROCESS_LEVELS).get(self.choose_level) \
                     if self.choose_level else None
-                self._base_w = self.width(self.refine_badge)
+                self._base_w = self.width(self.refine_badge, self.mode)
             self._resize(self._base_w, self._base_h)
         self.transcribing = True
+        self.status_text = ""
         self.drawing_area.queue_draw()
 
     def set_choosing(self, level: int) -> None:
@@ -248,6 +259,8 @@ class GtkOverlay(Gtk.Window):
     def set_live_text(self, text: str) -> None:
         """Update the live partial-transcript text shown while streaming."""
         self.live_text = text or ""
+        if self.live_text:
+            self.status_text = ""
         self.drawing_area.queue_draw()
 
     def set_paused(self, paused: bool) -> None:
@@ -357,6 +370,8 @@ class GtkOverlay(Gtk.Window):
         elif self.live_text:
             text = self.live_text
             live = True
+        elif self.status_text:
+            text = self.status_text
         else:
             text = self.config["text"]
 
@@ -365,7 +380,8 @@ class GtkOverlay(Gtk.Window):
             cr, w, h, scheme=scheme, mode=self.mode, text=text,
             bars=self._bars, tick=self._tick, font_family=self._font_family,
             transcribing=self.transcribing, a=a, ellipsize_start=live,
-            hints=self.hint_items(self.transcribing, self.paused) if STATE.show_hints else (),
+            hints=(self.hint_items(self.transcribing, self.paused, self.mode)
+                   if STATE.show_hints else ()),
             badge=self.refine_badge,
         )
 
@@ -381,7 +397,8 @@ class GtkOverlay(Gtk.Window):
         return [part.title() for part in specs[0].split("+") if part]
 
     @classmethod
-    def hint_items(cls, transcribing: bool, paused: bool) -> List[Tuple[List[str], str]]:
+    def hint_items(cls, transcribing: bool, paused: bool,
+                   mode: Optional[str] = None) -> List[Tuple[List[str], str]]:
         """
         The hotkeys that actually do something right now, as
         ``([key, …], action)`` — e.g. ``(["Ctrl", "Space"], "refine")``.
@@ -390,9 +407,16 @@ class GtkOverlay(Gtk.Window):
         — or unbound, e.g. 'refine' by default — action stays truthful. Once
         transcribing, only cancel is left: pause/refine act on capture, which is
         already over.
+
+        Talk mode is its own world: it holds the keyboard for the whole
+        conversation, so the global pause/refine/cancel bindings do not apply
+        and its own fixed keys are listed instead.
         """
         keys = cls.primary_keys
         items: List[Tuple[List[str], str]] = []
+        if mode == "talk":
+            return [(["Space"], "end turn"), (["Enter"], "write it"),
+                    (["Esc"], "cancel")]
         if not transcribing:
             k = keys("pause")
             if k:
@@ -781,7 +805,8 @@ class GtkOverlay(Gtk.Window):
             self._icon_spinner(cr, 24, 24, fg, a, self._tick)
         else:
             self._draw_icon(cr, self.mode, 24, 24, fg, a)
-        label = {"ai_rewrite": "Rewrite", "vision": "Vision"}.get(self.mode, "AI")
+        label = {"ai_rewrite": "Rewrite", "vision": "Vision",
+                 "talk": "Talk"}.get(self.mode, "AI")
         self._draw_text_at(cr, self._font_family, label, 42, 24, 10.0, fg, a,
                            Pango.Weight.BOLD)
 
@@ -793,15 +818,21 @@ class GtkOverlay(Gtk.Window):
 
         # Body: "Réflexion…" while thinking, else the (wrapped) result block.
         if thinking:
-            self._draw_text(cr, self._font_family, "Réflexion…", w / 2, h / 2 + 4,
-                            11.0, fg, a)
+            self._draw_text(cr, self._font_family,
+                            "Rédaction…" if self.mode == "talk" else "Réflexion…",
+                            w / 2, h / 2 + 4, 11.0, fg, a)
         else:
             self._draw_block(cr, self._font_family, self.ai_result, 16, 66,
                              w - 30, h - 92, 9.0, txt, a)
 
-        # Bottom hint line.
-        hint = ("Échap pour annuler" if thinking
-                else "Entrée ✓   ·   Échap ✗   ·   R ↻   ·   V 🎤")
+        # Bottom hint line — V re-dictates the instruction, except in talk mode
+        # where it drops back into the conversation.
+        if thinking:
+            hint = "Échap pour annuler"
+        elif self.mode == "talk":
+            hint = "Entrée ✓   ·   C ⧉   ·   R ↻   ·   V 🗣️   ·   Échap ✗"
+        else:
+            hint = "Entrée ✓   ·   C ⧉   ·   R ↻   ·   V 🎤   ·   Échap ✗"
         self._draw_text(cr, self._font_family, hint, w / 2, h - 15, 7.5, fg, a)
 
     @staticmethod
@@ -853,6 +884,7 @@ class GtkOverlay(Gtk.Window):
             "ai": cls._icon_sparkle,
             "ai_rewrite": cls._icon_pencil,
             "vision": cls._icon_camera,
+            "talk": cls._icon_bubble,
         }.get(mode, cls._icon_mic)
         drawer(cr, cx, cy)
 
@@ -895,6 +927,19 @@ class GtkOverlay(Gtk.Window):
         cr.stroke()
         cr.arc(cx, cy + 1, 3.4, 0, 2 * math.pi)
         cr.stroke()
+
+    @classmethod
+    def _icon_bubble(cls, cr, cx, cy):
+        """Speech bubble with a tail — talk mode."""
+        cls._rounded_rect_path(cr, cx - 9, cy - 8, 18, 13, 4)
+        cr.stroke()
+        cr.move_to(cx - 4, cy + 5)
+        cr.line_to(cx - 5.5, cy + 9)
+        cr.line_to(cx + 0.5, cy + 5)
+        cr.stroke()
+        for dx in (-3.5, 0.0, 3.5):
+            cr.arc(cx + dx, cy - 1.5, 0.9, 0, 2 * math.pi)
+            cr.fill()
 
     @staticmethod
     def _icon_sparkle(cr, cx, cy):
@@ -1006,6 +1051,13 @@ if __name__ == "__main__":
     ]
     assert GtkOverlay.width() > CFG.OVERLAY_WIDTH   # strip measured, non-zero
     print(f"✓ hint_items OK — {recording} → width {GtkOverlay.width()}px")
+
+    # Talk mode holds the keyboard itself, so it lists its own fixed keys — and
+    # the bubble is sized around those, not around the global bindings.
+    talk = GtkOverlay.hint_items(False, False, "talk")
+    assert [a for _k, a in talk] == ["end turn", "write it", "cancel"], talk
+    assert GtkOverlay.width(None, "talk") > CFG.OVERLAY_WIDTH
+    print(f"✓ talk hints OK — {talk} → width {GtkOverlay.width(None, 'talk')}px")
 
     # The refinement badge only applies to dictation, and claims its own strip
     # (so the live transcript can never paint over it).

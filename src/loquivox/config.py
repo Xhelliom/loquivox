@@ -43,6 +43,7 @@ HOTKEY_DESCRIPTIONS: Dict[str, str] = {
     "ai":         "Ask the AI",
     "ai_rewrite": "Rewrite the selected text",
     "vision":     "Screenshot + ask about it",
+    "talk":       "Talk it through, then get the text",
     "pin":        "Pin the chat overlay on top",
     "tts":        "Read AI answers aloud",
     "cancel":     "Cancel recording / transcription",
@@ -237,12 +238,63 @@ class Config:
         "output be grounded, clear, and highly concise. Return ONLY the direct response."
     )
 
+    # --- Talk mode (spoken conversation → one generated text) ---
+    # Turn detection: how a spoken turn ends. With VAD on, a pause ends it
+    # (like the Realtime API's server_vad); Space/the talk key always ends it
+    # immediately. Levels are RMS on the captured audio — see services/vad.py,
+    # which calibrates against the room noise on top of this floor.
+    TALK_VAD: bool = True
+    TALK_VAD_THRESHOLD: float = 0.02
+    TALK_VAD_SILENCE_MS: int = 900
+    TALK_VAD_MIN_SPEECH_MS: int = 300
+    # A turn stops after this long no matter what (seconds).
+    TALK_TURN_TIMEOUT: float = 60.0
+    # Silence with nothing said at all for this long ends the conversation and
+    # goes to the text generation (seconds).
+    TALK_IDLE_TIMEOUT: float = 15.0
+    # Hard stop on the conversation length (user turns).
+    TALK_MAX_TURNS: int = 30
+    # How long the generated text waits for a verdict before being left on the
+    # clipboard (seconds) — it is never typed without an explicit accept.
+    TALK_REVIEW_TIMEOUT: float = 120.0
+    # Speak the assistant's conversational replies even when TTS is toggled off
+    # — talk mode is a voice conversation, the read-back is the point.
+    TALK_SPEAK_REPLIES: bool = True
+
+    # Conversation phase: the model is a partner working out WHAT to write.
+    TALK_SYSTEM_PROMPT: str = (
+        "You are on a live voice call with the user, working out a text they need "
+        "to produce (an email, a message, a note, a snippet — anything). In this "
+        "phase you do NOT write that text: you understand it. Reply in at most two "
+        "short spoken sentences — no markdown, no lists, no headings — because your "
+        "answer is read aloud. Ask about one thing at a time when something "
+        "important is missing (audience, intent, tone, key facts, length). When you "
+        "have enough to write it, say so in one sentence instead of asking more. "
+        "Never produce the final text until you are explicitly asked for it. Always "
+        "answer in the language the user speaks."
+    )
+    # Generation phase: same conversation, new instructions — write the thing.
+    TALK_GENERATE_PROMPT: str = (
+        "You write the final text the user has just discussed with you by voice. "
+        "The conversation is the brief: honour every instruction, fact and "
+        "preference expressed in it, and nothing else. Output ONLY the finished "
+        "text — no preamble, no commentary, no surrounding quotes, no code fences "
+        "unless the text itself is code. Write it in the language the user spoke, "
+        "ready to paste as-is."
+    )
+    # The closing user turn that asks for it (appended to the conversation).
+    TALK_GENERATE_REQUEST: str = (
+        "The conversation is over. Write the final text now, following everything "
+        "we discussed. Output only that text."
+    )
+
     # --- Mode Definitions (icon, overlay text, colors) ---
     MODES: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
         "dictation":  {"icon": "🎙️", "text": "Listening...",    "bg": "bg", "fg": "accent"},
         "ai":         {"icon": "🤖", "text": "AI Listening...", "bg": "bg", "fg": "accent"},
         "ai_rewrite": {"icon": "✍️", "text": "Rewrite Mode...", "bg": "bg", "fg": "accent"},
         "vision":     {"icon": "📸", "text": "Vision Mode...",  "bg": "bg", "fg": "accent"},
+        "talk":       {"icon": "🗣️", "text": "Talk Mode...",    "bg": "bg", "fg": "accent"},
     })
 
     # --- Hotkey Definitions ---
@@ -258,6 +310,8 @@ class Config:
         "ai":         ("F4",  ["F4", "F14"]),
         "ai_rewrite": ("F7",  ["F7", "PREVIOUSSONG"]),
         "vision":     ("F8",  ["F8", "PLAYPAUSE"]),
+        # Spoken conversation that ends in one generated, ready-to-paste text.
+        "talk":       ("F6",  ["F6"]),
         "pin":        ("F9",  ["F9", "NEXTSONG"]),
         "tts":        ("F10", ["F10", "MUTE"]),
         # Cancel the active recording / in-flight transcription (no text inserted).
@@ -459,6 +513,30 @@ def _build_config() -> Config:
     custom = post.get("custom_prompt", post.get("reformulate_prompt"))
     if custom is not None:
         overrides["POSTPROCESS_CUSTOM_PROMPT"] = str(custom).strip()
+
+    talk = data.get("talk", {})
+    if "vad" in talk:
+        overrides["TALK_VAD"] = bool(talk["vad"])
+    if "vad_threshold" in talk:
+        overrides["TALK_VAD_THRESHOLD"] = float(talk["vad_threshold"])
+    if "silence_ms" in talk:
+        overrides["TALK_VAD_SILENCE_MS"] = int(talk["silence_ms"])
+    if "min_speech_ms" in talk:
+        overrides["TALK_VAD_MIN_SPEECH_MS"] = int(talk["min_speech_ms"])
+    if "turn_timeout" in talk:
+        overrides["TALK_TURN_TIMEOUT"] = float(talk["turn_timeout"])
+    if "idle_timeout" in talk:
+        overrides["TALK_IDLE_TIMEOUT"] = float(talk["idle_timeout"])
+    if "max_turns" in talk:
+        overrides["TALK_MAX_TURNS"] = int(talk["max_turns"])
+    if "review_timeout" in talk:
+        overrides["TALK_REVIEW_TIMEOUT"] = float(talk["review_timeout"])
+    if "speak_replies" in talk:
+        overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
+    if str(talk.get("system_prompt", "")).strip():
+        overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
+    if str(talk.get("generate_prompt", "")).strip():
+        overrides["TALK_GENERATE_PROMPT"] = str(talk["generate_prompt"]).strip()
 
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:

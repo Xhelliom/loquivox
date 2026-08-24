@@ -34,6 +34,23 @@ class AIService:
         return response.choices[0].message.content
 
     @staticmethod
+    @safe_execute("AI Completion")
+    def complete(messages: List[Dict[str, Any]],
+                 model: Optional[str] = None) -> Optional[str]:
+        """
+        Raw chat completion for callers that build their own message list.
+
+        Unlike ``chat``, this ignores the global conversation history and system
+        prompt — talk mode keeps its conversation to itself, so a long spoken
+        session never pollutes (or gets polluted by) the F4 chat history.
+        """
+        response = get_client().chat.completions.create(
+            model=model or CFG.MODEL_CHAT,
+            messages=messages
+        )
+        return response.choices[0].message.content
+
+    @staticmethod
     @safe_execute("AI Vision")
     def vision(prompt: str, image_base64: str) -> Optional[str]:
         """Send vision completion request with image."""

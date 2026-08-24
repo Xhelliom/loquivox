@@ -960,7 +960,7 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     _HOTKEY_LABELS = {
         "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
-        "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
+        "vision": "Vision", "talk": "Talk", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
         "refine": "Stop + choose level",
     }

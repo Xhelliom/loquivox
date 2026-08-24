@@ -55,6 +55,16 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
+    def set_status(text: str) -> None:
+        """Show a free-form state label on the overlay (talk mode's beats)."""
+        if STATE.overlay_window:
+            try:
+                STATE.overlay_window.set_status(text)
+            except Exception:
+                pass
+
+    @staticmethod
+    @run_on_main_thread
     def set_live_text(text: str) -> None:
         """Show incremental live-transcription text on the overlay (if shown)."""
         if STATE.overlay_window:

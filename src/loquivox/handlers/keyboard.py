@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import selectors
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 import evdev
@@ -26,6 +27,127 @@ from loquivox.services.tts import TTSService
 from loquivox.state import STATE
 
 logger = logging.getLogger(__name__)
+
+
+class GrabbedKeys:
+    """
+    Keyboard access for a modal flow that spans several waits (talk mode).
+
+    ``capture_review`` & co open the keyboards, grab them, wait for ONE decision
+    and close everything. A talk session instead runs for minutes across many
+    waits — every spoken turn, then the review of the generated text — so it
+    keeps the devices OPEN for its whole life: a key pressed while the model is
+    thinking stays queued on our fd and is still there when the next wait
+    starts, nothing is lost between turns.
+
+    The exclusive grab, though, is taken only around the waits themselves
+    (``with keys.exclusive():``) and dropped for the blocking work in between.
+    Holding it across a network call would mean a hung request leaves the user
+    with a frozen keyboard — never worth it. Keys pressed during those short
+    gaps reach the focused app as well as us; keys pressed while we wait do not.
+
+    Use it as a context manager. It MUST be closed, and MUST run off the GTK
+    main thread. Pointers are read but never grabbed (grabbing one freezes the
+    cursor), exactly like the one-shot captures.
+    """
+
+    def __init__(self) -> None:
+        self._devices = KeyboardHandler._find_keyboards()
+        self._selector = selectors.DefaultSelector()
+        self._grabbed: List[InputDevice] = []
+        for dev in self._devices:
+            try:
+                self._selector.register(dev, selectors.EVENT_READ)
+            except Exception:
+                continue
+
+    def __enter__(self) -> "GrabbedKeys":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    @property
+    def alive(self) -> bool:
+        """False when no keyboard could be opened — there is nothing to wait on."""
+        return bool(self._devices)
+
+    @contextmanager
+    def exclusive(self):
+        """
+        Hold the exclusive grab for the duration of the block — wrap every wait
+        on the user, and nothing else.
+        """
+        self._grab()
+        try:
+            yield self
+        finally:
+            self._ungrab()
+
+    def _grab(self) -> None:
+        for dev in self._devices:
+            if KeyboardHandler._is_pointer(dev) or dev in self._grabbed:
+                continue
+            try:
+                dev.grab()
+                self._grabbed.append(dev)
+            except Exception:
+                pass  # grab is best-effort; the keys still get read
+
+    def _ungrab(self) -> None:
+        for dev in self._grabbed:
+            try:
+                dev.ungrab()
+            except Exception:
+                pass
+        self._grabbed = []
+        # The key-ups that happened while we held the grab never reached the
+        # listener, so its view of what is held is stale — drop it.
+        KeyboardHandler._held.clear()
+        KeyboardHandler._active.clear()
+
+    def poll(self, mapping: Dict[int, str], timeout: float) -> Optional[str]:
+        """
+        Wait up to ``timeout`` seconds for one of ``mapping``'s keys (keycode →
+        action) and return its action, or None if none came. Key-ups and
+        autorepeats are ignored, so a held key fires exactly once.
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            for key_obj, _ in self._selector.select(timeout=remaining):
+                try:
+                    events = list(key_obj.fileobj.read())
+                except Exception:
+                    continue
+                for event in events:
+                    if event.type != ecodes.EV_KEY or event.value != 1:
+                        continue
+                    action = mapping.get(event.code)
+                    if action is not None:
+                        return action
+
+    def close(self) -> None:
+        """Ungrab and close every device (safe to call more than once)."""
+        self._ungrab()
+        for dev in self._devices:
+            try:
+                self._selector.unregister(dev)
+            except Exception:
+                pass
+            try:
+                dev.close()
+            except Exception:
+                pass
+        self._devices = []
+        try:
+            self._selector.close()
+        except Exception:
+            pass
 
 
 class KeyboardHandler:
@@ -236,7 +358,10 @@ class KeyboardHandler:
         # event.value == 2 (autorepeat): ignore
 
     # Hotkeys that act on the session itself rather than starting a recording.
-    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause", "refine")
+    # 'talk' is here because its key only STARTS the session — everything after
+    # that is handled by the session's own grabbed keyboard, and its release
+    # must not stop anything.
+    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause", "refine", "talk")
 
     @classmethod
     def _on_press(cls, mode: str) -> None:
@@ -256,6 +381,12 @@ class KeyboardHandler:
         if mode == "refine":
             if STATE.recording:
                 cls._stop_and_choose()
+            return
+
+        # Talk mode: a whole spoken conversation, driven by its own worker.
+        if mode == "talk":
+            if not STATE.recording and not STATE.talk_active:
+                ModeHandler.start_talk_session()
             return
 
         # Pin toggle (non-recording action)
@@ -470,6 +601,39 @@ class KeyboardHandler:
                 except Exception:
                     pass
 
+    # --- Talk mode key maps --------------------------------------------------
+
+    @classmethod
+    def talk_listen_keys(cls) -> Dict[int, str]:
+        """
+        Keycode → action while a talk turn is being recorded.
+
+        Space (or the talk key itself) ends the turn now instead of waiting for
+        the VAD to hear the pause; Enter ends the conversation and writes the
+        text; Esc drops the whole thing.
+        """
+        mapping = {
+            ecodes.KEY_SPACE: "send",
+            ecodes.KEY_ENTER: "finish",
+            getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER): "finish",
+            ecodes.KEY_ESC: "cancel",
+        }
+        for trigger, _mods in resolve_hotkeys(CFG).get("talk", []):
+            mapping.setdefault(trigger, "send")
+        return mapping
+
+    @classmethod
+    def talk_review_keys(cls) -> Dict[int, str]:
+        """Keycode → action while the generated text awaits its verdict."""
+        return {
+            ecodes.KEY_ENTER: "accept",
+            getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER): "accept",
+            ecodes.KEY_C: "copy",
+            ecodes.KEY_R: "redo",
+            ecodes.KEY_V: "talk",      # back into the conversation
+            ecodes.KEY_ESC: "reject",
+        }
+
     # --- AI action panel review (rewrite/vision) -----------------------------
 
     @staticmethod
@@ -483,13 +647,16 @@ class KeyboardHandler:
             return "redo"
         if code == ecodes.KEY_V:
             return "redict"
+        if code == ecodes.KEY_C:
+            return "copy"
         return None
 
     @classmethod
     def capture_review(cls, mode: str, timeout: float = 90.0) -> str:
         """
         Grab the keyboard and wait for the user's decision on the AI result shown
-        in the review panel. Returns "accept" / "reject" / "redo" / "redict".
+        in the review panel. Returns "accept" / "reject" / "redo" / "redict" /
+        "copy".
 
         Mirrors ``capture_refinement``'s grab/select/ungrab loop. Times out to
         "reject" (a review must NEVER auto-insert unreviewed text). Always
@@ -769,5 +936,6 @@ if __name__ == "__main__":
     assert _ra(ecodes.KEY_ESC) == "reject"
     assert _ra(ecodes.KEY_R) == "redo"
     assert _ra(ecodes.KEY_V) == "redict"
+    assert _ra(ecodes.KEY_C) == "copy"
     assert _ra(ecodes.KEY_A) is None
     print("✓ _review_action mapping OK")

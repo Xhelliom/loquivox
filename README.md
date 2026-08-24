@@ -41,6 +41,7 @@ identically under X11 and Wayland), records while you hold the key, transcribes,
 | 💬 | **AI chat** | Ask out loud, or type into the chat overlay. The answer lands in the overlay and at your cursor. |
 | ✍️ | **Smart rewrite** | Select text, say how to change it (*"make it formal"*, *"shorten this"*), and it's replaced. |
 | 👁️ | **Vision** | Screenshot + a spoken question → a vision model explains the error, the page, the screen. |
+| 🗣️ | **Talk mode** | Discuss what you need out loud, back and forth, then say the word: the whole conversation becomes one finished text, typed and copied. |
 | 🪄 | **Refinement levels** | Raw transcript, grammar fix, light/medium/strong reformulation, or a custom prompt — pick it per dictation, on the fly. |
 | 🌍 | **Live translation** | Dictate in one language, have the text typed in another. |
 | 🔊 | **Voice feedback** | Optional TTS reads AI answers aloud, so you stay hands-free end to end. |
@@ -103,6 +104,7 @@ network, no key, API error.
 | `F4` | **Chat** | Ask a question aloud — or type it in the overlay |
 | `F7` | **Rewrite** | Select text → speak an instruction → it's replaced |
 | `F8` | **Vision** | Screenshot + spoken question → visual analysis |
+| `F6` | **Talk** | Talk it through with the AI, then get the text it was all about |
 | `F9` | **Pin** | Toggle "always on top" for the chat overlay |
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
 | `Esc` | **Cancel** | Abort the active recording / transcription (nothing inserted) |
@@ -116,6 +118,31 @@ assign a key to use it.
 > [!TIP]
 > Forgot a key? A thin tab sits at the top-center of your screen — hover it and the full list
 > drops down. Turn it off in **Settings → Appearance**.
+
+---
+
+## 🗣️ Talk mode: think out loud, get the text
+
+Dictation gives you what you said. Talk mode gives you what you *meant*.
+
+Press `F6` and just talk — no key to hold. A local voice-activity detector hears the pause at
+the end of your sentence and closes your turn, the assistant answers out loud (two sentences,
+never more), and you keep going: it asks who the text is for, what tone you want, what must
+absolutely be in it. When you're done briefing it, press `Enter` — and the entire conversation
+becomes **one finished text**, ready to paste.
+
+| Key | While talking | On the generated text |
+|:---:|:---|:---|
+| `Space` | End this turn now, don't wait for the pause | — |
+| `Enter` | Stop talking, write the text | Accept: typed at the cursor **and** copied |
+| `C` | — | Copy only, nothing typed |
+| `R` | — | Write it again |
+| `V` | — | Back into the conversation — fix it by saying what's wrong |
+| `Esc` | Drop the conversation | Discard the text |
+
+Nothing is ever typed without your `Enter`. If you walk away, the text goes to the clipboard
+rather than into whatever has focus. Turn detection, timeouts and both prompts are tunable in
+`config.toml` under `[talk]` — see [`config.example.toml`](config.example.toml).
 
 ---
 
@@ -239,7 +266,8 @@ starts. UI-toggled preferences (voice, color scheme, …) are stored separately 
 ```
 keyboard.py  ──▶  AudioService  ──▶  transcription backend  ──▶  ModeHandler
  (evdev,          (record while       (groq / whispercpp /      (dictation, chat,
-  own thread)      the key is held)    deepgram / openai)        rewrite, vision)
+  own thread)      the key is held)    deepgram / openai)        rewrite, vision,
+                                                                   talk)
                                               │                        │
                                         worker thread ──GLib.idle_add──▶ GTK main loop
                                                                         (type / overlay / TTS)
@@ -252,7 +280,7 @@ src/loquivox/
 ├── state.py          # AppState + SettingsManager (runtime state & user prefs)
 ├── platform/         # X11 vs Wayland backends behind ABCs (clipboard, typing, screenshot)
 ├── transcription/    # Pluggable STT: factory, dispatcher, groq / whispercpp / streaming
-├── services/         # audio, ai (chat+vision), tts, clipboard, image, postprocess
+├── services/         # audio, ai (chat+vision), tts, clipboard, image, postprocess, talk, vad
 ├── managers/         # history, chat overlay state, recording overlay
 ├── ui/               # recording overlay, WebKit2 chat overlay, settings, tray, hotkey bar
 └── handlers/         # mode.py (route a transcript), keyboard.py (evdev listener)
