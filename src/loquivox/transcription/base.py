@@ -70,13 +70,18 @@ class TranscriptionBackend(ABC):
         sample_rate: int,
         language: str,
         on_partial: "PartialCallback",
+        *,
+        semantic_turns: bool = False,
     ) -> "StreamingSession":
         """
         Open a live streaming session (only when ``supports_streaming``).
 
         ``on_partial(text)`` is invoked with the best-so-far transcript as it
-        arrives, for live overlay display. Raise ``BackendUnavailable`` if the
-        session cannot be established. Default: not supported.
+        arrives, for live overlay display. ``semantic_turns`` asks the backend
+        to segment the audio into conversational turns on its own (talk mode);
+        a backend that can't do that ignores the flag and leaves
+        ``StreamingSession.semantic_turns`` False. Raise ``BackendUnavailable``
+        if the session cannot be established. Default: not supported.
         """
         raise BackendUnavailable(f"{self.name} does not support streaming")
 

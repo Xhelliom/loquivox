@@ -32,6 +32,19 @@ def float32_to_pcm16(audio: np.ndarray) -> bytes:
 class StreamingSession(ABC):
     """A live transcription session for a single recording."""
 
+    #: True when the backend closes turns itself (server-side semantic VAD).
+    #: Talk mode then follows ``turn_ended`` instead of its local detection.
+    semantic_turns: bool = False
+
+    @property
+    def turn_ended(self) -> bool:
+        """
+        True once the backend has decided the speaker's turn is over. Always
+        False unless ``semantic_turns`` — the default session knows nothing
+        about turns, only about the recording it was opened for.
+        """
+        return False
+
     @abstractmethod
     def feed(self, audio: np.ndarray) -> None:
         """Push a captured audio chunk (float32 mono @ session rate). Non-blocking."""

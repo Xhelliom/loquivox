@@ -5,8 +5,8 @@ Talk mode is a spoken conversation: the user must be able to just *talk*, and
 have their turn end when they stop speaking. That is what a server-side VAD
 (OpenAI Realtime's ``server_vad``) does for streaming sessions — but Loquivox
 must work the same way on every backend, including batch Groq Whisper and the
-offline whisper.cpp. So turn detection is done locally, on the audio chunks the
-recorder already captures, with the same knobs as a server VAD:
+offline whisper.cpp. So it is done locally, on the audio chunks the recorder
+already captures, with the same knobs as a server VAD:
 
   - ``threshold``       activation level (RMS): louder than this counts as speech
   - ``silence_ms``      how long a pause must last to end the turn
@@ -16,6 +16,13 @@ recorder already captures, with the same knobs as a server VAD:
 Mic levels vary wildly from machine to machine, so the first ``calibration_ms``
 of every turn are spent measuring the room instead of deciding: the activation
 level ends up as ``max(threshold, noise_floor * NOISE_MARGIN)``.
+
+This detector answers "has the microphone gone quiet", which is not the same
+question as "has the speaker finished" — a silence timer cannot tell a finished
+sentence from a hesitation. When ``services/turn_detector.py`` is available it
+takes that second decision and this one becomes its trigger: a much shorter
+silence window, and ``rearm()`` whenever the model rules the turn unfinished.
+Alone (no model, or ``semantic_turns = false``), it decides on its own.
 
 Threading: ``feed()`` is called from the PortAudio callback thread while the
 talk loop reads the flags from its worker thread. Both are plain attribute
@@ -89,6 +96,21 @@ class VoiceActivityDetector:
               and self._last_voice is not None
               and self.elapsed - self._last_voice >= self._silence):
             self.ended = True
+
+    def rearm(self, silence_ms: Optional[int] = None) -> None:
+        """
+        Re-open a turn the semantic detector judged unfinished.
+
+        The pause we just reported stops counting: another full silence window
+        has to elapse before ``ended`` can fire again. ``silence_ms`` replaces
+        that window — talk mode uses a short trigger for the first check and a
+        longer one for the re-checks, so a hesitation doesn't spin the model.
+        Speech already heard still counts (``min_speech_ms`` stays satisfied).
+        """
+        self.ended = False
+        self._last_voice = self.elapsed
+        if silence_ms is not None:
+            self._silence = max(0.0, silence_ms / 1000.0)
 
     @property
     def silent_for(self) -> float:

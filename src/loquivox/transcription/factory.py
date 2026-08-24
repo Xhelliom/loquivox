@@ -38,7 +38,8 @@ def make_backend(name: str, cfg) -> Optional[TranscriptionBackend]:
         return WhisperCppBackend(model=cfg.WHISPERCPP_MODEL, prompt=cfg.VOCABULARY)
     if name in ("openai_realtime", "openai"):
         from .openai_realtime_backend import OpenAIRealtimeBackend
-        return OpenAIRealtimeBackend(model=cfg.OPENAI_MODEL)
+        return OpenAIRealtimeBackend(model=cfg.OPENAI_MODEL,
+                                     eagerness=cfg.OPENAI_TURN_EAGERNESS)
     if name == "deepgram":
         from .deepgram_backend import DeepgramBackend
         return DeepgramBackend(model=cfg.DEEPGRAM_MODEL, vocabulary=cfg.VOCABULARY)

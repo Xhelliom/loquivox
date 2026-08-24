@@ -80,12 +80,17 @@ class TranscriptionDispatcher:
 
     # -- live streaming -----------------------------------------------------
     def start_stream(
-        self, sample_rate: int, on_partial: PartialCallback
+        self, sample_rate: int, on_partial: PartialCallback,
+        semantic_turns: bool = False,
     ) -> Optional[StreamingSession]:
         """
         Open a live streaming session on the primary backend, or return None if
         the primary doesn't stream / is unavailable / fails to connect. A None
         result means the caller should fall back to the batch path on stop.
+
+        ``semantic_turns`` asks the backend to close turns itself (talk mode);
+        backends that can't are free to ignore it, and the caller reads
+        ``session.semantic_turns`` to find out what it actually got.
         """
         backend = self.streaming_backend()
         if backend is None:
@@ -94,7 +99,8 @@ class TranscriptionDispatcher:
             print(f"⚠️  {backend.name} streaming unavailable — will batch-fallback")
             return None
         try:
-            return backend.start_stream(sample_rate, self.language, on_partial)
+            return backend.start_stream(sample_rate, self.language, on_partial,
+                                        semantic_turns=semantic_turns)
         except BackendUnavailable as e:
             print(f"⚠️  {backend.name} stream start failed: {e}")
             return None

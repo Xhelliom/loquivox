@@ -397,6 +397,8 @@ class ModeHandler:
         """
         if STATE.talk_active or STATE.recording:
             return
+        from loquivox.services.turn_detector import prewarm_async
+        prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
         threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
 
@@ -481,26 +483,42 @@ class ModeHandler:
         """
         Record one spoken turn and return ``(audio, action)``.
 
-        The turn ends on its own when the local VAD hears a long enough pause
-        (that is talk mode's whole point — no key to hold), and otherwise on
-        Space / the talk key, on the turn timeout, or on Enter/Esc, which end
-        the conversation. A turn where nothing at all was said for
+        The turn ends on its own — that is talk mode's whole point, there is no
+        key to hold. Three layers can call it, in priority order: the backend's
+        own semantic VAD when it has one, else the local semantic detector
+        arbitrating the pauses the energy VAD hears, else that pause alone (see
+        ``_talk_turn_complete``). On top of that: Space / the talk key end the
+        turn now, the turn timeout ends it eventually, and Enter/Esc end the
+        conversation. A turn where nothing at all was said for
         ``TALK_IDLE_TIMEOUT`` yields ``idle_action``: the user has walked away
         from the microphone, not paused mid-sentence.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
+        from loquivox.services.turn_detector import ready_detector
         from loquivox.services.vad import VoiceActivityDetector
 
         cfg = config_module.CFG
         STATE.vad = None
         STATE.current_mode = "talk"
         OverlayManager.show("talk")
-        AudioService.start_recording()
+        AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS)
+        # A streaming backend may detect turns server-side (OpenAI Realtime's
+        # semantic_vad). When it does, it is the authority and neither the local
+        # model nor the silence window gets a vote.
+        stream = STATE.stream_session
+        remote_turns = bool(getattr(stream, "semantic_turns", False))
+        # ready_detector() never blocks: while the model is still downloading
+        # in the background, this turn simply ends on silence like before.
+        semantic = ready_detector() is not None if not remote_turns else False
         if cfg.TALK_VAD:
             STATE.vad = VoiceActivityDetector(
                 STATE.capture_rate,
                 threshold=cfg.TALK_VAD_THRESHOLD,
-                silence_ms=cfg.TALK_VAD_SILENCE_MS,
+                # With the model deciding, the pause is only a trigger — a much
+                # shorter one, since a finished sentence no longer waits out the
+                # full silence window to be recognised as finished.
+                silence_ms=(cfg.TALK_SEMANTIC_TRIGGER_MS if semantic
+                            else cfg.TALK_VAD_SILENCE_MS),
                 min_speech_ms=cfg.TALK_VAD_MIN_SPEECH_MS,
             )
 
@@ -515,10 +533,13 @@ class ModeHandler:
                 if pressed is not None:
                     action = pressed
                     break
+                if remote_turns and getattr(stream, "turn_ended", False):
+                    break
                 vad = STATE.vad
                 if vad is not None:
-                    if vad.ended:
-                        break
+                    if vad.ended and not remote_turns:
+                        if ModeHandler._talk_turn_complete(vad, semantic):
+                            break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
                         action = idle_action
                         break
@@ -539,6 +560,39 @@ class ModeHandler:
         else:
             OverlayManager.set_transcribing()
         return audio, action
+
+    @staticmethod
+    def _talk_turn_complete(vad, semantic: bool) -> bool:
+        """
+        Decide whether the pause the VAD just heard really ends the turn.
+
+        Without the semantic model the trigger *is* the decision — plain silence
+        detection, as before. With it, Smart Turn reads the prosody of the last
+        8 seconds and answers "landed" or "still going"; "still going" re-arms
+        the VAD for a longer window, so trailing off buys you more time instead
+        of handing the floor over. The hard cap keeps that bounded: past
+        TALK_TURN_MAX_SILENCE_MS of silence the turn ends regardless, and a
+        model that cannot answer degrades to the plain behaviour.
+        """
+        from loquivox.services.turn_detector import WINDOW_SEC, ready_detector
+
+        if not semantic:
+            return True
+        cfg = config_module.CFG
+        if vad.silent_for * 1000 >= cfg.TALK_TURN_MAX_SILENCE_MS:
+            return True
+        detector = ready_detector()
+        if detector is None:
+            return True
+        audio = AudioService.snapshot_tail(WINDOW_SEC)
+        probability = detector.probability(audio, STATE.capture_rate)
+        if probability is None:
+            return True
+        if probability >= cfg.TALK_TURN_THRESHOLD:
+            return True
+        print(f"🤔 Turn not finished (p={probability:.2f}) — still listening")
+        vad.rearm(cfg.TALK_VAD_SILENCE_MS)
+        return False
 
     @staticmethod
     def _talk_transcribe(audio: Optional[np.ndarray]) -> Optional[str]:

@@ -24,6 +24,11 @@ whispercpp_model = "base"
 #   backend = "deepgram"         + pip install -e '.[deepgram]'  + DEEPGRAM_API_KEY
 #   backend = "openai_realtime"  + pip install -e '.[openai]'    + OPENAI_API_KEY
 deepgram_model = "nova-3"
+# OpenAI Realtime only: how eagerly its own semantic VAD closes a turn in talk
+# mode — "auto" (= medium), "low" (let people take their time), "medium",
+# "high" (chunk as soon as possible). With this backend the server detects
+# turns and the local model isn't used.
+openai_eagerness = "auto"
 openai_model   = "gpt-4o-transcribe"
 
 # Whisper model served by Groq (this app uses the Groq Cloud API, not a local
@@ -100,16 +105,36 @@ tts        = ["F10"]
 # Talk mode (F6): a spoken conversation with the AI that ends in ONE generated
 # text, typed at the cursor and left on the clipboard.
 
-# Turn detection. With vad = true a pause ends your turn on its own (like the
-# Realtime API's server_vad, but computed locally so every backend has it);
-# Space — or the talk key — always ends it immediately.
+# Turn detection, in two layers. The energy VAD hears the pause; the semantic
+# model decides whether that pause actually ends your sentence.
+#
+# vad = false disables both (only Space / the talk key end a turn).
 vad = true
+
+# Semantic turn detection: Smart Turn v3 reads the prosody of your last 8
+# seconds and answers "finished" or "still going", so "euh… donc…" no longer
+# hands the floor to the assistant while a finished sentence is picked up in
+# ~250 ms instead of 900. Needs onnxruntime (pip install -e '.[turn]') and an
+# 8 MB model fetched once into ~/.cache/loquivox; without either, talk mode
+# falls back to the silence window below.
+semantic_turns = true
+# P(finished) at or above this ends the turn. Raise it to trail off longer.
+turn_threshold = 0.5
+# Pause that triggers a semantic check (ms) — the trigger, not the decision.
+semantic_trigger_ms = 250
+# Silence after which the turn ends whatever the model thinks (ms).
+max_silence_ms = 4000
+# Use a local model file instead of downloading one, or pin the download URL.
+# turn_model_path = "~/models/smart-turn-v3.2-cpu.onnx"
+# turn_model_url = ""
 # Activation level (RMS of the captured audio). Raise it in a noisy room, lower
 # it if your turns end while you are still speaking. The detector also
 # calibrates against the room noise on top of this floor.
 vad_threshold = 0.02
-# How long a pause has to last to end a turn, and how much speech there must
-# have been before a pause can end anything (milliseconds).
+# How long a pause has to last to end a turn when NO semantic model is in play
+# (and, when there is one, how long to wait before re-checking a turn it judged
+# unfinished), plus how much speech there must have been before a pause can end
+# anything (milliseconds).
 silence_ms = 900
 min_speech_ms = 300
 # A turn stops after this long no matter what (seconds).

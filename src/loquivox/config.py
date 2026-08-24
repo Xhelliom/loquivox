@@ -164,6 +164,10 @@ class Config:
     WHISPERCPP_MODEL: str = "base"
     # Streaming-backend models (used in the streaming phase).
     OPENAI_MODEL: str = "gpt-4o-transcribe"
+    # How eagerly OpenAI Realtime's own semantic VAD closes a turn — "auto"
+    # (= medium), "low", "medium" or "high". Only used in talk mode, where that
+    # backend detects turns server-side instead of the local model.
+    OPENAI_TURN_EAGERNESS: str = "auto"
     DEEPGRAM_MODEL: str = "nova-3"
 
     # --- Post-processing (dictation text → LLM, opt-in) ---
@@ -247,6 +251,27 @@ class Config:
     TALK_VAD_THRESHOLD: float = 0.02
     TALK_VAD_SILENCE_MS: int = 900
     TALK_VAD_MIN_SPEECH_MS: int = 300
+    # Semantic turn detection (services/turn_detector.py): a pause no longer
+    # ends the turn by itself — Smart Turn v3 reads the prosody of the last 8
+    # seconds and decides whether the sentence has landed. The energy VAD
+    # becomes the trigger, which is why its silence window drops to
+    # TALK_SEMANTIC_TRIGGER_MS while the model is in play: a finished sentence
+    # is cut in ~250 ms instead of 900, and a hesitation isn't cut at all.
+    # Needs onnxruntime (pip install -e '.[turn]'); falls back to the plain
+    # silence VAD when it is missing.
+    TALK_SEMANTIC_TURNS: bool = True
+    # P(turn complete) at or above this ends the turn. Raise it to let yourself
+    # trail off further before the assistant answers.
+    TALK_TURN_THRESHOLD: float = 0.5
+    # Pause that triggers a semantic check (milliseconds).
+    TALK_SEMANTIC_TRIGGER_MS: int = 250
+    # Silence after which the turn ends whatever the model says (milliseconds).
+    TALK_TURN_MAX_SILENCE_MS: int = 4000
+    # Model file: empty = the newest CPU build of pipecat-ai/smart-turn-v3,
+    # downloaded once (~8 MB) to ~/.cache/loquivox. A path here uses a local
+    # copy instead and skips the download entirely.
+    TALK_TURN_MODEL_URL: str = ""
+    TALK_TURN_MODEL_PATH: str = ""
     # A turn stops after this long no matter what (seconds).
     TALK_TURN_TIMEOUT: float = 60.0
     # Silence with nothing said at all for this long ends the conversation and
@@ -467,6 +492,8 @@ def _build_config() -> Config:
         overrides["WHISPERCPP_MODEL"] = str(trans["whispercpp_model"])
     if "openai_model" in trans:
         overrides["OPENAI_MODEL"] = str(trans["openai_model"])
+    if "openai_eagerness" in trans:
+        overrides["OPENAI_TURN_EAGERNESS"] = str(trans["openai_eagerness"]).strip().lower()
     if "deepgram_model" in trans:
         overrides["DEEPGRAM_MODEL"] = str(trans["deepgram_model"])
     if "model" in trans:
@@ -531,6 +558,18 @@ def _build_config() -> Config:
         overrides["TALK_MAX_TURNS"] = int(talk["max_turns"])
     if "review_timeout" in talk:
         overrides["TALK_REVIEW_TIMEOUT"] = float(talk["review_timeout"])
+    if "semantic_turns" in talk:
+        overrides["TALK_SEMANTIC_TURNS"] = bool(talk["semantic_turns"])
+    if "turn_threshold" in talk:
+        overrides["TALK_TURN_THRESHOLD"] = float(talk["turn_threshold"])
+    if "semantic_trigger_ms" in talk:
+        overrides["TALK_SEMANTIC_TRIGGER_MS"] = int(talk["semantic_trigger_ms"])
+    if "max_silence_ms" in talk:
+        overrides["TALK_TURN_MAX_SILENCE_MS"] = int(talk["max_silence_ms"])
+    if "turn_model_url" in talk:
+        overrides["TALK_TURN_MODEL_URL"] = str(talk["turn_model_url"]).strip()
+    if "turn_model_path" in talk:
+        overrides["TALK_TURN_MODEL_PATH"] = str(talk["turn_model_path"]).strip()
     if "speak_replies" in talk:
         overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
     if str(talk.get("system_prompt", "")).strip():

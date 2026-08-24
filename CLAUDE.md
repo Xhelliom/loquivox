@@ -65,7 +65,8 @@ transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
                   groq, whispercpp (local), deepgram, openai_realtime; streaming.py
 services/         audio (record+transcribe), ai (chat+vision), tts (Orpheus),
                   clipboard, image, postprocess (LLM refinement of dictation),
-                  talk (conversation → one text), vad (local end-of-turn detect)
+                  talk (conversation → one text), vad (energy trigger),
+                  turn_detector (Smart Turn v3 semantic end-of-turn)
 managers/         history, chat (overlay state + auto-hide), overlay (recording indicator)
 ui/               recording_overlay, chat_overlay (WebKit2; voice + typed input via
                   JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray,
@@ -92,11 +93,11 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
    next wait starts — but takes the exclusive grab only inside
    `with keys.exclusive():`, around the waits themselves. Never hold a grab
    across a network call: a hung request would freeze the user's keyboard.
-2. Each turn: `_talk_listen` records and ends on the local VAD's silence (or
-   Space / Enter / Esc / timeout), `_talk_transcribe` transcribes (streaming
-   backends included) and applies the hallucination guard, `TalkSession.reply`
-   answers, and the reply is spoken with `wait=True` — blocking is deliberate,
-   the next turn must not record the assistant's own voice.
+2. Each turn: `_talk_listen` records until the turn ends (see below),
+   `_talk_transcribe` transcribes (streaming backends included) and applies the
+   hallucination guard, `TalkSession.reply` answers, and the reply is spoken
+   with `wait=True` — blocking is deliberate, the next turn must not record the
+   assistant's own voice.
 3. `_talk_generate` turns the conversation into one text and shows it in the
    review panel; `_deliver_talk_text` types it (accept only) and leaves it on
    the clipboard.
@@ -105,6 +106,24 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 — a long spoken briefing must not pollute the F4 chat context. `STATE.vad` is the
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
+
+### How a turn ends (three layers, in priority order)
+
+1. **Server-side** — when the streaming session reports `semantic_turns` (only
+   OpenAI Realtime, via `turn_detection: semantic_vad`, and only in talk mode),
+   its `turn_ended` is the authority and the local layers are skipped.
+2. **Semantic** — `services/turn_detector.py` (Smart Turn v3, ONNX via
+   optional `onnxruntime`). The energy VAD is only the *trigger*: on a pause of
+   `TALK_SEMANTIC_TRIGGER_MS`, `_talk_turn_complete` asks the model for
+   P(finished) over `AudioService.snapshot_tail(8s)`. Below the threshold it
+   calls `vad.rearm(TALK_VAD_SILENCE_MS)` and listening continues, bounded by
+   `TALK_TURN_MAX_SILENCE_MS`.
+3. **Silence** — no onnxruntime / no model / `semantic_turns = false`: the
+   `TALK_VAD_SILENCE_MS` pause ends the turn, as it always did.
+
+Every layer degrades to the next one; a missing model is a printed warning, never
+an error. `services/_whisper_features.py` is vendored from Pipecat (BSD-2) — keep
+it in sync with upstream instead of editing it.
 
 ## Threading rules (important)
 

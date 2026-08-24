@@ -125,11 +125,26 @@ assign a key to use it.
 
 Dictation gives you what you said. Talk mode gives you what you *meant*.
 
-Press `F6` and just talk — no key to hold. A local voice-activity detector hears the pause at
-the end of your sentence and closes your turn, the assistant answers out loud (two sentences,
-never more), and you keep going: it asks who the text is for, what tone you want, what must
+Press `F6` and just talk — no key to hold. The assistant answers out loud (two sentences,
+never more) and you keep going: it asks who the text is for, what tone you want, what must
 absolutely be in it. When you're done briefing it, press `Enter` — and the entire conversation
 becomes **one finished text**, ready to paste.
+
+**Turns end on meaning, not on a stopwatch.** A silence timer can't tell *"…and then, uh…"*
+from a finished sentence. So the pause is only a trigger: when Loquivox hears one, a small
+audio model — [Smart Turn v3](https://github.com/pipecat-ai/smart-turn), 8 MB, ~10 ms on CPU,
+23 languages — reads the *prosody* of your last 8 seconds and answers "landed" or "still
+going". Trail off and you keep the floor; land your sentence and the assistant replies in
+~250 ms instead of waiting out a full second of silence. It works on every backend, offline
+included, because it listens to the waveform rather than to a transcript.
+
+```bash
+pip install -e '.[turn]'   # onnxruntime; the model is fetched on first use
+```
+
+No onnxruntime, no network on first run, `semantic_turns = false`? Talk mode falls back to
+plain silence detection — nothing breaks. And with the `openai_realtime` backend, OpenAI's own
+`semantic_vad` does the job server-side instead.
 
 | Key | While talking | On the generated text |
 |:---:|:---|:---|
@@ -280,7 +295,7 @@ src/loquivox/
 ├── state.py          # AppState + SettingsManager (runtime state & user prefs)
 ├── platform/         # X11 vs Wayland backends behind ABCs (clipboard, typing, screenshot)
 ├── transcription/    # Pluggable STT: factory, dispatcher, groq / whispercpp / streaming
-├── services/         # audio, ai (chat+vision), tts, clipboard, image, postprocess, talk, vad
+├── services/         # audio, ai, tts, clipboard, image, postprocess, talk, vad, turn_detector
 ├── managers/         # history, chat overlay state, recording overlay
 ├── ui/               # recording overlay, WebKit2 chat overlay, settings, tray, hotkey bar
 └── handlers/         # mode.py (route a transcript), keyboard.py (evdev listener)

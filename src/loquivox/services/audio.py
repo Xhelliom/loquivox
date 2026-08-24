@@ -96,8 +96,15 @@ class AudioService:
             pass
 
     @staticmethod
-    def start_recording() -> None:
-        """Start audio recording stream (and a live session if the backend streams)."""
+    def start_recording(*, semantic_turns: bool = False) -> None:
+        """
+        Start audio recording stream (and a live session if the backend streams).
+
+        ``semantic_turns`` asks a streaming backend to detect turn boundaries
+        itself (OpenAI Realtime's semantic VAD) instead of transcribing one
+        push-to-talk segment — talk mode only; every other mode wants the
+        recording to end exactly when the key is released.
+        """
         STATE.audio_buffer = []
         STATE.stream_session = None
         STATE.paused = False
@@ -124,7 +131,9 @@ class AudioService:
         # Open the live session AFTER recording is armed so early audio is
         # buffered (and replayable via fallback) even if the session is slow.
         if streaming_backend is not None:
-            session = dispatcher.start_stream(rate, AudioService._on_partial)
+            session = dispatcher.start_stream(
+                rate, AudioService._on_partial, semantic_turns=semantic_turns
+            )
             STATE.stream_session = session  # None → silently uses batch fallback
 
     @staticmethod
@@ -140,6 +149,31 @@ class AudioService:
         if STATE.audio_buffer:
             return np.concatenate(STATE.audio_buffer, axis=0)
         return None
+
+    @staticmethod
+    def snapshot_tail(seconds: float) -> Optional[np.ndarray]:
+        """
+        The last ``seconds`` of the recording in progress, float32 mono at
+        ``STATE.capture_rate`` — what the semantic turn detector reads while
+        the microphone is still open.
+
+        Takes a shallow copy of the chunk list first: the callback thread only
+        ever appends, so a snapshot can miss the newest chunk but never tear.
+        """
+        chunks = list(STATE.audio_buffer)
+        if not chunks:
+            return None
+        needed = max(1, int(seconds * STATE.capture_rate))
+        tail, total = [], 0
+        for chunk in reversed(chunks):
+            tail.append(chunk)
+            total += len(chunk)
+            if total >= needed:
+                break
+        data = np.concatenate(list(reversed(tail)), axis=0)
+        if data.ndim > 1:
+            data = data[:, 0]
+        return data[-needed:] if len(data) > needed else data
 
     @staticmethod
     def _on_partial(text: str) -> None:
