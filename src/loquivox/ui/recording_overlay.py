@@ -213,6 +213,30 @@ class GtkOverlay(Gtk.Window):
         self.add(self.drawing_area)
         self.timeout_id = GLib.timeout_add(self.FRAME_MS, self._animate)
 
+    def reset(self, hints=None) -> None:
+        """
+        Put a live overlay back to its recording state without rebuilding it.
+
+        A talk session asks for this overlay once per turn and again after a
+        review. Destroying and recreating it costs ~50 ms, fades the outgoing
+        window out underneath the incoming one, and throws away a window that
+        was perfectly good. Everything cleared here is what a fresh ``__init__``
+        would have set.
+        """
+        self._hints = hints
+        self.transcribing = False
+        self.paused = False
+        self.live_text = ""
+        self.status_text = ""
+        self.choosing = False
+        self.ai_panel = False
+        self.ai_instruction = ""
+        self.ai_result = ""
+        self._closing = False          # cancels a fade-out already under way
+        self._base_w = self.width(self.refine_badge, self._hints)
+        self._resize(self._base_w, self._base_h)
+        self.drawing_area.queue_draw()
+
     def set_status(self, text: str) -> None:
         """Show a free-form state label (talk mode's thinking / speaking beats)."""
         self.status_text = text or ""

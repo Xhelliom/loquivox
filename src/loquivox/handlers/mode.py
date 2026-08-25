@@ -437,6 +437,11 @@ class ModeHandler:
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        # Up front, before anything that can block. Opening the keyboards takes
+        # ~450 ms and the conversation engine up to a second more; the user
+        # pressed a key and needs to see that it registered, not to wonder.
+        from loquivox.handlers.keyboard import KeyboardHandler
+        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
         # Sequenced, not simultaneous. Building either window blocks the GTK
         # loop for ~100ms and both then fade in, so opening them together is
         # what makes F6 feel sluggish. The recording overlay is the one that
@@ -580,9 +585,11 @@ class ModeHandler:
         cfg = config_module.CFG
         STATE.current_mode = "talk"
         OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
+        OverlayManager.set_status("Connecting…")
         talk = RealtimeTalk(session)
         try:
             talk.start()
+            OverlayManager.set_status("")
         except Exception as e:
             print(f"⚠️  Realtime talk unavailable ({e}) — using the cascade")
             return ModeHandler._talk_converse(session, keys)
@@ -732,9 +739,11 @@ class ModeHandler:
                 vad.prime(len(prefix) / rate)
             return vad
 
+        OverlayManager.set_status("Connecting…")
         AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS,
                                      prefix=prefix,
                                      detector=build_vad if cfg.TALK_VAD else None)
+        OverlayManager.set_status("")
         # A streaming backend may detect turns server-side (OpenAI Realtime's
         # semantic_vad). When it does, it is the authority and neither the local
         # model nor the silence window gets a vote.

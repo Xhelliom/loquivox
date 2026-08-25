@@ -194,6 +194,14 @@ panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
 recording overlay while reviewing: its hint strip names the conversation's
 keys, which are not the ones that apply then.
 
+`_handle_talk` shows the recording overlay before anything that can block —
+`GrabbedKeys()` spends ~300–450 ms opening the input devices and the
+conversation engine up to a second more, and a key press has to register on
+screen before either. `OverlayManager._show_impl` reuses a same-mode window
+through `GtkOverlay.reset()` rather than rebuilding it, which is what makes
+that possible without the overlay cross-fading with itself — and which also
+stops talk mode rebuilding it once per turn.
+
 Opening it is sequenced, not simultaneous: `_handle_talk` defers
 `ChatManager.set_talk(True)` by `TALK_BUBBLE_DELAY_MS` so the recording overlay
 — the one that has to appear the instant the key is pressed — gets the main
