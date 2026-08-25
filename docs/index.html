@@ -443,6 +443,11 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
         <p>Take a screenshot and ask about it. Llama 4 vision explains errors, summarizes pages, or reads what's on screen.</p>
       </div>
       <div class="card reveal">
+        <div class="icon">🗣️</div>
+        <h3>Talk mode<span class="key">F6</span></h3>
+        <p>Talk it through first — turns end on meaning, not on a timer: a small on-device model reads your prosody and lets you hesitate. Then one key, and the whole conversation becomes a finished text, typed and copied.</p>
+      </div>
+      <div class="card reveal">
         <div class="icon">🪄</div>
         <h3>Refinement levels</h3>
         <p>Raw transcript, grammar correction, full reformulation or translation — pick a post-processing level on the fly, per dictation.</p>
@@ -543,7 +548,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
         <div class="kkey mapped" data-key="F3">F3</div>
         <div class="kkey mapped" data-key="F4">F4</div>
         <div class="kkey">F5</div>
-        <div class="kkey">F6</div>
+        <div class="kkey mapped" data-key="F6">F6</div>
         <div class="kkey mapped" data-key="F7">F7</div>
         <div class="kkey mapped" data-key="F8">F8</div>
         <div class="kkey mapped" data-key="F9">F9</div>
@@ -737,6 +742,7 @@ document.querySelector('.pipe-levels').addEventListener('click', () => { userTou
 const ACTIONS = {
   F3:  { icon: '🎙️', title: 'Dictate',  desc: 'Hold the floor. Your speech lands as text at the cursor, in whatever app has focus.' },
   F4:  { icon: '💬', title: 'Chat',     desc: 'Summon the AI overlay, ask anything, get back to work. It politely hides when ignored.' },
+  F6:  { icon: '🗣️', title: 'Talk',     desc: 'Converse with the AI about what you need — no key to hold — then turn the whole conversation into one finished text.' },
   F7:  { icon: '✍️', title: 'Rewrite',  desc: 'Select text anywhere, press F7, and say how it should change. "Make it sound less grumpy."' },
   F8:  { icon: '👁️', title: 'Vision',   desc: 'Screenshot + question in one move. Great for cryptic error dialogs and other people\'s code.' },
   F9:  { icon: '📌', title: 'Pin',      desc: 'Nail the chat overlay on top of everything. Unpin when you need your screen back.' },

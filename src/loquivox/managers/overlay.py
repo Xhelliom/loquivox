@@ -18,20 +18,32 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
-    def show(mode: str) -> None:
-        """Show overlay for given mode."""
-        OverlayManager._show_impl(mode)
+    def show(mode: str, hints=None) -> None:
+        """
+        Show the overlay for ``mode``.
+
+        ``hints`` overrides the hotkey strip with a fixed list — for a caller
+        that has grabbed the keyboard, whose keys are not the global bindings.
+        """
+        OverlayManager._show_impl(mode, hints)
 
     @staticmethod
-    def _show_impl(mode: str) -> None:
+    def _show_impl(mode: str, hints=None) -> None:
         # Late import to avoid circular dependency
         from loquivox.ui.recording_overlay import GtkOverlay
-        if STATE.overlay_window:
+        existing = STATE.overlay_window
+        if existing is not None:
+            # Same mode → the window we already have IS the one being asked
+            # for. Talk mode asks once per turn; rebuilding would cost 50 ms
+            # and cross-fade the overlay with itself.
+            if getattr(existing, "mode", None) == mode:
+                existing.reset(hints)
+                return
             try:
-                STATE.overlay_window.close()
+                existing.close()
             except Exception:
                 pass
-        STATE.overlay_window = GtkOverlay(mode)
+        STATE.overlay_window = GtkOverlay(mode, hints)
 
     @staticmethod
     @run_on_main_thread
@@ -50,6 +62,16 @@ class OverlayManager:
         if STATE.overlay_window:
             try:
                 STATE.overlay_window.set_paused(paused)
+            except Exception:
+                pass
+
+    @staticmethod
+    @run_on_main_thread
+    def set_status(text: str) -> None:
+        """Show a free-form state label on the overlay (talk mode's beats)."""
+        if STATE.overlay_window:
+            try:
+                STATE.overlay_window.set_status(text)
             except Exception:
                 pass
 

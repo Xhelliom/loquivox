@@ -24,6 +24,11 @@ whispercpp_model = "base"
 #   backend = "deepgram"         + pip install -e '.[deepgram]'  + DEEPGRAM_API_KEY
 #   backend = "openai_realtime"  + pip install -e '.[openai]'    + OPENAI_API_KEY
 deepgram_model = "nova-3"
+# OpenAI Realtime only: how eagerly its own semantic VAD closes a turn in talk
+# mode — "auto" (= medium), "low" (let people take their time), "medium",
+# "high" (chunk as soon as possible). With this backend the server detects
+# turns and the local model isn't used.
+openai_eagerness = "auto"
 openai_model   = "gpt-4o-transcribe"
 
 # Whisper model served by Groq (this app uses the Groq Cloud API, not a local
@@ -71,9 +76,18 @@ target_language = "en"
 format = false
 
 [models]
-# Groq chat / vision / TTS model ids.
-chat = "llama-3.3-70b-versatile"
-vision = "meta-llama/llama-4-scout-17b-16e-instruct"
+# Chat / vision provider: "groq" (default) or "openai" — both speak the same
+# chat-completions API, and each uses its own key. Pick it, and the two model
+# ids, in Settings → Models (stored in settings.json); these are only defaults.
+provider = "groq"
+# Groq chat / vision model ids, and the default TTS engine.
+# TTS is picked in Settings → Models (stored in settings.json); this is only the
+# default. "canopylabs/orpheus-v1-english" speaks English via Groq (accept its
+# terms on console.groq.com first), "gpt-4o-mini-tts" is multilingual and speaks
+# French via OPENAI_API_KEY, and "piper" runs locally with no key at all
+# (pip install -e '.[tts]'; the voice is fetched once, ~60 MB).
+chat = "openai/gpt-oss-120b"
+vision = "qwen/qwen3.6-27b"
 tts = "canopylabs/orpheus-v1-english"
 
 [clipboard]
@@ -92,10 +106,153 @@ dictation  = ["RIGHTALT", "F3", "F13"]
 ai         = ["F4", "F14"]
 ai_rewrite = ["F7"]
 vision     = ["F8"]
+talk       = ["F6"]
 pin        = ["F9"]
 tts        = ["F10"]
+
+[talk]
+# Talk mode (F6): a spoken conversation with the AI that ends in ONE generated
+# text, typed at the cursor and left on the clipboard.
+
+# Turn detection, in two layers. The energy VAD hears the pause; the semantic
+# model decides whether that pause actually ends your sentence.
+#
+# vad = false disables both, leaving only Space / the talk key to end a turn —
+# and with no detector there is no idle timeout either, so a session you walk
+# away from waits out turn_timeout instead.
+vad = true
+
+# Semantic turn detection: Smart Turn v3 reads the prosody of your last 8
+# seconds and answers "finished" or "still going", so "euh… donc…" no longer
+# hands the floor to the assistant while a finished sentence is picked up in
+# ~250 ms instead of 900. Needs onnxruntime (pip install -e '.[turn]') and an
+# 8 MB model fetched once into ~/.cache/loquivox; without either, talk mode
+# falls back to the silence window below.
+semantic_turns = true
+# P(finished) at or above this ends the turn. Raise it to trail off longer.
+turn_threshold = 0.5
+# Pause that triggers a semantic check (ms) — the trigger, not the decision.
+semantic_trigger_ms = 250
+# Silence after which the turn ends whatever the model thinks (ms).
+max_silence_ms = 4000
+# The model: empty downloads the newest CPU build once into ~/.cache/loquivox
+# and reuses it from there. A path uses that file and never downloads; an
+# http(s) URL pins which build to fetch.
+# turn_model = "~/models/smart-turn-v3.2-cpu.onnx"
+# Activation level (RMS of the captured audio). Raise it in a noisy room, lower
+# it if your turns end while you are still speaking. The detector also
+# calibrates against the room noise on top of this floor.
+vad_threshold = 0.02
+# How long a pause has to last to end a turn when NO semantic model is in play
+# (and, when there is one, how long to wait before re-checking a turn it judged
+# unfinished), plus how much speech there must have been before a pause can end
+# anything (milliseconds).
+silence_ms = 900
+min_speech_ms = 300
+# A turn stops after this long no matter what (seconds).
+turn_timeout = 60.0
+# Nothing said at all for this long ends the conversation and writes the text.
+idle_timeout = 15.0
+# Hard stop on the conversation length (your turns).
+max_turns = 30
+
+# How much the assistant digs before writing:
+#   "minimal" — asks only when something is genuinely unclear
+#   "normal"  — asks about what would change the text (default)
+#   "deep"    — pushes the reasoning: assumptions, objections, missing examples
+depth = "normal"
+
+# Who may end the briefing. Enter always can and is not a toggle — there is
+# always a way out that depends on nothing. These two are independent extras:
+# turn both off to keep the ending entirely under your control.
+finish_on_phrase = true    # you saying so out loud ends it
+finish_by_model = false    # the assistant ends it once it has enough context
+# Short spoken phrases that end the briefing on the spot, before the model is
+# even called. Matched accent- and punctuation-insensitively, and only on an
+# utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
+# stays part of the brief. Ignored when finish_on_phrase = false.
+# finish_phrases = ["j'ai fini", "vas-y", "that's it"]
+# How long the generated text waits for a verdict before being left on the
+# clipboard (seconds). It is never typed without an explicit Enter.
+review_timeout = 120.0
+# Standing instructions for the conversation: the language to speak, the
+# persona, the tone, the kind of work you usually discuss. ADDED to the
+# built-in prompt, never replacing it, so talk mode keeps asking one question
+# at a time and keeps knowing when to stop. Both engines read it. Editable in
+# Settings → Talk. Use system_prompt below instead to replace the base outright.
+# instructions = """
+# Tu réponds toujours en français, simplement et sans formalisme.
+# Le contexte est technique : sois précis, et demande une précision plutôt que
+# de deviner. Les seuls mots anglais sont les termes techniques.
+# """
+
+# How the conversation is held:
+#   "cascade"  — transcribe → answer → speak. Four swappable slots (any of them
+#                local), the local turn detector, ~1.8s before you hear a reply.
+#   "realtime" — one OpenAI Realtime session, speech in and speech out: the
+#                server owns turn-taking and interruptions, ~1.0s, and the reply
+#                keeps the prosody of speech. The [models] chat model no longer
+#                answers in talk mode (it still writes the final text).
+engine = "cascade"
+# Only read when engine = "realtime".
+realtime_model = "gpt-realtime-2.1"
+realtime_voice = "marin"
+realtime_transcribe = "gpt-4o-mini-transcribe"
+
+# Read the assistant's spoken replies aloud even when TTS is toggled off.
+speak_replies = true
+
+# Paste the finished text as soon as it is written, where the cursor was when
+# the conversation ended — no review, so no rewrite and no going back to the
+# conversation. This is the one setting that gives up talk mode's "nothing is
+# typed without an explicit Enter", which is why it is off by default.
+auto_paste = false
+
+# Barge-in: speaking over a reply cuts it off and starts your next turn, the
+# way it works with a person. The detector arms on the first sample that
+# actually reaches the speakers, so it calibrates on the reply's own echo and
+# sits above it — on a headset there is nothing to calibrate against and it
+# stays at [talk] threshold. With speakers, no echo cancellation and the volume
+# up, a reply can still cut itself off: use a headset, or PipeWire's
+# libpipewire-module-echo-cancel in monitor mode.
+barge_in = true
+# Speech needed before a reply is cut off (ms) — long enough that a cough or a
+# key click is not an interruption. Raise it if the assistant is too jumpy.
+barge_in_ms = 400
+# How much of what was heard is kept as the start of the next turn (seconds):
+# the words spoken over the reply must not be lost.
+barge_in_keep = 1.5
+
+# Screen context: a screenshot taken when the session starts, described once by
+# the vision model and handed to the conversation. Most of what you are about
+# to dictate is already in front of you — the error, the thread you're replying
+# to — and you won't spell it out. The capture runs in parallel with your first
+# sentence, so it costs no startup delay.
+# OFF by default: it sends your screen to the cloud.
+screenshot = false
+# "screen" = the whole screen; "cursor" = a box around the pointer, which
+# focuses the model on what you're actually working on. The pointer can only be
+# located under X11 and Hyprland — anywhere else this falls back to the whole
+# screen (Wayland has no protocol for it).
+screenshot_region = "screen"
+# Width of that box in pixels; its height follows the screen's aspect ratio.
+screenshot_cursor_px = 1200
+# Longest edge of the uploaded image — this is what keeps a 4K capture small
+# (3840 → 1280 is roughly ten times less to upload). 0 sends it as captured.
+screenshot_max_px = 1280
+# What the vision model is asked to report about it. Empty = the built-in prompt.
+# screen_prompt = ""
+# Override the two prompts: the conversation phase (understand, don't write)
+# and the generation phase (write the final text). Empty = keep the built-ins.
+# system_prompt = ""
+# generate_prompt = ""
 
 [overlay]
 # Recording overlay size in pixels.
 width = 220
 height = 60
+# Seconds an AI answer stays on screen before the chat overlay fades out. It
+# never fades while the overlay is pinned (F9), while you are typing in it, or
+# during a talk session — a generated text starts its countdown once it is
+# actually shown. Raise it if answers vanish before you have read them.
+chat_auto_hide = 3

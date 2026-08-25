@@ -186,7 +186,11 @@ class DeepgramBackend(TranscriptionBackend):
         return DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
 
     def start_stream(self, sample_rate: int, language: str,
-                     on_partial: PartialCallback) -> StreamingSession:
+                     on_partial: PartialCallback,
+                     *, semantic_turns: bool = False) -> StreamingSession:
+        # Deepgram segments on its own endpointing rather than a semantic model,
+        # so the flag is accepted and ignored: talk mode falls back to the local
+        # detector (session.semantic_turns stays False).
         return DeepgramSession(self._client(), self._model, language, sample_rate,
                                on_partial, self._keyterms)
 

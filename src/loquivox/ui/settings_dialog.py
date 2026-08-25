@@ -8,7 +8,7 @@ from typing import Optional
 
 import cairo
 
-from loquivox.config import CFG
+from loquivox import config as config_module
 from loquivox.state import STATE, SettingsManager
 
 import gi
@@ -46,7 +46,10 @@ class SettingsDialog:
         "whispercpp":      ["base", "tiny", "small", "medium", "large-v3",
                             "large-v3-turbo", "base.en", "tiny.en", "small.en"],
         "deepgram":        ["nova-3", "nova-2"],
-        "openai_realtime": ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"],
+        # gpt-live-transcribe is first: it is the only OpenAI model that emits
+        # the transcript *while* you speak (the 4o ones wait for the commit).
+        "openai_realtime": ["gpt-live-transcribe", "gpt-realtime-whisper",
+                            "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"],
     }
     # Provider model-list links shown as a hint per backend.
     _MODEL_DOCS = {
@@ -88,6 +91,32 @@ class SettingsDialog:
     _vocab_entry: Optional[Gtk.Entry] = None
     _fallback_check: Optional[Gtk.CheckButton] = None
     _trans_status: Optional[Gtk.Label] = None
+    _voice_combo: Optional[Gtk.ComboBoxText] = None
+
+    # Models tab
+    _chat_model: Optional[Gtk.ComboBoxText] = None
+    _vision_model: Optional[Gtk.ComboBoxText] = None
+    _models_status: Optional[Gtk.Label] = None
+    _preset_status: Optional[Gtk.Label] = None
+    _engine_combo: Optional[Gtk.ComboBoxText] = None
+    _realtime_model: Optional[Gtk.Entry] = None
+    _realtime_voice: Optional[Gtk.ComboBoxText] = None
+    _tts_engine_combo: Optional[Gtk.ComboBoxText] = None
+    _realtime_test: Optional[Gtk.Button] = None
+
+    # Talk mode
+    _talk_phrase_check: Optional[Gtk.CheckButton] = None
+    _talk_model_check: Optional[Gtk.CheckButton] = None
+    _talk_depth: Optional[Gtk.ComboBoxText] = None
+    _talk_semantic_check: Optional[Gtk.CheckButton] = None
+    _talk_speak_check: Optional[Gtk.CheckButton] = None
+    _talk_instructions: Optional[Gtk.TextView] = None
+    _talk_autopaste_check: Optional[Gtk.CheckButton] = None
+    _talk_shot_check: Optional[Gtk.CheckButton] = None
+    _talk_shot_region: Optional[Gtk.ComboBoxText] = None
+    _talk_shot_cursor: Optional[Gtk.SpinButton] = None
+    _talk_shot_max: Optional[Gtk.SpinButton] = None
+    _talk_status: Optional[Gtk.Label] = None
 
     @classmethod
     def show(cls) -> None:
@@ -116,14 +145,21 @@ class SettingsDialog:
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
 
-        trans = cls._page()
-        cls._build_transcription_section(trans)
-        cls._build_postprocess_section(trans)
-        notebook.append_page(cls._scroll(trans), Gtk.Label(label="Transcription"))
+        models = cls._page()
+        cls._build_models_section(models)
+        notebook.append_page(cls._scroll(models), Gtk.Label(label="Models"))
+
+        refine = cls._page()
+        cls._build_postprocess_section(refine)
+        notebook.append_page(cls._scroll(refine), Gtk.Label(label="Refinement"))
 
         keys = cls._page()
         cls._build_api_keys_section(keys)
         notebook.append_page(cls._scroll(keys), Gtk.Label(label="API Keys"))
+
+        talk = cls._page()
+        cls._build_talk_section(talk)
+        notebook.append_page(cls._scroll(talk), Gtk.Label(label="Talk"))
 
         hotkeys = cls._page()
         cls._build_hotkeys_section(hotkeys)
@@ -181,23 +217,428 @@ class SettingsDialog:
         return sw
 
     # -----------------------------------------------------------------
+    # Models tab: which provider answers, and with which models
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_models_section(cls, vbox: Gtk.Box) -> None:
+        """
+        Everything that decides *who* does the work: a preset, the talk-mode
+        engine, the chat/vision provider, and the voice.
+
+        Four slots — transcription, turn detection, LLM, voice — each of which
+        can run here or in the cloud. Spelling that out as four menus reads
+        like a kernel config, so the presets fill them in one click and the
+        sections below stay for whoever wants to disagree.
+        """
+        cls._build_presets(vbox)
+        cls._build_engine_section(vbox)
+        cls._build_transcription_section(vbox)   # slot 1 — the ears
+        cls._build_chat_section(vbox)            # slot 2 — the brain
+        cls._build_voice_section(vbox)           # slot 3 — the mouth
+
+    @classmethod
+    def _build_chat_section(cls, vbox: Gtk.Box) -> None:
+        """Provider + chat/vision models, listed live from the provider's API."""
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Chat &amp; vision</b>")
+        vbox.pack_start(header, False, False, 0)
+
+        note = Gtk.Label()
+        note.set_halign(Gtk.Align.START)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small><i>Who answers F4, the rewrite, vision and talk mode — and "
+            "who writes the final text, whichever conversation engine is in "
+            "use. The model lists come from the provider itself, so a model "
+            "your account no longer has simply stops being offered.</i></small>")
+        vbox.pack_start(note, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Provider:"), False, False, 0)
+        provider = Gtk.ComboBoxText()
+        for pid in config_module.CFG.AI_PROVIDERS:
+            provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid.title()))
+        provider.set_active_id(STATE.ai_provider if STATE.ai_provider in config_module.CFG.AI_PROVIDERS
+                               else config_module.CFG.AI_PROVIDERS[0])
+        row.pack_start(provider, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        for label, attr in (("Chat model:", "_chat_model"), ("Vision model:", "_vision_model")):
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.pack_start(cls._row_label(label), False, False, 0)
+            combo = Gtk.ComboBoxText.new_with_entry()   # editable: a new model id still works
+            setattr(cls, attr, combo)
+            row.pack_start(combo, True, True, 0)
+            vbox.pack_start(row, False, False, 0)
+
+        cls._models_status = Gtk.Label()
+        cls._models_status.set_halign(Gtk.Align.START)
+        cls._models_status.set_line_wrap(True)
+        vbox.pack_start(cls._models_status, False, False, 6)
+
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.connect("clicked", cls._on_apply_models)
+        vbox.pack_start(apply_btn, False, False, 0)
+
+        cls._load_models_async()
+        provider.connect("changed", cls._on_provider_changed)
+
+    # -----------------------------------------------------------------
+    # Presets: the four slots, filled in one click
+    # -----------------------------------------------------------------
+    #: label → (description, {section: {key: value}}, {STATE attr: value})
+    PRESETS: tuple = (
+        ("Fast", "Cloud cascade — live transcription, Groq answers, cloud voice. "
+                 "The default, ~1.8s before you hear a reply.",
+         {"talk": {"engine": "cascade"}, "transcription": {"backend": "openai_realtime"}},
+         {"tts_model": "gpt-4o-mini-tts", "tts_voice": "marin"}),
+        ("Natural", "Speech to speech — one OpenAI Realtime session holds the "
+                    "conversation, ~1.0s and it keeps the prosody. Costs more, "
+                    "and the chat model below no longer answers in talk mode.",
+         {"talk": {"engine": "realtime"}}, {}),
+        ("Private", "Local voice and offline transcription — nothing but the "
+                    "answer itself leaves the machine. Needs piper-tts and the "
+                    "whisper.cpp binary; anything missing falls back to cloud.",
+         {"talk": {"engine": "cascade"}, "transcription": {"backend": "whispercpp"}},
+         {"tts_model": "piper", "tts_voice": "fr_FR-siwis-medium"}),
+    )
+
+    @classmethod
+    def _build_presets(cls, vbox: Gtk.Box) -> None:
+        """One row of buttons that fill every slot at once."""
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Presets</b>")
+        vbox.pack_start(header, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for name, tooltip, sections, state in cls.PRESETS:
+            button = Gtk.Button(label=name)
+            button.set_tooltip_text(tooltip)
+            button.connect("clicked", cls._on_preset, name, sections, state)
+            row.pack_start(button, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        cls._preset_status = Gtk.Label()
+        cls._preset_status.set_halign(Gtk.Align.START)
+        cls._preset_status.set_line_wrap(True)
+        cls._preset_status.set_markup(
+            "<small><i>Hover a preset to see what it picks. Everything below "
+            "stays editable afterwards.</i></small>")
+        vbox.pack_start(cls._preset_status, False, False, 6)
+
+    @classmethod
+    def _on_preset(cls, _btn: Gtk.Button, name: str, sections: dict, state: dict) -> None:
+        """Apply a preset: config.toml for the engines, settings.json for the voice."""
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        try:
+            for section, values in sections.items():
+                update_section(section, values)
+        except ConfigWriteError as e:
+            cls._preset_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        for attr, value in state.items():
+            setattr(STATE, attr, value)
+        if state:
+            SettingsManager.save(STATE)
+        config_module.reload_config()
+        cls._refresh_engine_widgets()
+        picked = ", ".join(f"{k}={v}" for values in sections.values()
+                           for k, v in values.items())
+        print(f"🎛️  Preset {name}: {picked} {state}")
+        cls._preset_status.set_markup(
+            f"<small>✓ {GLib.markup_escape_text(name)} applied — takes effect on "
+            "the next talk session.</small>")
+
+    # -----------------------------------------------------------------
+    # Conversation engine (talk mode): cascade or native speech-to-speech
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_engine_section(cls, vbox: Gtk.Box) -> None:
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Conversation engine</b>")
+        vbox.pack_start(header, False, False, 10)
+
+        note = Gtk.Label()
+        note.set_halign(Gtk.Align.START)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small><i>How talk mode holds the conversation. The cascade chains "
+            "transcription, the chat model and the voice below — each swappable, "
+            "local or cloud. Realtime hands the whole conversation to one model "
+            "that hears and answers directly: faster and more natural, but the "
+            "chat model no longer answers. The text it writes at the end is a "
+            "plain completion either way.</i></small>")
+        vbox.pack_start(note, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Engine:"), False, False, 0)
+        cls._engine_combo = Gtk.ComboBoxText()
+        for eid in config_module.CFG.TALK_ENGINES:
+            cls._engine_combo.append(eid, {
+                "cascade": "Cascade — transcribe, answer, speak",
+                "realtime": "Realtime — speech to speech (OpenAI)",
+            }.get(eid, eid.title()))
+        cls._engine_combo.set_active_id(
+            config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
+        row.pack_start(cls._engine_combo, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Realtime model:"), False, False, 0)
+        cls._realtime_model = Gtk.Entry()   # ids change often — free text
+        cls._realtime_model.set_text(config_module.CFG.TALK_REALTIME_MODEL)
+        row.pack_start(cls._realtime_model, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Its voice:"), False, False, 0)
+        # A closed list, not free text: the API rejects an unknown voice, and
+        # it does so only once the session is already opening.
+        cls._realtime_voice = Gtk.ComboBoxText()
+        for vid in config_module.CFG.TALK_REALTIME_VOICES:
+            cls._realtime_voice.append(vid, vid.title())
+        cls._realtime_voice.set_active_id(
+            config_module.CFG.TALK_REALTIME_VOICE if config_module.CFG.TALK_REALTIME_VOICE
+            in config_module.CFG.TALK_REALTIME_VOICES else config_module.CFG.TALK_REALTIME_VOICES[0])
+        row.pack_start(cls._realtime_voice, True, True, 0)
+        cls._realtime_test = Gtk.Button(label="▶ Test")
+        cls._realtime_test.set_tooltip_text(
+            "Preview this voice (same voice, spoken by the TTS model)")
+        cls._realtime_test.connect("clicked", cls._on_test_realtime_voice)
+        row.pack_start(cls._realtime_test, False, False, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        # The two fields above only mean anything in realtime mode — greying
+        # them out is the shortest answer to "why are there two voices here".
+        cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
+        cls._on_talk_engine_changed(cls._engine_combo)
+
+        apply_btn = Gtk.Button(label="Apply engine")
+        apply_btn.connect("clicked", cls._on_apply_engine)
+        vbox.pack_start(apply_btn, False, False, 0)
+
+    @classmethod
+    def _on_talk_engine_changed(cls, combo: Gtk.ComboBoxText) -> None:
+        """Only the realtime engine has a model and a voice of its own."""
+        realtime = (combo.get_active_id() or "cascade") == "realtime"
+        for widget in (cls._realtime_model, cls._realtime_voice, cls._realtime_test):
+            if widget is not None:
+                widget.set_sensitive(realtime)
+
+    #: a line to try a voice on, per transcription language
+    _SAMPLES = {
+        "fr": "Bonjour. Voici à quoi je ressemble — est-ce que cette voix vous convient ?",
+        "es": "Hola. Así es como sueno. ¿Le conviene esta voz?",
+        "de": "Guten Tag. So klinge ich. Passt Ihnen diese Stimme?",
+        "": "Hello. This is what I sound like — does this voice work for you?",
+    }
+
+    @classmethod
+    def _sample_line(cls) -> str:
+        """The test line, in whatever language is being transcribed."""
+
+        lang = (config_module.CFG.WHISPER_LANGUAGE or "").strip().lower()[:2]
+        return cls._SAMPLES.get(lang, cls._SAMPLES[""])
+
+    @classmethod
+    def _on_test_voice(cls, _btn: Gtk.Button) -> None:
+        """Speak a line with whatever the combos show, saving nothing."""
+        from loquivox.services.tts import TTSService
+
+        model = cls._tts_engine_combo.get_active_id() if cls._tts_engine_combo else ""
+        voice = cls._voice_combo.get_active_id() if cls._voice_combo else ""
+        TTSService.preview(cls._sample_line(), model=model, voice=voice)
+
+    @classmethod
+    def _on_test_realtime_voice(cls, _btn: Gtk.Button) -> None:
+        """
+        Preview the Realtime voice through the TTS model.
+
+        Same voice names and the same timbre, a different model — opening a
+        Realtime session to hear what "cedar" sounds like would cost a call and
+        several seconds for one word.
+        """
+        from loquivox.services.tts import TTSService
+
+        voice = cls._realtime_voice.get_active_id() if cls._realtime_voice else ""
+        TTSService.preview(cls._sample_line(), model="gpt-4o-mini-tts", voice=voice)
+
+    @classmethod
+    def _on_apply_engine(cls, _btn: Gtk.Button) -> None:
+        """Write [talk] engine/model/voice and reload — talk mode reads CFG live."""
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        engine = cls._engine_combo.get_active_id() or "cascade"
+        try:
+            update_section("talk", {
+                "engine": engine,
+                "realtime_model": cls._realtime_model.get_text().strip(),
+                "realtime_voice": cls._realtime_voice.get_active_id() or "marin",
+            })
+        except ConfigWriteError as e:
+            cls._preset_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        config_module.reload_config()
+        print(f"🗣️  Talk engine: {engine}")
+        cls._preset_status.set_markup(
+            f"<small>✓ Engine set to {engine} — takes effect on the next talk "
+            "session.</small>")
+
+    @classmethod
+    def _refresh_engine_widgets(cls) -> None:
+        """
+        Put every widget back in step with CFG/STATE after a preset.
+
+        A preset writes the same keys these combos edit; leaving them showing
+        the old value would make the tab lie about what the app is doing.
+
+        Read through ``config_module`` — as every reader in this file does
+        of this file: ``reload_config()`` rebinds the singleton, so the imported
+        name still points at the config as it was before the preset.
+        """
+
+        live = config_module.CFG
+        if cls._engine_combo is not None:
+            cls._engine_combo.set_active_id(live.TALK_ENGINE)
+        if cls._tts_engine_combo is not None:
+            cls._tts_engine_combo.set_active_id(
+                STATE.tts_model if STATE.tts_model in live.TTS_ENGINES
+                else next(iter(live.TTS_ENGINES)))
+        # The preset already wrote STATE.tts_model, so the combo's own handler
+        # sees nothing to change and returns before refilling the voices.
+        cls._fill_voices()
+        if cls._backend_combo is not None:
+            current = live.BACKEND.strip().lower()
+            for i, (bid, *_rest) in enumerate(cls._BACKENDS):
+                if bid == current:
+                    cls._backend_combo.set_active(i)
+                    break
+
+    # -----------------------------------------------------------------
+    # Voice (TTS): which engine speaks, and with which voice
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_voice_section(cls, vbox: Gtk.Box) -> None:
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup("<b>Voice</b> <small>(text-to-speech)</small>")
+        vbox.pack_start(header, False, False, 10)
+
+        note = Gtk.Label()
+        note.set_halign(Gtk.Align.START)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small><i>Reads every AI answer aloud — F4, the rewrite, vision, "
+            "and talk mode when the engine is Cascade. Not the same voice as "
+            "the Realtime one above: that one is the model speaking for itself "
+            "and only exists in Realtime mode, this one is a separate engine "
+            "that speaks written text, so it works everywhere and can be "
+            "local. Piper needs no key and no network, its voice is downloaded "
+            "once (~60 MB) and is flatter than the cloud's. Applies "
+            "immediately.</i></small>")
+        vbox.pack_start(note, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Engine:"), False, False, 0)
+        cls._tts_engine_combo = Gtk.ComboBoxText()
+        for model in config_module.CFG.TTS_ENGINES:
+            cls._tts_engine_combo.append(model, cls._ENGINE_LABELS.get(model, model))
+        cls._tts_engine_combo.set_active_id(
+            STATE.tts_model if STATE.tts_model in config_module.CFG.TTS_ENGINES
+            else next(iter(config_module.CFG.TTS_ENGINES)))
+        row.pack_start(cls._tts_engine_combo, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("Voice:"), False, False, 0)
+        cls._voice_combo = Gtk.ComboBoxText()
+        cls._fill_voices()
+        cls._voice_combo.connect("changed", cls._on_voice_changed)
+        row.pack_start(cls._voice_combo, True, True, 0)
+        test = Gtk.Button(label="▶ Test")
+        test.set_tooltip_text("Speak a line with the selected engine and voice")
+        test.connect("clicked", cls._on_test_voice)
+        row.pack_start(test, False, False, 0)
+        vbox.pack_start(row, False, False, 0)
+        # Connected last: filling the voices above must not fire the handler.
+        cls._tts_engine_combo.connect("changed", cls._on_engine_changed)
+
+    @classmethod
+    def _on_provider_changed(cls, combo: Gtk.ComboBoxText) -> None:
+        """Switch provider and re-list its models (the previous ids won't exist)."""
+        pid = combo.get_active_id()
+        if not pid or pid == STATE.ai_provider:
+            return
+        STATE.ai_provider = pid
+        SettingsManager.save(STATE)
+        print(f"🧠 AI provider changed to: {pid}")
+        cls._load_models_async()
+
+    @classmethod
+    def _load_models_async(cls) -> None:
+        """Fill both combos from ``models.list()`` — off-thread, it is a network call."""
+        import threading
+        provider = STATE.ai_provider
+        cls._set_models_status(f"⏳ Listing {provider} models…")
+
+        def work():
+            from gi.repository import GLib
+            from loquivox.api import get_ai_client
+            try:
+                ids = sorted(m.id for m in get_ai_client(provider).models.list().data)
+                error = None
+            except Exception as e:
+                ids, error = [], str(e)
+
+            def done():
+                for combo, current in ((cls._chat_model, STATE.ai_chat_model),
+                                       (cls._vision_model, STATE.ai_vision_model)):
+                    if combo is None:
+                        continue
+                    combo.remove_all()
+                    for mid in ids:
+                        combo.append_text(mid)
+                    combo.get_child().set_text(current)
+                if error:
+                    cls._set_models_status(f"⚠️ Could not list models — {error[:120]}")
+                else:
+                    cls._set_models_status(
+                        f"✓ {len(ids)} models available on {provider}. "
+                        "Pick or type one, then Apply.")
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @classmethod
+    def _set_models_status(cls, markup: str) -> None:
+        if cls._models_status is not None:
+            cls._models_status.set_markup(f"<small>{GLib.markup_escape_text(markup)}</small>")
+
+    @classmethod
+    def _on_apply_models(cls, _btn: Gtk.Button) -> None:
+        """Persist the two model ids (the provider is saved as soon as it changes)."""
+        chat = cls._chat_model.get_child().get_text().strip()
+        vision = cls._vision_model.get_child().get_text().strip()
+        if not chat or not vision:
+            cls._set_models_status("⚠️ Both models need an id.")
+            return
+        STATE.ai_chat_model, STATE.ai_vision_model = chat, vision
+        SettingsManager.save(STATE)
+        print(f"🧠 Models applied: chat={chat} vision={vision} ({STATE.ai_provider})")
+        cls._set_models_status(f"✓ Applied — chat {chat}, vision {vision}.")
+
+    # -----------------------------------------------------------------
     # Appearance tab: TTS voice + colour scheme gallery + overlay preview
     # -----------------------------------------------------------------
     @classmethod
     def _build_appearance_page(cls, vbox: Gtk.Box) -> None:
-        # TTS voice
-        voice_label = Gtk.Label()
-        voice_label.set_halign(Gtk.Align.START)
-        voice_label.set_markup("<b>TTS Voice</b>")
-        vbox.pack_start(voice_label, False, False, 0)
-
-        voice_combo = Gtk.ComboBoxText()
-        for voice in CFG.TTS_VOICES:
-            voice_combo.append_text(voice.title())
-        voice_combo.set_active(CFG.TTS_VOICES.index(STATE.tts_voice) if STATE.tts_voice in CFG.TTS_VOICES else 0)
-        voice_combo.connect("changed", cls._on_voice_changed)
-        vbox.pack_start(voice_combo, False, False, 0)
-
+        # The voice lives in the Models tab, with the rest of "who does what".
         # Overlay style (pill vs classic) — shown live in the preview below.
         style_label = Gtk.Label()
         style_label.set_halign(Gtk.Align.START)
@@ -209,9 +650,9 @@ class SettingsDialog:
             "pill": "Pill — waveform capsule",
             "classic": "Classic — icon + bars",
         }
-        for sid in CFG.OVERLAY_STYLES:
+        for sid in config_module.CFG.OVERLAY_STYLES:
             style_combo.append(sid, _STYLE_LABELS.get(sid, sid.title()))
-        active_style = STATE.overlay_style if STATE.overlay_style in CFG.OVERLAY_STYLES else CFG.DEFAULT_OVERLAY_STYLE
+        active_style = STATE.overlay_style if STATE.overlay_style in config_module.CFG.OVERLAY_STYLES else config_module.CFG.DEFAULT_OVERLAY_STYLE
         style_combo.set_active_id(active_style)
         style_combo.connect("changed", cls._on_overlay_style_changed)
         vbox.pack_start(style_combo, False, False, 0)
@@ -263,7 +704,7 @@ class SettingsDialog:
         cls._listbox = Gtk.ListBox()
         cls._listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         cls._listbox.connect("row-activated", cls._on_scheme_selected)
-        for name in CFG.COLOR_SCHEMES.keys():
+        for name in config_module.CFG.COLOR_SCHEMES.keys():
             row = cls._create_theme_row(name)
             cls._listbox.add(row)
             if name == STATE.color_scheme:
@@ -279,9 +720,9 @@ class SettingsDialog:
         """
         from loquivox.ui.recording_overlay import GtkOverlay
 
-        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+        scheme = config_module.CFG.COLOR_SCHEMES.get(STATE.color_scheme, config_module.CFG.COLOR_SCHEMES[config_module.CFG.DEFAULT_SCHEME])
         badge = GtkOverlay.refine_badge_for("dictation")
-        bw, bh = GtkOverlay.width(badge), CFG.OVERLAY_HEIGHT
+        bw, bh = GtkOverlay.width(badge), config_module.CFG.OVERLAY_HEIGHT
         aw, ah = widget.get_allocated_width(), widget.get_allocated_height()
 
         # Looping, calm waveform like the overlay's idle/recording motion.
@@ -321,7 +762,7 @@ class SettingsDialog:
         # Backend selector
         grid.attach(cls._row_label("Backend:"), 0, 0, 1, 1)
         cls._backend_combo = Gtk.ComboBoxText()
-        current = CFG.BACKEND.strip().lower()
+        current = config_module.CFG.BACKEND.strip().lower()
         active_idx = 0
         for i, (bid, label, _stream, _key, _attr) in enumerate(cls._BACKENDS):
             cls._backend_combo.append_text(label)
@@ -343,8 +784,8 @@ class SettingsDialog:
         for label, code in cls._LANGUAGES:
             cls._lang_entry.append(code, f"{label}" + (f" ({code})" if code else ""))
         # Select the row matching the current code, else put the raw code in.
-        if not cls._lang_entry.set_active_id(CFG.WHISPER_LANGUAGE):
-            cls._lang_entry.get_child().set_text(CFG.WHISPER_LANGUAGE)
+        if not cls._lang_entry.set_active_id(config_module.CFG.WHISPER_LANGUAGE):
+            cls._lang_entry.get_child().set_text(config_module.CFG.WHISPER_LANGUAGE)
         grid.attach(cls._lang_entry, 1, 2, 1, 1)
 
         # Microphone: "System default" + every detected capture device.
@@ -356,10 +797,10 @@ class SettingsDialog:
             cls._mic_combo.append(name, name)
         # Restore the saved choice; if it's set but not currently present
         # (mic unplugged), still show it so the selection isn't silently lost.
-        if not cls._mic_combo.set_active_id(CFG.INPUT_DEVICE):
-            if CFG.INPUT_DEVICE:
-                cls._mic_combo.append(CFG.INPUT_DEVICE, f"{CFG.INPUT_DEVICE} (not connected)")
-                cls._mic_combo.set_active_id(CFG.INPUT_DEVICE)
+        if not cls._mic_combo.set_active_id(config_module.CFG.INPUT_DEVICE):
+            if config_module.CFG.INPUT_DEVICE:
+                cls._mic_combo.append(config_module.CFG.INPUT_DEVICE, f"{config_module.CFG.INPUT_DEVICE} (not connected)")
+                cls._mic_combo.set_active_id(config_module.CFG.INPUT_DEVICE)
             else:
                 cls._mic_combo.set_active(0)
         grid.attach(cls._mic_combo, 1, 3, 1, 1)
@@ -369,7 +810,7 @@ class SettingsDialog:
         grid.attach(cls._row_label("Vocabulary:"), 0, 4, 1, 1)
         cls._vocab_entry = Gtk.Entry()
         cls._vocab_entry.set_hexpand(True)
-        cls._vocab_entry.set_text(CFG.VOCABULARY)
+        cls._vocab_entry.set_text(config_module.CFG.VOCABULARY)
         cls._vocab_entry.set_placeholder_text("proper nouns, jargon, foreign words…")
         cls._vocab_entry.set_tooltip_text(
             "Comma-separated words the engine tends to drop or misspell — "
@@ -397,7 +838,7 @@ class SettingsDialog:
 
         # Offline fallback toggle
         cls._fallback_check = Gtk.CheckButton(label="Offline fallback (whisper.cpp) when a backend is unavailable")
-        cls._fallback_check.set_active(bool(CFG.FALLBACK_BACKEND))
+        cls._fallback_check.set_active(bool(config_module.CFG.FALLBACK_BACKEND))
         vbox.pack_start(cls._fallback_check, False, False, 0)
 
         # Apply button + status line
@@ -446,7 +887,7 @@ class SettingsDialog:
             combo.set_sensitive(True)
             for m in cls._MODELS.get(bid, []):
                 combo.append_text(m)
-            combo.get_child().set_text(getattr(CFG, cfg_attr))
+            combo.get_child().set_text(getattr(config_module.CFG, cfg_attr))
 
         cap = "🔴 live transcription" if is_stream else "📝 batch (transcribing… indicator)"
         doc = cls._MODEL_DOCS.get(bid)
@@ -460,7 +901,7 @@ class SettingsDialog:
         if cls._whisper_status is None:
             return
         from loquivox.transcription.whispercpp_backend import WhisperCppBackend
-        model = CFG.WHISPERCPP_MODEL
+        model = config_module.CFG.WHISPERCPP_MODEL
         installed, downloaded = WhisperCppBackend(model).local_status()
         if not installed:
             msg = "whisper.cpp: ⚪ engine not found (<tt>whisper-cli</tt> missing)"
@@ -489,7 +930,7 @@ class SettingsDialog:
         def status(markup: str) -> None:
             GLib.idle_add(lambda: cls._whisper_status.set_markup(f"<small>{markup}</small>"))
 
-        model = CFG.WHISPERCPP_MODEL
+        model = config_module.CFG.WHISPERCPP_MODEL
         backend = WhisperCppBackend(model)
 
         # The engine is a bundled binary (whisper-cli), not a pip package — if
@@ -546,7 +987,6 @@ class SettingsDialog:
             return
 
         # 2) apply live: rebuild CFG + reconfigure the dispatcher
-        from loquivox import config as config_module
         from loquivox.transcription import get_dispatcher, reconfigure_dispatcher
         fresh = config_module.reload_config()
         reconfigure_dispatcher(fresh)
@@ -616,7 +1056,6 @@ class SettingsDialog:
                     cls._set_trans_status(f"❌ {human} install failed — {msg}")
                     return False
                 # Rebuild backends now that the package exists, then re-report.
-                from loquivox import config as config_module
                 from loquivox.transcription import reconfigure_dispatcher
                 reconfigure_dispatcher(config_module.reload_config())
                 cls._report_backend_availability(bid)
@@ -640,12 +1079,11 @@ class SettingsDialog:
         import sys
         import sysconfig
 
-        # Not in a venv → never touch a system/managed interpreter.
+        # Not in a venv → never touch a system/managed interpreter. This is the
+        # whole PEP 668 guard: inside a venv the marker lives on the *base*
+        # stdlib (/usr/lib/pythonX.Y), which every venv on Arch/Debian shares,
+        # so testing it here would refuse every install pip itself allows.
         if sys.prefix == sys.base_prefix:
-            return False
-        # PEP 668: interpreter explicitly marked externally managed.
-        stdlib = sysconfig.get_path("stdlib") or ""
-        if stdlib and os.path.exists(os.path.join(stdlib, "EXTERNALLY-MANAGED")):
             return False
         # site-packages must be writable.
         purelib = sysconfig.get_path("purelib") or ""
@@ -721,7 +1159,7 @@ class SettingsDialog:
         cls._pp_scale.set_hexpand(True)
         for level, label in POSTPROCESS_LEVELS:
             cls._pp_scale.add_mark(level, Gtk.PositionType.BOTTOM, label)
-        cls._pp_scale.set_value(int(CFG.POSTPROCESS_LEVEL or 0))
+        cls._pp_scale.set_value(int(config_module.CFG.POSTPROCESS_LEVEL or 0))
         # Snap to whole levels while dragging, and show the level name live.
         cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
         cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
@@ -731,22 +1169,22 @@ class SettingsDialog:
         # Translate — a separate axis; when on it overrides the level.
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         cls._pp_translate_check = Gtk.CheckButton(label="Translate to")
-        cls._pp_translate_check.set_active(bool(CFG.POSTPROCESS_TRANSLATE))
+        cls._pp_translate_check.set_active(bool(config_module.CFG.POSTPROCESS_TRANSLATE))
         cls._pp_translate_check.connect("toggled", cls._on_pp_translate_toggled)
         trow.pack_start(cls._pp_translate_check, False, False, 0)
         cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
             if code:  # translation needs a real target
                 cls._pp_lang.append(code, f"{label} ({code})")
-        if not cls._pp_lang.set_active_id(CFG.POSTPROCESS_TARGET_LANG):
-            cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
+        if not cls._pp_lang.set_active_id(config_module.CFG.POSTPROCESS_TARGET_LANG):
+            cls._pp_lang.get_child().set_text(config_module.CFG.POSTPROCESS_TARGET_LANG)
         trow.pack_start(cls._pp_lang, True, True, 0)
         vbox.pack_start(trow, False, False, 0)
 
         # Format — a separate axis that COMBINES with the level / translate.
         cls._pp_format_check = Gtk.CheckButton(
             label="Format as structured text (paragraphs + bullet lists)")
-        cls._pp_format_check.set_active(bool(CFG.POSTPROCESS_FORMAT))
+        cls._pp_format_check.set_active(bool(config_module.CFG.POSTPROCESS_FORMAT))
         cls._pp_format_check.set_tooltip_text(
             "Lays the result out in plain-text paragraphs and lists. Combines "
             "with the refinement level (or works alone when level is Off).")
@@ -763,7 +1201,7 @@ class SettingsDialog:
 
         cls._pp_prompt_view = Gtk.TextView()
         cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
-        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_CUSTOM_PROMPT)
+        cls._pp_prompt_view.get_buffer().set_text(config_module.CFG.POSTPROCESS_CUSTOM_PROMPT)
         cls._pp_prompt_scroll = Gtk.ScrolledWindow()
         cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         cls._pp_prompt_scroll.set_min_content_height(80)
@@ -860,7 +1298,6 @@ class SettingsDialog:
         except ConfigWriteError as e:
             cls._pp_status.set_markup(f"<small>❌ {e}</small>")
             return
-        from loquivox import config as config_module
         config_module.reload_config()  # PostProcessor reads config_module.CFG live
         if translate:
             desc = f"translate → {lang}"
@@ -870,6 +1307,307 @@ class SettingsDialog:
             desc += " + format"
         cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
         print(f"✨ Post-processing: level={level} translate={translate} format={fmt} lang={lang}")
+
+    # -----------------------------------------------------------------
+    # Talk mode section (written to config.toml [talk])
+    # -----------------------------------------------------------------
+    #: (id, label) for the "how far it digs" combo — mirrors CFG.TALK_DEPTH.
+    _TALK_DEPTHS = (
+        ("minimal", "Minimal — only asks when something is unclear"),
+        ("normal", "Normal — asks about what would change the text"),
+        ("deep", "Deep — pushes the reasoning further"),
+    )
+
+    _SEMANTIC_LABEL_BASE = "End my turns on meaning, not on silence"
+
+    @classmethod
+    def _semantic_needs_onnx(cls) -> bool:
+        """
+        Whether ending turns on meaning needs the local ONNX detector here.
+
+        False when onnxruntime is already there, and false when the active
+        backend closes the turns server-side (OpenAI Realtime's semantic VAD) —
+        the box is still worth ticking then, it just installs nothing.
+        """
+        if cls._module_installed("onnxruntime"):
+            return False
+        from loquivox.transcription import get_dispatcher
+        active = get_dispatcher().active
+        if active is not None and active.name == "openai_realtime":
+            from loquivox.transcription.openai_realtime_backend import OpenAIRealtimeSession
+            return not OpenAIRealtimeSession._supports_turn_detection(config_module.CFG.OPENAI_MODEL)
+        return True
+
+    @classmethod
+    def _build_talk_section(cls, vbox: Gtk.Box) -> None:
+        """Talk-mode knobs: who may end the briefing, and how it converses."""
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup(
+            f"<b>Ending the conversation</b> "
+            f"<small>({config_module.CFG.HOTKEY_DEFS['talk'][0]} starts it)</small>"
+        )
+        vbox.pack_start(header, False, False, 6)
+
+        note = Gtk.Label()
+        note.set_halign(Gtk.Align.START)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small><i>Enter always writes the text — that one can't be turned "
+            "off, so there is always a way out. These two are extras.</i></small>"
+        )
+        vbox.pack_start(note, False, False, 0)
+
+        cls._talk_phrase_check = Gtk.CheckButton(
+            label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
+        cls._talk_phrase_check.set_active(bool(config_module.CFG.TALK_FINISH_ON_PHRASE))
+        vbox.pack_start(cls._talk_phrase_check, False, False, 0)
+
+        cls._talk_model_check = Gtk.CheckButton(
+            label="When the assistant judges it has enough context")
+        cls._talk_model_check.set_active(bool(config_module.CFG.TALK_FINISH_BY_MODEL))
+        vbox.pack_start(cls._talk_model_check, False, False, 0)
+
+        header2 = Gtk.Label()
+        header2.set_halign(Gtk.Align.START)
+        header2.set_markup("<b>Conversation</b>")
+        vbox.pack_start(header2, False, False, 10)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("How far it digs:"), False, False, 0)
+        cls._talk_depth = Gtk.ComboBoxText()
+        for depth_id, label in cls._TALK_DEPTHS:
+            cls._talk_depth.append(depth_id, label)
+        cls._talk_depth.set_active_id(
+            config_module.CFG.TALK_DEPTH if config_module.CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
+        row.pack_start(cls._talk_depth, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        cls._talk_semantic_check = Gtk.CheckButton(
+            label=cls._SEMANTIC_LABEL_BASE + (
+                " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
+        cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
+        cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
+        vbox.pack_start(cls._talk_semantic_check, False, False, 0)
+
+        cls._talk_speak_check = Gtk.CheckButton(
+            label="Read the assistant's replies aloud, even with TTS off")
+        cls._talk_speak_check.set_active(bool(config_module.CFG.TALK_SPEAK_REPLIES))
+        vbox.pack_start(cls._talk_speak_check, False, False, 0)
+
+        cls._talk_autopaste_check = Gtk.CheckButton(
+            label="Paste the finished text straight away, without reviewing it")
+        cls._talk_autopaste_check.set_active(bool(config_module.CFG.TALK_AUTO_PASTE))
+        cls._talk_autopaste_check.set_tooltip_text(
+            "The text is copied and pasted where the cursor was when the "
+            "conversation ended — no Enter, and no chance to rewrite it or go "
+            "back to the conversation. Off by default: talk mode otherwise "
+            "never types anything you have not accepted."
+        )
+        vbox.pack_start(cls._talk_autopaste_check, False, False, 0)
+
+        header_instr = Gtk.Label()
+        header_instr.set_halign(Gtk.Align.START)
+        header_instr.set_markup("<b>Instructions</b>")
+        vbox.pack_start(header_instr, False, False, 10)
+
+        instr_note = Gtk.Label()
+        instr_note.set_halign(Gtk.Align.START)
+        instr_note.set_line_wrap(True)
+        instr_note.set_markup(
+            "<small><i>Standing instructions for the conversation: what language "
+            "to speak, the persona, the tone, the kind of work you usually "
+            "discuss. Added to the built-in prompt, not replacing it — talk mode "
+            "keeps asking questions and keeps knowing when to stop. Both engines "
+            "read it. Leave empty for the default.</i></small>"
+        )
+        vbox.pack_start(instr_note, False, False, 0)
+
+        instr_scroll = Gtk.ScrolledWindow()
+        instr_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        instr_scroll.set_size_request(-1, 120)
+        instr_scroll.set_shadow_type(Gtk.ShadowType.IN)
+        cls._talk_instructions = Gtk.TextView()
+        cls._talk_instructions.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        cls._talk_instructions.set_left_margin(6)
+        cls._talk_instructions.set_right_margin(6)
+        cls._talk_instructions.get_buffer().set_text(
+            config_module.CFG.TALK_INSTRUCTIONS)
+        cls._talk_instructions.set_tooltip_text(
+            "Example:\nTu réponds toujours en français, simplement et sans "
+            "formalisme. Le contexte est technique : sois précis, et demande une "
+            "précision plutôt que de deviner. Les seuls mots anglais sont les "
+            "termes techniques."
+        )
+        instr_scroll.add(cls._talk_instructions)
+        vbox.pack_start(instr_scroll, False, False, 0)
+
+        header3 = Gtk.Label()
+        header3.set_halign(Gtk.Align.START)
+        header3.set_markup("<b>Screen context</b>")
+        vbox.pack_start(header3, False, False, 10)
+
+        shot_note = Gtk.Label()
+        shot_note.set_halign(Gtk.Align.START)
+        shot_note.set_line_wrap(True)
+        shot_note.set_markup(
+            "<small><i>Most of what you are about to dictate is already on your "
+            "screen. Captured once when the session starts, in parallel with your "
+            "first sentence, and described by the vision model — so your screen "
+            "leaves the machine. Off by default.</i></small>"
+        )
+        vbox.pack_start(shot_note, False, False, 0)
+
+        cls._talk_shot_check = Gtk.CheckButton(
+            label="Send a screenshot as context when the session starts")
+        cls._talk_shot_check.set_active(bool(config_module.CFG.TALK_SCREENSHOT))
+        cls._talk_shot_check.connect("toggled", cls._on_talk_shot_toggled)
+        vbox.pack_start(cls._talk_shot_check, False, False, 0)
+
+        region_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        region_row.pack_start(cls._row_label("Capture:"), False, False, 0)
+        cls._talk_shot_region = Gtk.ComboBoxText()
+        cls._talk_shot_region.append("screen", "The whole screen")
+        cls._talk_shot_region.append("cursor", "A box around the cursor (X11 / Hyprland)")
+        cls._talk_shot_region.set_active_id(
+            "cursor" if config_module.CFG.TALK_SCREENSHOT_REGION == "cursor" else "screen")
+        cls._talk_shot_region.set_tooltip_text(
+            "Wayland gives no way to locate the pointer, except on Hyprland — "
+            "elsewhere this falls back to the whole screen."
+        )
+        region_row.pack_start(cls._talk_shot_region, True, True, 0)
+        vbox.pack_start(region_row, False, False, 0)
+
+        cursor_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cursor_row.pack_start(cls._row_label("Box width (px):"), False, False, 0)
+        cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
+        cls._talk_shot_cursor.set_value(int(config_module.CFG.TALK_SCREENSHOT_CURSOR_PX))
+        cursor_row.pack_start(cls._talk_shot_cursor, False, False, 0)
+        vbox.pack_start(cursor_row, False, False, 0)
+
+        max_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        max_row.pack_start(cls._row_label("Downscale to (px):"), False, False, 0)
+        cls._talk_shot_max = Gtk.SpinButton.new_with_range(0, 7680, 128)
+        cls._talk_shot_max.set_value(int(config_module.CFG.TALK_SCREENSHOT_MAX_PX))
+        cls._talk_shot_max.set_tooltip_text(
+            "Longest edge of the uploaded image — what keeps a 4K capture small. "
+            "0 uploads it as captured."
+        )
+        max_row.pack_start(cls._talk_shot_max, False, False, 0)
+        vbox.pack_start(max_row, False, False, 0)
+        cls._on_talk_shot_toggled(cls._talk_shot_check)
+
+        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.connect("clicked", cls._on_apply_talk)
+        apply_row.pack_start(apply_btn, False, False, 0)
+        cls._talk_status = Gtk.Label()
+        cls._talk_status.set_halign(Gtk.Align.START)
+        cls._talk_status.set_line_wrap(True)
+        apply_row.pack_start(cls._talk_status, True, True, 0)
+        vbox.pack_start(apply_row, False, False, 10)
+
+        hint = Gtk.Label()
+        hint.set_halign(Gtk.Align.START)
+        hint.set_line_wrap(True)
+        hint.set_markup(
+            "<small><i>Timings, prompts and the turn-detection thresholds live "
+            "under [talk] in config.toml.</i></small>"
+        )
+        vbox.pack_start(hint, False, False, 0)
+
+    @classmethod
+    def _on_talk_semantic_toggled(cls, check: Gtk.CheckButton) -> None:
+        """Ticking the box offers to install onnxruntime when it is missing."""
+        if not check.get_active() or not cls._semantic_needs_onnx():
+            return
+        import threading
+
+        ask = Gtk.MessageDialog(
+            transient_for=cls._instance, modal=True,
+            message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.OK_CANCEL,
+            text="Install onnxruntime?")
+        ask.format_secondary_text(
+            "Ending turns on meaning needs onnxruntime (~200 MB), plus an 8 MB "
+            "model downloaded the first time it runs. Without it, turns keep "
+            "ending on silence.")
+        answer = ask.run()
+        ask.destroy()
+        if answer != Gtk.ResponseType.OK:
+            check.set_active(False)
+            return
+        check.set_label(f"{cls._SEMANTIC_LABEL_BASE} — installing onnxruntime…")
+        check.set_sensitive(False)
+
+        def work():
+            from gi.repository import GLib
+            ok, msg = cls._pip_install("onnxruntime")
+
+            def done():
+                check.set_sensitive(True)
+                if ok:
+                    check.set_label(f"{cls._SEMANTIC_LABEL_BASE} (ready)")
+                else:
+                    check.set_active(False)
+                    check.set_label(f"{cls._SEMANTIC_LABEL_BASE} — install failed: {msg}")
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @classmethod
+    def _on_talk_shot_toggled(cls, check: Gtk.CheckButton) -> None:
+        """Grey out the framing controls while the capture itself is off."""
+        active = bool(check.get_active())
+        for widget in (cls._talk_shot_region, cls._talk_shot_cursor, cls._talk_shot_max):
+            if widget is not None:
+                widget.set_sensitive(active)
+
+    @classmethod
+    def _on_apply_talk(cls, _btn: Gtk.Button) -> None:
+        """Write the talk knobs to config.toml and reload — next session uses them."""
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        phrase = bool(cls._talk_phrase_check.get_active())
+        by_model = bool(cls._talk_model_check.get_active())
+        depth = cls._talk_depth.get_active_id() or "normal"
+        semantic = bool(cls._talk_semantic_check.get_active())
+        speak = bool(cls._talk_speak_check.get_active())
+        screenshot = bool(cls._talk_shot_check.get_active())
+        auto_paste = bool(cls._talk_autopaste_check.get_active())
+        buffer = cls._talk_instructions.get_buffer()
+        instructions = buffer.get_text(buffer.get_start_iter(),
+                                       buffer.get_end_iter(), False).strip()
+        try:
+            update_section("talk", {
+                "finish_on_phrase": phrase,
+                "finish_by_model": by_model,
+                "depth": depth,
+                "semantic_turns": semantic,
+                "speak_replies": speak,
+                "screenshot": screenshot,
+                "instructions": instructions,
+                "auto_paste": auto_paste,
+                "screenshot_region": cls._talk_shot_region.get_active_id() or "screen",
+                "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
+                "screenshot_max_px": int(cls._talk_shot_max.get_value()),
+            })
+        except ConfigWriteError as e:
+            cls._talk_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        config_module.reload_config()  # talk mode reads config_module.CFG live
+        ends = [name for name, on in (("Enter", True), ("spoken", phrase),
+                                      ("assistant", by_model)) if on]
+        instr_note = (f" · {len(instructions)} chars of instructions"
+                      if instructions else "")
+        if auto_paste:
+            instr_note += " · pasted without review"
+        cls._talk_status.set_markup(
+            f"<small>✓ Applied — ends on: {', '.join(ends)}{instr_note}.</small>"
+        )
+        print(f"🗣️  Talk: finish_on_phrase={phrase} finish_by_model={by_model} "
+              f"depth={depth} semantic_turns={semantic} screenshot={screenshot}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)
@@ -943,7 +1681,6 @@ class SettingsDialog:
             cls._key_status.set_markup(f"<small>❌ {e}</small>")
             return
         # Re-evaluate backends now that keys changed.
-        from loquivox import config as config_module
         from loquivox.transcription import reconfigure_dispatcher
         reconfigure_dispatcher(config_module.reload_config())
         n = sum(1 for v in values.values() if v.strip())
@@ -960,7 +1697,7 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     _HOTKEY_LABELS = {
         "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
-        "vision": "Vision", "pin": "Pin Chat", "tts": "TTS Toggle",
+        "vision": "Vision", "talk": "Talk", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
         "refine": "Stop + choose level",
     }
@@ -979,7 +1716,7 @@ class SettingsDialog:
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
-        for i, (mode_id, (_label, specs)) in enumerate(CFG.HOTKEY_DEFS.items()):
+        for i, (mode_id, (_label, specs)) in enumerate(config_module.CFG.HOTKEY_DEFS.items()):
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
             lbl = Gtk.Label(label=name + ":")
             lbl.set_halign(Gtk.Align.START)
@@ -1045,7 +1782,6 @@ class SettingsDialog:
 
         # Apply live: reload config and rebuild the keyboard listener's map so
         # the new bindings take effect immediately — no service restart needed.
-        from loquivox import config as config_module
         from loquivox.handlers.keyboard import KeyboardHandler
         KeyboardHandler.reload_hotkeys(config_module.reload_config())
 
@@ -1090,10 +1826,51 @@ class SettingsDialog:
 
         threading.Thread(target=work, daemon=True).start()
 
+    # Engine labels: which provider speaks, and what it can speak.
+    _ENGINE_LABELS = {
+        "canopylabs/orpheus-v1-english": "Groq Orpheus — English only (needs GROQ_API_KEY)",
+        "gpt-4o-mini-tts": "OpenAI — multilingual, speaks French (needs OPENAI_API_KEY)",
+        "piper": "Piper — local, offline, no key (pip install piper-tts)",
+    }
+
+    @classmethod
+    def _voices(cls) -> tuple:
+        """The voices of the currently selected engine."""
+        return config_module.CFG.TTS_ENGINES.get(STATE.tts_model, ("", ()))[1]
+
+    @classmethod
+    def _fill_voices(cls) -> None:
+        """(Re)populate the voice combo for the current engine."""
+        combo = cls._voice_combo
+        if combo is None:
+            return
+        combo.remove_all()
+        voices = cls._voices()
+        for voice in voices:
+            combo.append(voice, voice.title())
+        combo.set_active_id(STATE.tts_voice if STATE.tts_voice in voices
+                            else (voices[0] if voices else None))
+
+    @classmethod
+    def _on_engine_changed(cls, combo: Gtk.ComboBoxText) -> None:
+        """Switch engine, then re-offer the voices that engine actually has."""
+        model = combo.get_active_id()
+        if not model or model == STATE.tts_model:
+            return
+        STATE.tts_model = model
+        voices = cls._voices()
+        if STATE.tts_voice not in voices and voices:
+            STATE.tts_voice = voices[0]
+        print(f"🔊 TTS engine changed to: {model} (voice {STATE.tts_voice})")
+        SettingsManager.save(STATE)
+        cls._fill_voices()
+
     @staticmethod
     def _on_voice_changed(combo: Gtk.ComboBoxText) -> None:
         """Handle voice selection change."""
-        voice = combo.get_active_text().lower()
+        voice = combo.get_active_id()
+        if not voice or voice == STATE.tts_voice:
+            return
         STATE.tts_voice = voice
         print(f"🎙️ Voice changed to: {voice}")
         SettingsManager.save(STATE)
@@ -1165,7 +1942,7 @@ class SettingsDialog:
 
         find_name(row.get_child())
 
-        if name in CFG.COLOR_SCHEMES:
+        if name in config_module.CFG.COLOR_SCHEMES:
             STATE.color_scheme = name
             print(f"🎨 Color scheme changed to: {name}")
             SettingsManager.save(STATE)
@@ -1179,7 +1956,7 @@ class SettingsDialog:
     @classmethod
     def _create_theme_row(cls, name: str) -> Gtk.ListBoxRow:
         """Create a visual card for a theme in the gallery."""
-        scheme = CFG.COLOR_SCHEMES[name]
+        scheme = config_module.CFG.COLOR_SCHEMES[name]
         row = Gtk.ListBoxRow()
         row.set_margin_top(4)
         row.set_margin_bottom(4)

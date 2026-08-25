@@ -34,6 +34,11 @@ POSTPROCESS_LEVELS: tuple = (
     (5, "Custom"),   # uses POSTPROCESS_CUSTOM_PROMPT
 )
 POSTPROCESS_MAX_LEVEL: int = 5
+
+#: What the vision model is told to answer when a talk-mode screenshot holds
+#: nothing worth passing on — interpolated into the prompt below, so the
+#: sentinel the code matches on and the sentence the model reads are one string.
+TALK_SCREEN_EMPTY: str = "(nothing relevant on screen)"
 POSTPROCESS_CUSTOM_LEVEL: int = 5
 
 # One-line description per hotkey action — single source of truth for the
@@ -43,6 +48,7 @@ HOTKEY_DESCRIPTIONS: Dict[str, str] = {
     "ai":         "Ask the AI",
     "ai_rewrite": "Rewrite the selected text",
     "vision":     "Screenshot + ask about it",
+    "talk":       "Talk it through, then get the text",
     "pin":        "Pin the chat overlay on top",
     "tts":        "Read AI answers aloud",
     "cancel":     "Cancel recording / transcription",
@@ -143,8 +149,12 @@ class Config:
     CHAT_AUTO_HIDE_SEC: int = 3
 
     # --- AI Models ---
-    MODEL_CHAT: str = "llama-3.3-70b-versatile"
-    MODEL_VISION: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Provider for chat + vision: "groq" or "openai" (same API dialect, see
+    # api.get_ai_client). Overridable per-user in Settings → Models.
+    AI_PROVIDER: str = "groq"
+    AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
+    MODEL_CHAT: str = "openai/gpt-oss-120b"
+    MODEL_VISION: str = "qwen/qwen3.6-27b"
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
@@ -163,6 +173,10 @@ class Config:
     WHISPERCPP_MODEL: str = "base"
     # Streaming-backend models (used in the streaming phase).
     OPENAI_MODEL: str = "gpt-4o-transcribe"
+    # How eagerly OpenAI Realtime's own semantic VAD closes a turn — "auto"
+    # (= medium), "low", "medium" or "high". Only used in talk mode, where that
+    # backend detects turns server-side instead of the local model.
+    OPENAI_TURN_EAGERNESS: str = "auto"
     DEEPGRAM_MODEL: str = "nova-3"
 
     # --- Post-processing (dictation text → LLM, opt-in) ---
@@ -211,8 +225,22 @@ class Config:
     # Cache window for focused-window / terminal detection (seconds).
     TERMINAL_CACHE_TTL: float = 0.2
 
-    # --- TTS Voices ---
-    TTS_VOICES: Tuple[str, ...] = ("diana", "hannah", "autumn", "austin", "daniel", "troy")
+    # --- TTS engines: model → (provider, voices) ---
+    # Groq's Orpheus is English-only (and gated behind a terms acceptance on
+    # console.groq.com); OpenAI's is multilingual — the one to pick to be
+    # answered in French. Each engine uses its own provider's key.
+    TTS_ENGINES: Dict[str, Tuple[str, Tuple[str, ...]]] = field(default_factory=lambda: {
+        "canopylabs/orpheus-v1-english": (
+            "groq", ("diana", "hannah", "autumn", "austin", "daniel", "troy")),
+        "gpt-4o-mini-tts": (
+            "openai", ("alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
+                       "marin", "nova", "onyx", "sage", "shimmer", "verse")),
+        # Local, offline, no key: the "voices" are Piper voice ids, fetched
+        # once into ~/.cache/loquivox/piper. A filesystem path works too.
+        "piper": ("piper", ("fr_FR-siwis-medium", "fr_FR-upmc-medium",
+                            "fr_FR-gilles-low", "en_US-lessac-medium",
+                            "en_GB-alba-medium")),
+    })
     TTS_DEFAULT_VOICE: str = "diana"
     TTS_MAX_CHARS: int = 4000
 
@@ -237,13 +265,196 @@ class Config:
         "output be grounded, clear, and highly concise. Return ONLY the direct response."
     )
 
+    # --- Talk mode (spoken conversation → one generated text) ---
+    # Turn detection: how a spoken turn ends. With VAD on, a pause ends it
+    # (like the Realtime API's server_vad); Space/the talk key always ends it
+    # immediately. Levels are RMS on the captured audio — see services/vad.py,
+    # which calibrates against the room noise on top of this floor.
+    TALK_VAD: bool = True
+    TALK_VAD_THRESHOLD: float = 0.02
+    TALK_VAD_SILENCE_MS: int = 900
+    TALK_VAD_MIN_SPEECH_MS: int = 300
+    # Semantic turn detection (services/turn_detector.py): a pause no longer
+    # ends the turn by itself — Smart Turn v3 reads the prosody of the last 8
+    # seconds and decides whether the sentence has landed. The energy VAD
+    # becomes the trigger, which is why its silence window drops to
+    # TALK_SEMANTIC_TRIGGER_MS while the model is in play: a finished sentence
+    # is cut in ~250 ms instead of 900, and a hesitation isn't cut at all.
+    # Needs onnxruntime (pip install -e '.[turn]'); falls back to the plain
+    # silence VAD when it is missing.
+    TALK_SEMANTIC_TURNS: bool = True
+    # P(turn complete) at or above this ends the turn. Raise it to let yourself
+    # trail off further before the assistant answers.
+    TALK_TURN_THRESHOLD: float = 0.5
+    # Pause that triggers a semantic check (milliseconds).
+    TALK_SEMANTIC_TRIGGER_MS: int = 250
+    # Silence after which the turn ends whatever the model says (milliseconds).
+    TALK_TURN_MAX_SILENCE_MS: int = 4000
+    # The model: empty = the newest CPU build of pipecat-ai/smart-turn-v3,
+    # downloaded once (~8 MB) to ~/.cache/loquivox and reused from there. A
+    # local path uses that file and never downloads; an http(s) URL pins the
+    # build to fetch.
+    TALK_TURN_MODEL: str = ""
+    # Barge-in: speaking over a reply cuts it off, the way one does with a
+    # person. The detector is armed on the first sample that actually reaches
+    # the speakers, so its calibration window measures the ECHO of the reply —
+    # the activation level lands above whatever the speakers leak back into
+    # the microphone, and on a headset (no leak) it stays at the plain
+    # threshold. Without echo cancellation and with the volume up, the reply
+    # can still cut itself off: use a headset, or PipeWire's
+    # libpipewire-module-echo-cancel in monitor mode.
+    TALK_BARGE_IN: bool = True
+    # Speech needed before a reply is cut off (milliseconds). Long enough that
+    # a cough or a key click is not an interruption.
+    TALK_BARGE_IN_MS: int = 400
+    # How much of what the microphone heard is kept as the start of the next
+    # turn (seconds) — the words spoken over the reply must not be lost.
+    TALK_BARGE_IN_KEEP: float = 1.5
+    # How the conversation is held:
+    #   "cascade"  — STT → LLM → TTS, every slot swappable (local or cloud)
+    #   "realtime" — one OpenAI Realtime session, speech in and speech out:
+    #                the server owns turn-taking and interruptions and the
+    #                reply keeps the prosody of speech, but the conversation
+    #                is held by the Realtime model, not by [models] chat.
+    # The writing pass is a text completion either way.
+    TALK_ENGINE: str = "cascade"
+    TALK_ENGINES: Tuple[str, ...] = ("cascade", "realtime")
+    TALK_REALTIME_MODEL: str = "gpt-realtime-2.1"
+    TALK_REALTIME_VOICE: str = "marin"
+    # The voices gpt-realtime speaks with. Same names as the TTS ones and the
+    # same timbre, but a different model produces them — which is why the
+    # settings dialog previews them through the TTS engine.
+    TALK_REALTIME_VOICES: Tuple[str, ...] = (
+        "marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage",
+        "shimmer", "verse")
+    # Transcription model for the user's side — what lands in the brief.
+    TALK_REALTIME_TRANSCRIBE: str = "gpt-4o-mini-transcribe"
+    # A turn stops after this long no matter what (seconds).
+    TALK_TURN_TIMEOUT: float = 60.0
+    # Silence with nothing said at all for this long ends the conversation and
+    # goes to the text generation (seconds).
+    TALK_IDLE_TIMEOUT: float = 15.0
+    # Hard stop on the conversation length (user turns).
+    TALK_MAX_TURNS: int = 30
+    # How much the assistant digs before writing:
+    #   "minimal" — only asks when something is genuinely unclear
+    #   "normal"  — asks about what would change the text (default)
+    #   "deep"    — pushes the reasoning: assumptions, objections, examples
+    TALK_DEPTH: str = "normal"
+    # Who may end the briefing. The Enter key always can and is not a toggle —
+    # these two are, independently, so you can keep as much control as you want:
+    #   finish_on_phrase — saying you're done ends it ("vas-y", "j'ai fini")
+    #   finish_by_model  — the assistant ends it once it judges it has enough
+    # Both off = the key is the only way out.
+    TALK_FINISH_ON_PHRASE: bool = True
+    TALK_FINISH_BY_MODEL: bool = False
+    # Spoken phrases that end the briefing on their own (matched on a SHORT
+    # utterance only, accent- and punctuation-insensitive), before the model is
+    # even called. Ignored when finish_on_phrase is off.
+    TALK_FINISH_PHRASES: Tuple[str, ...] = (
+        # French
+        "j'ai fini", "j'ai termine", "c'est bon", "c'est tout", "vas-y",
+        "ecris-le", "ecris le texte", "redige", "on y va", "termine",
+        # English
+        "i'm done", "im done", "that's it", "that's all", "go ahead",
+        "write it", "write the text", "done",
+    )
+    # How long the generated text waits for a verdict before being left on the
+    # clipboard (seconds) — it is never typed without an explicit accept.
+    TALK_REVIEW_TIMEOUT: float = 120.0
+    # --- Talk mode: the screen as context (opt-in) ---
+    # A screenshot taken when the session starts, described once by the vision
+    # model, and handed to the conversation as context — most of what you are
+    # about to talk about is usually already on screen. OFF by default: it
+    # sends your screen to the cloud. The capture runs in parallel with your
+    # first turn, so it costs no startup delay.
+    TALK_SCREENSHOT: bool = False
+    # "screen" = the whole screen; "cursor" = a box around the pointer, which
+    # focuses the model on what you are actually working on. The pointer can
+    # only be located under X11 and Hyprland — anywhere else "cursor" falls
+    # back to the whole screen.
+    TALK_SCREENSHOT_REGION: str = "screen"
+    # Width of that box, in pixels (its height follows the screen's aspect).
+    TALK_SCREENSHOT_CURSOR_PX: int = 1200
+    # The capture is downscaled to this many pixels on its long edge before
+    # upload — the fix for a 4K screen. 0 disables the downscale.
+    TALK_SCREENSHOT_MAX_PX: int = 1280
+    # What the vision model is asked to report about that capture.
+    TALK_SCREEN_PROMPT: str = (
+        "The user is about to dictate a text to you by voice, and this is their "
+        "screen right now: the context they will be talking about, and will "
+        "probably not spell out. Describe it factually in at most 120 words — "
+        "which application, what document or page, and the content that matters. "
+        "Quote error messages, subject lines, names and figures verbatim rather "
+        "than summarising them. Ignore Loquivox's own small recording overlay and "
+        "chat panel if they are visible. If nothing on screen could plausibly be "
+        f"useful, answer exactly: {TALK_SCREEN_EMPTY}"
+    )
+
+    # Speak the assistant's conversational replies even when TTS is toggled off
+    # — talk mode is a voice conversation, the read-back is the point.
+    #: Deliver the finished text without asking. Off by default, and the one
+    #: setting that gives up talk mode's "nothing is typed without an explicit
+    #: Enter": with it on, the text is pasted wherever the cursor was the
+    #: moment the conversation ended.
+    TALK_AUTO_PASTE: bool = False
+    TALK_SPEAK_REPLIES: bool = True
+
+    # Conversation phase: the model is a partner working out WHAT to write.
+    TALK_SYSTEM_PROMPT: str = (
+        "You are on a live voice call with the user, working out a text they need "
+        "to produce (an email, a message, a note, a snippet — anything). In this "
+        "phase you do NOT write that text: you understand it.\n\n"
+        "What reaches you is a speech transcript, so it is spoken language, not "
+        "writing: it wanders, it backtracks, and the recognizer mishears words — a "
+        "name, a technical term, a number. Never quietly guess at a word that looks "
+        "wrong or a sentence that does not parse: quote the bit back and ask what "
+        "was meant. When the user corrects something, the correction replaces what "
+        "was said before it.\n\n"
+        "Reply in at most two short spoken sentences — no markdown, no lists, no "
+        "headings — because your answer is read aloud. Ask about one thing at a "
+        "time, and only about what would actually change the text: audience, "
+        "intent, tone, key facts, length. Never produce the final text until you "
+        "are explicitly asked for it. Always answer in the language the user "
+        "speaks."
+    )
+    # Generation phase: same conversation, new instructions — write the thing.
+    #: Standing instructions for the conversation: persona, language, tone. Added
+    #: to the built-in prompt rather than replacing it, so the briefing protocol
+    #: (ask, don't write; the end-of-briefing marker) survives whatever is put
+    #: here. Both engines read it — the cascade through ``system_prompt()``, the
+    #: Realtime session through the instructions it opens with.
+    TALK_INSTRUCTIONS: str = ""
+    TALK_GENERATE_PROMPT: str = (
+        "You write the final text the user has just discussed with you by voice. "
+        "The conversation is the brief: honour every instruction, fact and "
+        "preference expressed in it, and nothing else. It is a transcript of "
+        "speech, so read past the hesitations and repetitions, and where the user "
+        "corrected themselves keep only the corrected version. Output ONLY the "
+        "finished "
+        "text — no preamble, no commentary, no surrounding quotes, no code fences "
+        "unless the text itself is code. Write it in the language the user spoke, "
+        "ready to paste as-is."
+    )
+    # The closing user turn that asks for it (appended to the conversation).
+    TALK_GENERATE_REQUEST: str = (
+        "The conversation is over. Write the final text now, following everything "
+        "we discussed. Output only that text."
+    )
+
     # --- Mode Definitions (icon, overlay text, colors) ---
     MODES: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
         "dictation":  {"icon": "🎙️", "text": "Listening...",    "bg": "bg", "fg": "accent"},
         "ai":         {"icon": "🤖", "text": "AI Listening...", "bg": "bg", "fg": "accent"},
         "ai_rewrite": {"icon": "✍️", "text": "Rewrite Mode...", "bg": "bg", "fg": "accent"},
         "vision":     {"icon": "📸", "text": "Vision Mode...",  "bg": "bg", "fg": "accent"},
+        "talk":       {"icon": "🗣️", "text": "Talk Mode...",    "bg": "bg", "fg": "accent"},
     })
+
+    #: The modes whose hotkey records audio while it is held. MODES above is the
+    #: overlay's appearance table and is NOT this list: 'talk' has a look there
+    #: but owns the microphone through its own session, not through the key.
+    RECORDING_MODES: Tuple[str, ...] = ("dictation", "ai", "ai_rewrite", "vision")
 
     # --- Hotkey Definitions ---
     # format: "id": (Label, [chord specs])
@@ -258,6 +469,8 @@ class Config:
         "ai":         ("F4",  ["F4", "F14"]),
         "ai_rewrite": ("F7",  ["F7", "PREVIOUSSONG"]),
         "vision":     ("F8",  ["F8", "PLAYPAUSE"]),
+        # Spoken conversation that ends in one generated, ready-to-paste text.
+        "talk":       ("F6",  ["F6"]),
         "pin":        ("F9",  ["F9", "NEXTSONG"]),
         "tts":        ("F10", ["F10", "MUTE"]),
         # Cancel the active recording / in-flight transcription (no text inserted).
@@ -413,6 +626,8 @@ def _build_config() -> Config:
         overrides["WHISPERCPP_MODEL"] = str(trans["whispercpp_model"])
     if "openai_model" in trans:
         overrides["OPENAI_MODEL"] = str(trans["openai_model"])
+    if "openai_eagerness" in trans:
+        overrides["OPENAI_TURN_EAGERNESS"] = str(trans["openai_eagerness"]).strip().lower()
     if "deepgram_model" in trans:
         overrides["DEEPGRAM_MODEL"] = str(trans["deepgram_model"])
     if "model" in trans:
@@ -460,6 +675,87 @@ def _build_config() -> Config:
     if custom is not None:
         overrides["POSTPROCESS_CUSTOM_PROMPT"] = str(custom).strip()
 
+    talk = data.get("talk", {})
+    if "vad" in talk:
+        overrides["TALK_VAD"] = bool(talk["vad"])
+    if "vad_threshold" in talk:
+        overrides["TALK_VAD_THRESHOLD"] = float(talk["vad_threshold"])
+    if "silence_ms" in talk:
+        overrides["TALK_VAD_SILENCE_MS"] = int(talk["silence_ms"])
+    if "min_speech_ms" in talk:
+        overrides["TALK_VAD_MIN_SPEECH_MS"] = int(talk["min_speech_ms"])
+    if "turn_timeout" in talk:
+        overrides["TALK_TURN_TIMEOUT"] = float(talk["turn_timeout"])
+    if "idle_timeout" in talk:
+        overrides["TALK_IDLE_TIMEOUT"] = float(talk["idle_timeout"])
+    if "max_turns" in talk:
+        overrides["TALK_MAX_TURNS"] = int(talk["max_turns"])
+    if "review_timeout" in talk:
+        overrides["TALK_REVIEW_TIMEOUT"] = float(talk["review_timeout"])
+    if "depth" in talk:
+        overrides["TALK_DEPTH"] = str(talk["depth"]).strip().lower()
+    # Back-compat: `auto_finish` was one enum before the two toggles split it.
+    if "auto_finish" in talk:
+        legacy = str(talk["auto_finish"]).strip().lower()
+        overrides["TALK_FINISH_ON_PHRASE"] = legacy in ("asked", "model")
+        overrides["TALK_FINISH_BY_MODEL"] = legacy == "model"
+    if "finish_on_phrase" in talk:
+        overrides["TALK_FINISH_ON_PHRASE"] = bool(talk["finish_on_phrase"])
+    if "finish_by_model" in talk:
+        overrides["TALK_FINISH_BY_MODEL"] = bool(talk["finish_by_model"])
+    if "finish_phrases" in talk:
+        overrides["TALK_FINISH_PHRASES"] = tuple(
+            str(phrase).strip().lower() for phrase in talk["finish_phrases"]
+            if str(phrase).strip()
+        )
+    if "screenshot" in talk:
+        overrides["TALK_SCREENSHOT"] = bool(talk["screenshot"])
+    if "screenshot_region" in talk:
+        overrides["TALK_SCREENSHOT_REGION"] = str(talk["screenshot_region"]).strip().lower()
+    if "screenshot_cursor_px" in talk:
+        overrides["TALK_SCREENSHOT_CURSOR_PX"] = int(talk["screenshot_cursor_px"])
+    if "screenshot_max_px" in talk:
+        overrides["TALK_SCREENSHOT_MAX_PX"] = int(talk["screenshot_max_px"])
+    if str(talk.get("screen_prompt", "")).strip():
+        overrides["TALK_SCREEN_PROMPT"] = str(talk["screen_prompt"]).strip()
+    if "semantic_turns" in talk:
+        overrides["TALK_SEMANTIC_TURNS"] = bool(talk["semantic_turns"])
+    if "turn_threshold" in talk:
+        overrides["TALK_TURN_THRESHOLD"] = float(talk["turn_threshold"])
+    if "semantic_trigger_ms" in talk:
+        overrides["TALK_SEMANTIC_TRIGGER_MS"] = int(talk["semantic_trigger_ms"])
+    if "max_silence_ms" in talk:
+        overrides["TALK_TURN_MAX_SILENCE_MS"] = int(talk["max_silence_ms"])
+    # `turn_model_path`/`turn_model_url` were two keys before one took both jobs.
+    for legacy in ("turn_model_url", "turn_model_path", "turn_model"):
+        if str(talk.get(legacy, "")).strip():
+            overrides["TALK_TURN_MODEL"] = str(talk[legacy]).strip()
+    if "speak_replies" in talk:
+        overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
+    if "auto_paste" in talk:
+        overrides["TALK_AUTO_PASTE"] = bool(talk["auto_paste"])
+    if str(talk.get("engine", "")).strip():
+        overrides["TALK_ENGINE"] = str(talk["engine"]).strip().lower()
+    if str(talk.get("realtime_model", "")).strip():
+        overrides["TALK_REALTIME_MODEL"] = str(talk["realtime_model"]).strip()
+    if str(talk.get("realtime_voice", "")).strip():
+        # Lowercased: the API rejects "Echo", and a config file is typed by hand.
+        overrides["TALK_REALTIME_VOICE"] = str(talk["realtime_voice"]).strip().lower()
+    if str(talk.get("realtime_transcribe", "")).strip():
+        overrides["TALK_REALTIME_TRANSCRIBE"] = str(talk["realtime_transcribe"]).strip()
+    if "barge_in" in talk:
+        overrides["TALK_BARGE_IN"] = bool(talk["barge_in"])
+    if "barge_in_ms" in talk:
+        overrides["TALK_BARGE_IN_MS"] = int(talk["barge_in_ms"])
+    if "barge_in_keep" in talk:
+        overrides["TALK_BARGE_IN_KEEP"] = float(talk["barge_in_keep"])
+    if str(talk.get("system_prompt", "")).strip():
+        overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
+    if "instructions" in talk:
+        overrides["TALK_INSTRUCTIONS"] = str(talk["instructions"]).strip()
+    if str(talk.get("generate_prompt", "")).strip():
+        overrides["TALK_GENERATE_PROMPT"] = str(talk["generate_prompt"]).strip()
+
     clip = data.get("clipboard", {})
     if "paste_delay" in clip:
         overrides["CLIPBOARD_PASTE_DELAY"] = float(clip["paste_delay"])
@@ -469,6 +765,8 @@ def _build_config() -> Config:
         overrides["TERMINAL_CACHE_TTL"] = float(clip["terminal_cache_ttl"])
 
     models = data.get("models", {})
+    if "provider" in models:
+        overrides["AI_PROVIDER"] = str(models["provider"])
     if "chat" in models:
         overrides["MODEL_CHAT"] = str(models["chat"])
     if "vision" in models:
@@ -481,6 +779,8 @@ def _build_config() -> Config:
         overrides["OVERLAY_WIDTH"] = int(overlay["width"])
     if "height" in overlay:
         overrides["OVERLAY_HEIGHT"] = int(overlay["height"])
+    if "chat_auto_hide" in overlay:
+        overrides["CHAT_AUTO_HIDE_SEC"] = int(overlay["chat_auto_hide"])
 
     hotkeys = data.get("hotkeys", {})
     if hotkeys:

@@ -31,6 +31,13 @@ dependencies = [
 # Streaming live transcription backends.
 openai = ["openai>=2"]
 deepgram = ["deepgram-sdk>=7"]
+# Semantic end-of-turn detection for talk mode (Smart Turn v3, ~8 MB ONNX
+# fetched on first use). Without it, talk mode ends turns on silence alone.
+turn = ["onnxruntime>=1.17"]
+# Local offline text-to-speech (Piper). Voices are ~60 MB ONNX files fetched on
+# first use into ~/.cache/loquivox/piper. Without it, replies are spoken by the
+# configured cloud engine.
+tts = ["piper-tts>=1.2"]
 
 [project.scripts]
 loquivox = "loquivox.app:main"

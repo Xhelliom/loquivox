@@ -3,9 +3,9 @@ AI chat and vision completion service.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from loquivox.api import get_client
+from loquivox.api import get_ai_client
 from loquivox.config import CFG
 from loquivox.decorators import safe_execute
 from loquivox.state import STATE
@@ -13,6 +13,27 @@ from loquivox.state import STATE
 
 class AIService:
     """AI chat and vision completion service."""
+
+    @staticmethod
+    def _create(messages: List[Dict[str, Any]], model: str, **extra):
+        """
+        Start a completion through the provider the user picked.
+
+        The one place that knows the provider's quirks: Groq's reasoning models
+        otherwise answer with their <think> block inline (qwen does), which
+        would be typed at the cursor and read aloud, and "hidden" is Groq-only
+        so it is never sent to OpenAI.
+        """
+        provider = STATE.ai_provider
+        kwargs = {"reasoning_format": "hidden"} if provider == "groq" else {}
+        return get_ai_client(provider).chat.completions.create(
+            model=model, messages=messages, **kwargs, **extra
+        )
+
+    @staticmethod
+    def _complete(messages: List[Dict[str, Any]], model: str) -> Optional[str]:
+        """One completion, waited for."""
+        return AIService._create(messages, model).choices[0].message.content
 
     @staticmethod
     def build_messages(user_content: str) -> List[Dict[str, Any]]:
@@ -26,12 +47,50 @@ class AIService:
     @safe_execute("AI Chat")
     def chat(prompt: str) -> Optional[str]:
         """Send chat completion request."""
-        messages = AIService.build_messages(prompt)
-        response = get_client().chat.completions.create(
-            model=CFG.MODEL_CHAT,
-            messages=messages
-        )
-        return response.choices[0].message.content
+        return AIService._complete(AIService.build_messages(prompt),
+                                   STATE.ai_chat_model)
+
+    @staticmethod
+    def _stream(messages: List[Dict[str, Any]], model: str,
+                on_delta: Callable[[str], None]) -> str:
+        """
+        The same completion, handed over sentence by sentence as it is written.
+
+        ``on_delta`` receives the answer SO FAR, not the increment: every caller
+        wants to display the whole thing, and accumulating here means the UI
+        can drop a callback (it throttles) without losing text.
+        """
+        text = ""
+        for chunk in AIService._create(messages, model, stream=True):
+            choices = getattr(chunk, "choices", None)
+            delta = choices[0].delta.content if choices else None
+            if not delta:
+                continue
+            text += delta
+            on_delta(text)
+        return text
+
+    @staticmethod
+    @safe_execute("AI Completion")
+    def complete(messages: List[Dict[str, Any]],
+                 model: Optional[str] = None,
+                 on_delta: Optional[Callable[[str], None]] = None) -> Optional[str]:
+        """
+        Raw chat completion for callers that build their own message list.
+
+        Unlike ``chat``, this ignores the global conversation history and system
+        prompt — talk mode keeps its conversation to itself, so a long spoken
+        session never pollutes (or gets polluted by) the F4 chat history.
+
+        With ``on_delta`` the answer is streamed to that callback as it comes;
+        the return value is the same either way, so a caller that only wants
+        the finished text is unaffected — and a failed stream falls back to the
+        error path of ``safe_execute`` exactly like a failed one-shot call.
+        """
+        model = model or STATE.ai_chat_model
+        if on_delta is None:
+            return AIService._complete(messages, model)
+        return AIService._stream(messages, model, on_delta)
 
     @staticmethod
     @safe_execute("AI Vision")
@@ -46,8 +105,4 @@ class AIService:
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
         }
-        response = get_client().chat.completions.create(
-            model=CFG.MODEL_VISION,
-            messages=messages
-        )
-        return response.choices[0].message.content
+        return AIService._complete(messages, STATE.ai_vision_model)

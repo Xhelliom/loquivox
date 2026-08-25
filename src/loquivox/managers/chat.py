@@ -3,6 +3,7 @@ Chat overlay state and message management.
 """
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from loquivox.config import CFG
@@ -18,15 +19,64 @@ class ChatManager:
     """Manages chat overlay state and messages."""
 
     @staticmethod
-    def add_message(role: str, text: str) -> None:
-        """Add message to chat overlay."""
+    def add_message(role: str, text: str, status: Optional[str] = None,
+                    *, summon: bool = True) -> None:
+        """
+        Add a message to the chat overlay.
+
+        ``role`` becomes the bubble's CSS class, so "user", "assistant" and
+        "result" (talk mode's generated text) all go through this one path.
+        ``status`` is the single line shown under it — the review keys, when
+        the message is something to accept or reject.
+
+        ``summon=False`` records the message but never OPENS the overlay: plain
+        dictation types at the cursor and has nothing to show there, and a
+        layer-shell window mapping at that moment can take the keyboard focus
+        the next paste is aimed at. An overlay that is already up — pinned, or
+        carrying a conversation — still gets the message.
+        """
         STATE.chat_messages.append({"role": role, "text": text})
 
         # Trim to limit
         if len(STATE.chat_messages) > CFG.CHAT_MESSAGE_LIMIT:
             STATE.chat_messages = STATE.chat_messages[-CFG.CHAT_MESSAGE_LIMIT:]
 
-        ChatManager.refresh_overlay()
+        ChatManager._last_stream = 0.0  # the live node is about to be replaced
+        if summon or STATE.chat_overlay_window is not None:
+            ChatManager.refresh_overlay(status)
+
+    @staticmethod
+    def clear() -> None:
+        """
+        Empty the overlay.
+
+        Only what is on screen: the answer history and the models' own
+        conversation histories are somebody else's to clear.
+        """
+        STATE.chat_messages = []
+        ChatManager._last_stream = 0.0
+
+    @staticmethod
+    def set_result(text: str, status: str) -> None:
+        """
+        Put a generated text up for review, replacing the previous attempt.
+
+        A rewrite (R) must not stack a second copy under the first: what is on
+        screen is the candidate, and there is only ever one.
+        """
+        if STATE.chat_messages and STATE.chat_messages[-1]["role"] == "result":
+            STATE.chat_messages.pop()
+        ChatManager.add_message("result", text, status=status)
+
+    @staticmethod
+    def _keep_open() -> bool:
+        """
+        True while the overlay must not fade out: pinned, being typed into, or
+        carrying a talk conversation — whose turns last far longer than the
+        auto-hide delay, so without this the WebView is destroyed and rebuilt
+        between every single turn.
+        """
+        return STATE.chat_pinned or STATE.chat_input_focused or STATE.talk_active
 
     @staticmethod
     def toggle_pin() -> None:
@@ -35,6 +85,8 @@ class ChatManager:
             return
             
         STATE.chat_pinned = not STATE.chat_pinned
+        if STATE.chat_pinned:
+            STATE.chat_hidden = False  # pinning is how a hidden bubble comes back
 
         if not STATE.chat_pinned and STATE.chat_overlay_window:
             ChatManager._cancel_timer()
@@ -56,6 +108,8 @@ class ChatManager:
         if not STATE.chat_enabled:
             ChatManager._destroy()
             return
+        if STATE.chat_hidden:
+            return  # the user closed it — nothing reopens it behind their back
 
         if not STATE.chat_overlay_window:
             # Late import to avoid circular dependency
@@ -74,7 +128,7 @@ class ChatManager:
         # Don't arm the auto-hide while the text input is focused, or the
         # overlay would fade out from under the user mid-typing (an unrelated
         # refresh — e.g. a TTS toggle — would otherwise re-arm it).
-        if not STATE.chat_pinned and not STATE.chat_input_focused:
+        if not ChatManager._keep_open():
             STATE.chat_hide_timer = GLib.timeout_add_seconds(
                 CFG.CHAT_AUTO_HIDE_SEC,
                 ChatManager._auto_hide
@@ -91,17 +145,116 @@ class ChatManager:
         STATE.chat_input_focused = active
         if active:
             ChatManager._cancel_timer()
-        elif not STATE.chat_pinned and STATE.chat_overlay_window:
+        elif not ChatManager._keep_open() and STATE.chat_overlay_window:
             ChatManager._cancel_timer()
             STATE.chat_hide_timer = GLib.timeout_add_seconds(
                 CFG.CHAT_AUTO_HIDE_SEC, ChatManager._auto_hide
             )
 
+    #: the bubble waits this long before opening, so the recording overlay gets
+    #: the main thread — and its fade-in — to itself first. Building either
+    #: window blocks the GTK loop, and the one that has to answer the key press
+    #: instantly is the other one.
+    _OPEN_DELAY_MS: int = 450
+
+    @staticmethod
+    def set_talk(active: bool) -> None:
+        """
+        Open the bubble when a talk session starts, and hand the window back to
+        the side conversation when it ends.
+
+        The overlay normally appears with the first message; a spoken session
+        has to be visible before that, because the first thing it shows is the
+        transcript of a sentence still being said. Opening is deferred all the
+        same — the bubble has nothing to show until the first words come back,
+        and ``talk_active`` is re-read when the timer fires, so a session
+        dropped in the meantime opens nothing. Cosmetic only: the microphone
+        runs on its own thread and misses nothing either way.
+        """
+        if not active:
+            ChatManager._apply_talk(False)
+            return
+        GLib.timeout_add(ChatManager._OPEN_DELAY_MS, ChatManager._open_talk)
+
+    @staticmethod
+    def _open_talk() -> bool:
+        """Open the bubble, unless the session is already over."""
+        if STATE.talk_active:
+            ChatManager._apply_talk(True)
+        return False
+
+    @staticmethod
+    @run_on_main_thread
+    def _apply_talk(active: bool) -> None:
+        """Put the window into (or out of) its talk livery. Main thread only."""
+        if not STATE.chat_enabled:
+            return
+        # Whichever way the session turns, a bubble closed by hand does not
+        # outlive it: the next F4 answer must not land in a window nobody sees.
+        STATE.chat_hidden = False
+        if active:
+            # A new conversation starts on an empty bubble — the previous
+            # session's turns are history, and reading them as this one's is
+            # the confusion this avoids.
+            ChatManager.clear()
+        if not active and STATE.chat_overlay_window is None:
+            return  # nothing to hand back
+        if STATE.chat_overlay_window is None:
+            from loquivox.ui.chat_overlay import ChatOverlay
+            STATE.chat_overlay_window = ChatOverlay(talk=True)
+        else:
+            STATE.chat_overlay_window.set_talk_mode(active)
+        ChatManager._show_overlay()
+
+    #: last time a live update reached the page — the model writes far faster
+    #: than anyone reads, and every update crosses a process boundary
+    _last_stream: float = 0.0
+    _STREAM_INTERVAL: float = 0.08
+
+    @staticmethod
+    def stream(role: str, text: str) -> None:
+        """
+        Show the turn in progress — the transcript being heard, then the reply
+        being written — without rebuilding the page.
+
+        Throttled: a token-by-token stream would fire dozens of times a second
+        for text that is read at reading speed. Dropping updates is safe
+        because each one carries the whole turn, not an increment, and the
+        finished turn arrives as a real message right after.
+        """
+        now = time.monotonic()
+        if now - ChatManager._last_stream < ChatManager._STREAM_INTERVAL:
+            return
+        ChatManager._last_stream = now
+        ChatManager._stream_impl(role, text)
+
+    @staticmethod
+    @run_on_main_thread
+    def _stream_impl(role: str, text: str) -> None:
+        if STATE.chat_overlay_window:
+            STATE.chat_overlay_window.set_live(role, text)
+
+    @staticmethod
+    @run_on_main_thread
+    def hide_manual() -> None:
+        """
+        The ✕ on the bubble: hide it now, whatever is holding it open.
+
+        Deliberately stronger than the auto-hide — that one refuses to fire
+        while pinned, typed into or mid-conversation, and all three of those
+        are exactly when someone reaches for the close button. The pin hotkey
+        brings it back.
+        """
+        STATE.chat_hidden = True
+        ChatManager._cancel_timer()
+        if STATE.chat_overlay_window:
+            STATE.chat_overlay_window.start_fade_out(callback=ChatManager._destroy)
+
     @staticmethod
     def _auto_hide() -> bool:
         """Auto-hide callback."""
         STATE.chat_hide_timer = None
-        if not STATE.chat_pinned and STATE.chat_overlay_window:
+        if not ChatManager._keep_open() and STATE.chat_overlay_window:
             STATE.chat_overlay_window.start_fade_out(callback=ChatManager._destroy)
         return False
 
@@ -114,7 +267,16 @@ class ChatManager:
 
     @staticmethod
     def _destroy() -> None:
-        """Destroy chat overlay window."""
+        """
+        Destroy the chat overlay window.
+
+        Clearing ``chat_input_focused`` is the point: a window torn down while
+        its input box had focus never emits the blur that would have cleared
+        the flag, and ``_keep_open()`` then answers True forever — the overlay
+        stops auto-hiding, sits over everything, and holds the keyboard focus
+        that dictation's paste is aimed at.
+        """
+        STATE.chat_input_focused = False
         if STATE.chat_overlay_window:
             STATE.chat_overlay_window.close()
             STATE.chat_overlay_window = None
