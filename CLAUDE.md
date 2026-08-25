@@ -194,6 +194,16 @@ panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
 recording overlay while reviewing: its hint strip names the conversation's
 keys, which are not the ones that apply then.
 
+Two things stay off this window on purpose, both compositor cost rather than
+Python cost (the GTK loop measures fine either way — the spend is in the
+WebProcess and the compositor): no `backdrop-filter`, which would have the
+compositor read back and blur everything under a window that resizes as it
+fills, and no promoted scroll layer, which would be reallocated on every one of
+those resizes. Resizes themselves are coalesced over `RESIZE_COALESCE_MS`, and
+the MutationObserver watches `#chat`'s direct children only — routing the live
+node through `checkScroll()` would start a dozen smooth-scroll animations a
+second, so `set_live` scrolls itself, instantly.
+
 Dictation is the one mode that adds a message with `summon=False`: its answer
 is the text landing at the cursor, and a layer-shell window mapping at that
 moment takes the keyboard focus `ClipboardService.type_text` aims Ctrl+V at.

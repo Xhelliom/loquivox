@@ -42,6 +42,9 @@ TALK_WIDTH, TALK_MIN_HEIGHT, TALK_GAP = 560, 96, 16
 TALK_OVERLAY_MARGIN = 80
 #: and never taller than this share of the screen — it is an overlay, not a window
 TALK_MAX_SCREEN = 0.6
+#: resizes are coalesced over this window (ms): each one allocates a new surface
+#: and makes the compositor re-blur what is behind it
+RESIZE_COALESCE_MS = 120
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +301,17 @@ html, body {{
   border: 1px solid {accent_alpha40};
   border-radius: 22px;
   box-shadow: 0 10px 40px {black_alpha40};
+  /* No backdrop blur here. It is the most expensive property in this sheet —
+     the compositor has to read back and blur everything under the window on
+     every frame — and this window, unlike the side panel, is resized as its
+     content grows and sits over whatever the user is working in. The
+     background is opaque enough on its own to stay readable. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }}
+/* Same reason: a promoted layer has to be reallocated on every resize, and the
+   bubble barely scrolls — it grows to fit instead. */
+.talk .chat-scroll-area {{ will-change: auto; transform: none; }}
 /* The keyboard is grabbed for the whole session — there is nothing to type into. */
 .talk .chat-input-bar {{ display: none; }}
 .talk .chat-container {{ padding-bottom: 12px; }}
@@ -375,7 +388,12 @@ function setLive(role, html) {
     node = live.firstElementChild;
   }
   node.querySelector('.text').innerHTML = html;
-  reportHeight();  // scrolling is the MutationObserver's job, once per change
+  // Scrolled here, instantly. The observer below deliberately ignores this
+  // node: routing a dozen updates a second through checkScroll() would start
+  // a dozen smooth-scroll animations a second, each outliving the next.
+  const area = document.getElementById('scroll-area');
+  if (area) area.scrollTop = area.scrollHeight;
+  reportHeight();
 }
 
 function sendMessage() {
@@ -449,7 +467,9 @@ function checkScroll(smooth=true) {
 // Observe new messages
 const chat = document.getElementById('chat');
 if (chat) {
-  new MutationObserver(() => checkScroll(true)).observe(chat, { childList: true, subtree: true });
+  // Direct children only: those are real messages. The live node rewrites its
+  // own subtree many times a second and scrolls itself — see setLive().
+  new MutationObserver(() => checkScroll(true)).observe(chat, { childList: true });
 }
 
 window.onload = () => { checkScroll(false); reportHeight(); };
@@ -493,6 +513,8 @@ class ChatOverlay(Gtk.Window):
         #: talk bubble (top edge, content-sized) vs side conversation panel
         self.talk = talk
         self._height = TALK_MIN_HEIGHT
+        self._wanted_height = TALK_MIN_HEIGHT
+        self._resize_timer: Optional[int] = None
         self._ready = False        # the page is loaded and can run JS
         self._pending_js: Optional[str] = None
         self._setup_window()
@@ -599,14 +621,28 @@ class ChatOverlay(Gtk.Window):
         self.resize(width, height)
 
     def _apply_height(self, height: int) -> None:
-        """Grow or shrink the bubble to the height its content just reported."""
+        """
+        Grow or shrink the bubble to the height its content just reported.
+
+        Coalesced: a reply arriving line by line asks for a new height every
+        few hundred milliseconds, and every resize costs a fresh surface, a
+        full relayout and a repaint of what is behind it. The last height asked
+        for within the window is the one that lands.
+        """
         if not self.talk or height <= 0:
             return
-        height = max(TALK_MIN_HEIGHT, min(height, self._max_height()))
-        if height == self._height:
-            return
-        self._height = height
-        self._apply_geometry()
+        self._wanted_height = max(TALK_MIN_HEIGHT, min(height, self._max_height()))
+        if self._resize_timer is None:
+            self._resize_timer = GLib.timeout_add(RESIZE_COALESCE_MS,
+                                                  self._flush_height)
+
+    def _flush_height(self) -> bool:
+        """Apply the height last asked for, if it is not the current one."""
+        self._resize_timer = None
+        if self._wanted_height != self._height:
+            self._height = self._wanted_height
+            self._apply_geometry()
+        return False
 
     def set_talk_mode(self, talk: bool) -> None:
         """
@@ -851,7 +887,7 @@ class ChatOverlay(Gtk.Window):
             bg_rgba=hex_to_rgba(scheme["bg"], 0.95),
             # The bubble floats over what the user is working on: it must dim
             # the content underneath, never hide it.
-            bg_rgba_talk=hex_to_rgba(scheme["bg"], 0.78),
+            bg_rgba_talk=hex_to_rgba(scheme["bg"], 0.86),
             surface=scheme["surface"],
             surface_alpha80=hex_to_rgba(scheme["surface"], 0.8),
             accent=scheme["accent"],
@@ -943,4 +979,7 @@ class ChatOverlay(Gtk.Window):
     def close(self) -> None:
         """Clean up and destroy."""
         self._cancel_fade_timer()
+        if self._resize_timer is not None:
+            GLib.source_remove(self._resize_timer)
+            self._resize_timer = None
         self.destroy()
