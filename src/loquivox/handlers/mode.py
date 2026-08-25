@@ -423,6 +423,7 @@ class ModeHandler:
                     return
                 print("🗣️  Talk mode — speak freely. Enter: write the text · "
                       "Space: end this turn · Esc: drop the conversation")
+                ModeHandler._talk_capture_screen(session)
                 while True:
                     if ModeHandler._talk_converse(session, keys) == "cancel":
                         print("✖️  Talk mode cancelled — nothing written")
@@ -441,6 +442,54 @@ class ModeHandler:
             STATE.current_mode = None
             STATE.talk_active = False
             OverlayManager.hide()
+
+    @staticmethod
+    def _talk_capture_screen(session) -> None:
+        """
+        Hand the session what is on screen right now, in the background.
+
+        Most of what someone is about to dictate is already in front of them —
+        the error, the thread they are replying to, the page they are writing
+        about — and they will not spell it out. So the screen is captured once,
+        described once by the vision model, and attached as context.
+
+        All of it happens on its own thread while the first turn is already
+        being recorded: the capture costs no startup delay, and the description
+        lands in time for the first reply (or, at worst, the second). Opt-in —
+        it sends the screen to the cloud — and silent on failure.
+
+        The recording overlay may be in the shot: waiting for it to be gone
+        would mean delaying the microphone, which is exactly what this avoids.
+        The prompt tells the model to ignore Loquivox's own windows instead.
+        """
+        cfg = config_module.CFG
+        if not cfg.TALK_SCREENSHOT:
+            return
+        threading.Thread(
+            target=ModeHandler._talk_screen_worker, args=(session,), daemon=True
+        ).start()
+
+    @staticmethod
+    def _talk_screen_worker(session) -> None:
+        """Worker: capture, describe, attach. Never raises, never blocks a turn."""
+        cfg = config_module.CFG
+        image = ImageService.take_screenshot(
+            path=f"{cfg.TEMP_SCREEN_PATH}.talk.png",
+            region=cfg.TALK_SCREENSHOT_REGION,
+            cursor_px=cfg.TALK_SCREENSHOT_CURSOR_PX,
+            max_px=cfg.TALK_SCREENSHOT_MAX_PX,
+        )
+        if not image:
+            return
+        description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
+        if not description or cfg.TALK_SCREEN_EMPTY.lower() in description.lower():
+            print("👁️  Screen context: nothing relevant on screen")
+            return
+        if not STATE.talk_active:
+            return  # the conversation ended while we were looking
+        session.set_context(description)
+        print(f"👁️  Screen context: {description[:120]}"
+              f"{'…' if len(description) > 120 else ''}")
 
     @staticmethod
     def _talk_converse(session, keys) -> str:

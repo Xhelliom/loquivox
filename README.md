@@ -148,6 +148,19 @@ actually want — the unstated assumption, the objection your reader will raise.
 The last two are independent toggles — in **Settings → Talk**, or under `[talk]` in
 `config.toml`. Turn both off and nothing writes the text until *you* press the key.
 
+**It can look at your screen, once.** Half of what you're about to dictate is already in
+front of you — the error dialog, the thread you're answering, the page you're describing —
+and you won't say it out loud. Tick *Send a screenshot as context* in **Settings → Talk** and
+the screen is captured when the session opens, described once by the vision model, and handed
+to the conversation as context. It runs **in parallel with your first sentence**, so it costs
+no startup delay, and it's one vision call per session — not one per turn.
+
+Off by default: it sends your screen to the cloud. Capture the whole screen, or just a box
+around the cursor to keep the model on what you're working on (pointer location works under
+X11 and Hyprland; elsewhere Wayland offers no way to ask, so it falls back to the full
+screen). Either way the image is downscaled to `screenshot_max_px` before upload — which is
+what keeps a 4K capture from becoming megabytes of base64.
+
 **Turns end on meaning, not on a stopwatch.** A silence timer can't tell *"…and then, uh…"*
 from a finished sentence. So the pause is only a trigger: when Loquivox hears one, a small
 audio model — [Smart Turn v3](https://github.com/pipecat-ai/smart-turn), 8 MB, ~10 ms on CPU,

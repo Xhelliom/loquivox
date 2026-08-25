@@ -129,3 +129,24 @@ class WaylandScreenshot(ScreenshotBackend):
             return result.returncode == 0
         except Exception:
             return False
+
+    def pointer_position(self):
+        """
+        Pointer coordinates, when the compositor is willing to say.
+
+        Wayland deliberately has no protocol for this — a client only learns
+        the pointer position while it is over its own surface. Compositors that
+        expose it do so through their own IPC, so this tries the ones that ship
+        a CLI (Hyprland) and returns None everywhere else, which the caller
+        reads as "capture the whole screen".
+        """
+        try:
+            result = subprocess.run(
+                ["hyprctl", "cursorpos"], capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode == 0:
+                x, _, y = result.stdout.strip().partition(",")
+                return int(x.strip()), int(y.strip())
+        except Exception:
+            pass
+        return None

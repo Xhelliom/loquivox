@@ -305,6 +305,37 @@ class Config:
     # How long the generated text waits for a verdict before being left on the
     # clipboard (seconds) — it is never typed without an explicit accept.
     TALK_REVIEW_TIMEOUT: float = 120.0
+    # --- Talk mode: the screen as context (opt-in) ---
+    # A screenshot taken when the session starts, described once by the vision
+    # model, and handed to the conversation as context — most of what you are
+    # about to talk about is usually already on screen. OFF by default: it
+    # sends your screen to the cloud. The capture runs in parallel with your
+    # first turn, so it costs no startup delay.
+    TALK_SCREENSHOT: bool = False
+    # "screen" = the whole screen; "cursor" = a box around the pointer, which
+    # focuses the model on what you are actually working on. The pointer can
+    # only be located under X11 and Hyprland — anywhere else "cursor" falls
+    # back to the whole screen.
+    TALK_SCREENSHOT_REGION: str = "screen"
+    # Width of that box, in pixels (its height follows the screen's aspect).
+    TALK_SCREENSHOT_CURSOR_PX: int = 1200
+    # The capture is downscaled to this many pixels on its long edge before
+    # upload — the fix for a 4K screen. 0 disables the downscale.
+    TALK_SCREENSHOT_MAX_PX: int = 1280
+    # What the vision model is asked to report about that capture.
+    TALK_SCREEN_PROMPT: str = (
+        "The user is about to dictate a text to you by voice, and this is their "
+        "screen right now: the context they will be talking about, and will "
+        "probably not spell out. Describe it factually in at most 120 words — "
+        "which application, what document or page, and the content that matters. "
+        "Quote error messages, subject lines, names and figures verbatim rather "
+        "than summarising them. Ignore Loquivox's own small recording overlay and "
+        "chat panel if they are visible. If nothing on screen could plausibly be "
+        "useful, answer exactly: (nothing relevant on screen)"
+    )
+    #: the vision model's way of saying the screen holds nothing worth passing on
+    TALK_SCREEN_EMPTY: str = "(nothing relevant on screen)"
+
     # Speak the assistant's conversational replies even when TTS is toggled off
     # — talk mode is a voice conversation, the read-back is the point.
     TALK_SPEAK_REPLIES: bool = True
@@ -606,6 +637,16 @@ def _build_config() -> Config:
             str(phrase).strip().lower() for phrase in talk["finish_phrases"]
             if str(phrase).strip()
         )
+    if "screenshot" in talk:
+        overrides["TALK_SCREENSHOT"] = bool(talk["screenshot"])
+    if "screenshot_region" in talk:
+        overrides["TALK_SCREENSHOT_REGION"] = str(talk["screenshot_region"]).strip().lower()
+    if "screenshot_cursor_px" in talk:
+        overrides["TALK_SCREENSHOT_CURSOR_PX"] = int(talk["screenshot_cursor_px"])
+    if "screenshot_max_px" in talk:
+        overrides["TALK_SCREENSHOT_MAX_PX"] = int(talk["screenshot_max_px"])
+    if str(talk.get("screen_prompt", "")).strip():
+        overrides["TALK_SCREEN_PROMPT"] = str(talk["screen_prompt"]).strip()
     if "semantic_turns" in talk:
         overrides["TALK_SEMANTIC_TURNS"] = bool(talk["semantic_turns"])
     if "turn_threshold" in talk:

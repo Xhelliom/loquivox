@@ -95,6 +95,10 @@ class SettingsDialog:
     _talk_depth: Optional[Gtk.ComboBoxText] = None
     _talk_semantic_check: Optional[Gtk.CheckButton] = None
     _talk_speak_check: Optional[Gtk.CheckButton] = None
+    _talk_shot_check: Optional[Gtk.CheckButton] = None
+    _talk_shot_region: Optional[Gtk.ComboBoxText] = None
+    _talk_shot_cursor: Optional[Gtk.SpinButton] = None
+    _talk_shot_max: Optional[Gtk.SpinButton] = None
     _talk_status: Optional[Gtk.Label] = None
 
     @classmethod
@@ -948,6 +952,61 @@ class SettingsDialog:
         cls._talk_speak_check.set_active(bool(CFG.TALK_SPEAK_REPLIES))
         vbox.pack_start(cls._talk_speak_check, False, False, 0)
 
+        header3 = Gtk.Label()
+        header3.set_halign(Gtk.Align.START)
+        header3.set_markup("<b>Screen context</b>")
+        vbox.pack_start(header3, False, False, 10)
+
+        shot_note = Gtk.Label()
+        shot_note.set_halign(Gtk.Align.START)
+        shot_note.set_line_wrap(True)
+        shot_note.set_markup(
+            "<small><i>Most of what you are about to dictate is already on your "
+            "screen. Captured once when the session starts, in parallel with your "
+            "first sentence, and described by the vision model — so your screen "
+            "leaves the machine. Off by default.</i></small>"
+        )
+        vbox.pack_start(shot_note, False, False, 0)
+
+        cls._talk_shot_check = Gtk.CheckButton(
+            label="Send a screenshot as context when the session starts")
+        cls._talk_shot_check.set_active(bool(CFG.TALK_SCREENSHOT))
+        cls._talk_shot_check.connect("toggled", cls._on_talk_shot_toggled)
+        vbox.pack_start(cls._talk_shot_check, False, False, 0)
+
+        region_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        region_row.pack_start(cls._row_label("Capture:"), False, False, 0)
+        cls._talk_shot_region = Gtk.ComboBoxText()
+        cls._talk_shot_region.append("screen", "The whole screen")
+        cls._talk_shot_region.append("cursor", "A box around the cursor (X11 / Hyprland)")
+        cls._talk_shot_region.set_active_id(
+            "cursor" if CFG.TALK_SCREENSHOT_REGION == "cursor" else "screen")
+        cls._talk_shot_region.set_tooltip_text(
+            "Wayland gives no way to locate the pointer, except on Hyprland — "
+            "elsewhere this falls back to the whole screen."
+        )
+        region_row.pack_start(cls._talk_shot_region, True, True, 0)
+        vbox.pack_start(region_row, False, False, 0)
+
+        cursor_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cursor_row.pack_start(cls._row_label("Box width (px):"), False, False, 0)
+        cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
+        cls._talk_shot_cursor.set_value(int(CFG.TALK_SCREENSHOT_CURSOR_PX))
+        cursor_row.pack_start(cls._talk_shot_cursor, False, False, 0)
+        vbox.pack_start(cursor_row, False, False, 0)
+
+        max_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        max_row.pack_start(cls._row_label("Downscale to (px):"), False, False, 0)
+        cls._talk_shot_max = Gtk.SpinButton.new_with_range(0, 7680, 128)
+        cls._talk_shot_max.set_value(int(CFG.TALK_SCREENSHOT_MAX_PX))
+        cls._talk_shot_max.set_tooltip_text(
+            "Longest edge of the uploaded image — what keeps a 4K capture small. "
+            "0 uploads it as captured."
+        )
+        max_row.pack_start(cls._talk_shot_max, False, False, 0)
+        vbox.pack_start(max_row, False, False, 0)
+        cls._on_talk_shot_toggled(cls._talk_shot_check)
+
         apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_talk)
@@ -968,6 +1027,14 @@ class SettingsDialog:
         vbox.pack_start(hint, False, False, 0)
 
     @classmethod
+    def _on_talk_shot_toggled(cls, check: Gtk.CheckButton) -> None:
+        """Grey out the framing controls while the capture itself is off."""
+        active = bool(check.get_active())
+        for widget in (cls._talk_shot_region, cls._talk_shot_cursor, cls._talk_shot_max):
+            if widget is not None:
+                widget.set_sensitive(active)
+
+    @classmethod
     def _on_apply_talk(cls, _btn: Gtk.Button) -> None:
         """Write the talk knobs to config.toml and reload — next session uses them."""
         from loquivox.config_io import ConfigWriteError, update_section
@@ -984,6 +1051,10 @@ class SettingsDialog:
                 "depth": depth,
                 "semantic_turns": semantic,
                 "speak_replies": speak,
+                "screenshot": bool(cls._talk_shot_check.get_active()),
+                "screenshot_region": cls._talk_shot_region.get_active_id() or "screen",
+                "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
+                "screenshot_max_px": int(cls._talk_shot_max.get_value()),
             })
         except ConfigWriteError as e:
             cls._talk_status.set_markup(f"<small>❌ {e}</small>")
@@ -996,7 +1067,8 @@ class SettingsDialog:
             f"<small>✓ Applied — ends on: {', '.join(ends)}.</small>"
         )
         print(f"🗣️  Talk: finish_on_phrase={phrase} finish_by_model={by_model} "
-              f"depth={depth} semantic_turns={semantic}")
+              f"depth={depth} semantic_turns={semantic} "
+              f"screenshot={bool(cls._talk_shot_check.get_active())}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)

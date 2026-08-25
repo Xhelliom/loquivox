@@ -8,6 +8,7 @@ that provides concrete implementations of these ABCs.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Optional, Tuple
 
 
 class ClipboardBackend(ABC):
@@ -58,3 +59,15 @@ class ScreenshotBackend(ABC):
         Returns:
             True on success, False on failure.
         """
+
+    def pointer_position(self) -> Optional[Tuple[int, int]]:
+        """
+        Where the mouse pointer is, in the same coordinates as a full-screen
+        capture — or None when the session cannot tell.
+
+        None is a normal answer, not a failure: Wayland has no protocol for a
+        client to ask where the pointer is (only the compositor knows, and only
+        some of them expose it). Callers must degrade instead of insisting —
+        cropping around the cursor becomes cropping nothing.
+        """
+        return None

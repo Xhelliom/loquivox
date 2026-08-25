@@ -165,6 +165,26 @@ finish_by_model = false    # the assistant ends it once it has enough context
 review_timeout = 120.0
 # Read the assistant's spoken replies aloud even when TTS is toggled off.
 speak_replies = true
+
+# Screen context: a screenshot taken when the session starts, described once by
+# the vision model and handed to the conversation. Most of what you are about
+# to dictate is already in front of you — the error, the thread you're replying
+# to — and you won't spell it out. The capture runs in parallel with your first
+# sentence, so it costs no startup delay.
+# OFF by default: it sends your screen to the cloud.
+screenshot = false
+# "screen" = the whole screen; "cursor" = a box around the pointer, which
+# focuses the model on what you're actually working on. The pointer can only be
+# located under X11 and Hyprland — anywhere else this falls back to the whole
+# screen (Wayland has no protocol for it).
+screenshot_region = "screen"
+# Width of that box in pixels; its height follows the screen's aspect ratio.
+screenshot_cursor_px = 1200
+# Longest edge of the uploaded image — this is what keeps a 4K capture small
+# (3840 → 1280 is roughly ten times less to upload). 0 sends it as captured.
+screenshot_max_px = 1280
+# What the vision model is asked to report about it. Empty = the built-in prompt.
+# screen_prompt = ""
 # Override the two prompts: the conversation phase (understand, don't write)
 # and the generation phase (write the final text). Empty = keep the built-ins.
 # system_prompt = ""

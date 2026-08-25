@@ -410,6 +410,11 @@ class KeyboardHandler:
         if STATE.recording:
             return
 
+        # A talk session owns the microphone for its whole life, including the
+        # gaps between turns where the keyboard is not grabbed.
+        if STATE.talk_active:
+            return
+
         # Start recording for this mode
         if cls._is_recording_mode(mode):
             STATE.current_mode = mode

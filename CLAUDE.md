@@ -88,6 +88,13 @@ A whole conversation, not a single utterance — so it does NOT use the
 `process_audio_async` → `process()` path. `KeyboardHandler._on_press("talk")`
 spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
 
+0. If `CFG.TALK_SCREENSHOT`, `_talk_capture_screen` spawns a worker that
+   captures the screen (optionally cropped around the pointer via
+   `ScreenshotBackend.pointer_position`, always downscaled by `ImageService`),
+   has the vision model describe it once, and hands the text to
+   `TalkSession.set_context`. It runs beside the first turn on purpose — waiting
+   for it would delay the microphone — so the recording overlay may be in the
+   shot and the prompt tells the model to ignore it.
 1. `GrabbedKeys` (keyboard.py) keeps the input devices open for the *entire*
    session — a key pressed while the model is thinking is still queued when the
    next wait starts — but takes the exclusive grab only inside

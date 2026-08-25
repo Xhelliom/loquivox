@@ -84,3 +84,19 @@ class X11Screenshot(ScreenshotBackend):
             return result.returncode == 0
         except Exception:
             return False
+
+    def pointer_position(self):
+        """Pointer coordinates via ``xdotool getmouselocation`` (X11 globals)."""
+        try:
+            result = subprocess.run(
+                ["xdotool", "getmouselocation", "--shell"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode != 0:
+                return None
+            values = dict(
+                line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+            )
+            return int(values["X"]), int(values["Y"])
+        except Exception:
+            return None
