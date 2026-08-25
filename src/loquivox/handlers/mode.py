@@ -450,9 +450,10 @@ class ModeHandler:
 
         Four things can end the briefing: Enter (handled in ``_talk_listen``),
         the user saying so in a short utterance (caught here, before the model
-        is called), the model answering with its end-of-briefing marker
-        (``CFG.TALK_AUTO_FINISH``), and ``TALK_MAX_TURNS``. Everything said is
-        kept as part of the brief either way.
+        is called), the model answering with its end-of-briefing marker, and
+        ``TALK_MAX_TURNS``. The middle two are independently toggleable — see
+        ``services/talk.py``. Everything said is kept as part of the brief
+        either way.
         """
         from loquivox.services.talk import user_said_done
 
@@ -492,8 +493,8 @@ class ModeHandler:
                 TTSService.speak(reply.text, wait=True, force=cfg.TALK_SPEAK_REPLIES)
             if reply.done:
                 # The model took the floor to the writing phase — either because
-                # the user said so, or (auto_finish = "model") because it judged
-                # the brief complete.
+                # the user said so in words the phrase list doesn't cover, or
+                # (finish_by_model) because it judged the brief complete.
                 return "finish"
         print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
         return "finish"

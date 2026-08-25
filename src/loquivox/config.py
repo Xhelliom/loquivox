@@ -284,14 +284,16 @@ class Config:
     #   "normal"  — asks about what would change the text (default)
     #   "deep"    — pushes the reasoning: assumptions, objections, examples
     TALK_DEPTH: str = "normal"
-    # Who can end the briefing, on top of the Enter key (which always can):
-    #   "never" — the key only
-    #   "asked" — the key, or you saying you're done (default)
-    #   "model" — both, plus the assistant deciding it has enough
-    TALK_AUTO_FINISH: str = "asked"
+    # Who may end the briefing. The Enter key always can and is not a toggle —
+    # these two are, independently, so you can keep as much control as you want:
+    #   finish_on_phrase — saying you're done ends it ("vas-y", "j'ai fini")
+    #   finish_by_model  — the assistant ends it once it judges it has enough
+    # Both off = the key is the only way out.
+    TALK_FINISH_ON_PHRASE: bool = True
+    TALK_FINISH_BY_MODEL: bool = False
     # Spoken phrases that end the briefing on their own (matched on a SHORT
     # utterance only, accent- and punctuation-insensitive), before the model is
-    # even called. Ignored when auto_finish = "never".
+    # even called. Ignored when finish_on_phrase is off.
     TALK_FINISH_PHRASES: Tuple[str, ...] = (
         # French
         "j'ai fini", "j'ai termine", "c'est bon", "c'est tout", "vas-y",
@@ -590,8 +592,15 @@ def _build_config() -> Config:
         overrides["TALK_REVIEW_TIMEOUT"] = float(talk["review_timeout"])
     if "depth" in talk:
         overrides["TALK_DEPTH"] = str(talk["depth"]).strip().lower()
+    # Back-compat: `auto_finish` was one enum before the two toggles split it.
     if "auto_finish" in talk:
-        overrides["TALK_AUTO_FINISH"] = str(talk["auto_finish"]).strip().lower()
+        legacy = str(talk["auto_finish"]).strip().lower()
+        overrides["TALK_FINISH_ON_PHRASE"] = legacy in ("asked", "model")
+        overrides["TALK_FINISH_BY_MODEL"] = legacy == "model"
+    if "finish_on_phrase" in talk:
+        overrides["TALK_FINISH_ON_PHRASE"] = bool(talk["finish_on_phrase"])
+    if "finish_by_model" in talk:
+        overrides["TALK_FINISH_BY_MODEL"] = bool(talk["finish_by_model"])
     if "finish_phrases" in talk:
         overrides["TALK_FINISH_PHRASES"] = tuple(
             str(phrase).strip().lower() for phrase in talk["finish_phrases"]

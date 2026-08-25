@@ -12,14 +12,17 @@ The conversation is kept here, not in the global history: a ten-turn spoken
 briefing has no business landing in the F4 chat context (and vice versa). Only
 the finished text goes to the shared histories.
 
-Ending the briefing has three doors, and they all lead here (see
-``CFG.TALK_AUTO_FINISH``):
-  - the Enter key, always — handled by the talk loop, not by the model;
-  - saying so out loud ("j'ai fini", "vas-y", "that's it") — caught either by
-    ``user_said_done`` on the raw transcript, before any API call, or by the
-    model answering with the ``[[WRITE]]`` marker;
-  - the model deciding it has everything it needs, in ``auto_finish = "model"``
-    — same marker.
+Ending the briefing has three doors, and they all lead here:
+  - the Enter key, always — handled by the talk loop, not by the model, and not
+    a toggle: there is always a way out that depends on nothing;
+  - saying so out loud ("j'ai fini", "vas-y", "that's it"), when
+    ``CFG.TALK_FINISH_ON_PHRASE`` — caught either by ``user_said_done`` on the
+    raw transcript, before any API call, or by the model answering with the
+    ``[[WRITE]]`` marker;
+  - the model deciding it has everything it needs, when
+    ``CFG.TALK_FINISH_BY_MODEL`` — same marker.
+The last two are independent switches, so "I keep control of when it writes"
+and "let it decide" are both expressible, as is either one alone.
 The marker is stripped from what is spoken, shown and remembered: it is a
 protocol between the model and the loop, never part of the conversation.
 
@@ -33,7 +36,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import loquivox.config as config_module
 from loquivox.services.ai import AIService
@@ -58,26 +61,36 @@ _DEPTH_PROMPTS: Dict[str, str] = {
     ),
 }
 
-#: the end-of-briefing protocol, appended to the system prompt
-_FINISH_PROMPTS: Dict[str, str] = {
-    "never": (
+#: the end-of-briefing protocol, appended to the system prompt. Keyed by the
+#: two independent toggles: (the user may say so, the model may decide).
+_FINISH_PROMPTS: Dict[Tuple[bool, bool], str] = {
+    (False, False): (
         "The user ends the briefing with a key press, which you never see. Never "
-        "announce that you are about to write the text."
+        "announce that you are about to write the text, and never write it — not "
+        "even if they ask you to."
     ),
-    "asked": (
-        "The user decides when the briefing is over. The moment they say they are "
-        f"done — \"j'ai fini\", \"vas-y\", \"écris-le\", \"that's it\", \"go ahead\" — "
-        "reply with one short confirmation sentence and end that reply with the "
-        f"exact marker {FINISH_MARKER}. Emit that marker for no other reason: it "
-        "is what starts the writing."
+    (True, False): (
+        "The user decides when the briefing is over, and only the user. The moment "
+        "they say they are done — \"j'ai fini\", \"vas-y\", \"écris-le\", "
+        "\"that's it\", \"go ahead\" — reply with one short confirmation sentence "
+        f"and end that reply with the exact marker {FINISH_MARKER}. Never emit it "
+        "because YOU think the brief is complete: that call is theirs."
     ),
-    "model": (
-        "The user can end the briefing by saying they are done — \"j'ai fini\", "
-        "\"vas-y\", \"that's it\". You may also end it yourself, once you are "
-        "confident you could write the text well with what you already have. "
-        "Either way: reply with one short confirmation sentence and end that reply "
-        f"with the exact marker {FINISH_MARKER}. When in doubt, ask one more "
-        "question instead — emit the marker for no other reason."
+    (False, True): (
+        "You end the briefing yourself, and only yourself: once you are confident "
+        "you could write the text well with what you already have, reply with one "
+        "short confirmation sentence and end that reply with the exact marker "
+        f"{FINISH_MARKER}. Being asked to write is not by itself a reason to emit "
+        "it — the user has their own way of ending the briefing. When in doubt, "
+        "ask one more question instead."
+    ),
+    (True, True): (
+        "The briefing ends when the user says they are done — \"j'ai fini\", "
+        "\"vas-y\", \"that's it\" — or when you are confident you could write the "
+        "text well with what you already have. Either way: reply with one short "
+        "confirmation sentence and end that reply with the exact marker "
+        f"{FINISH_MARKER}. When in doubt, ask one more question instead — emit the "
+        "marker for no other reason."
     ),
 }
 
@@ -100,7 +113,7 @@ def user_said_done(text: str, max_words: int = 6) -> bool:
     Phrases come from ``CFG.TALK_FINISH_PHRASES``.
     """
     cfg = config_module.CFG
-    if cfg.TALK_AUTO_FINISH == "never":
+    if not cfg.TALK_FINISH_ON_PHRASE:
         return False
     normalized = _normalize(text)
     if not normalized or len(normalized.split()) > max_words:
@@ -136,7 +149,8 @@ class TalkSession:
     def system_prompt() -> str:
         """
         The conversation-phase prompt: the configured base, plus how deep to dig
-        (``TALK_DEPTH``) and who may end the briefing (``TALK_AUTO_FINISH``).
+        (``TALK_DEPTH``) and who may end the briefing (``TALK_FINISH_ON_PHRASE``
+        and ``TALK_FINISH_BY_MODEL``, independently).
 
         The clauses are appended rather than baked in so a user who overrides
         ``system_prompt`` in config.toml still gets the marker protocol — without
@@ -145,7 +159,8 @@ class TalkSession:
         cfg = config_module.CFG
         parts = [cfg.TALK_SYSTEM_PROMPT]
         parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
-        parts.append(_FINISH_PROMPTS.get(cfg.TALK_AUTO_FINISH, _FINISH_PROMPTS["asked"]))
+        parts.append(_FINISH_PROMPTS[(bool(cfg.TALK_FINISH_ON_PHRASE),
+                                     bool(cfg.TALK_FINISH_BY_MODEL))])
         return "\n\n".join(part for part in parts if part)
 
     def reply(self, text: str) -> Optional[TalkReply]:
@@ -219,6 +234,18 @@ if __name__ == "__main__":
     assert _MARKER_RE.sub("", "Ok, je rédige. [[WRITE]]").strip() == "Ok, je rédige."
     assert not _MARKER_RE.search("écris le texte maintenant")
 
-    prompt = TalkSession.system_prompt()
-    assert FINISH_MARKER in prompt or config_module.CFG.TALK_AUTO_FINISH == "never"
+    # Each toggle is independent, and off really means off.
+    from dataclasses import replace
+
+    base = config_module.CFG
+    try:
+        for phrase in (False, True):
+            for model in (False, True):
+                config_module.CFG = replace(base, TALK_FINISH_ON_PHRASE=phrase,
+                                            TALK_FINISH_BY_MODEL=model)
+                prompt = TalkSession.system_prompt()
+                assert user_said_done("vas-y") is phrase, (phrase, model)
+                assert (FINISH_MARKER in prompt) is (phrase or model), (phrase, model)
+    finally:
+        config_module.CFG = base
     print("✓ talk end-of-briefing logic OK")

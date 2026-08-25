@@ -150,15 +150,15 @@ max_turns = 30
 #   "deep"    — pushes the reasoning: assumptions, objections, missing examples
 depth = "normal"
 
-# Who can end the briefing, besides Enter (which always can):
-#   "never" — the key only
-#   "asked" — the key, or you saying you're done (default)
-#   "model" — both, plus the assistant deciding it has enough
-auto_finish = "asked"
+# Who may end the briefing. Enter always can and is not a toggle — there is
+# always a way out that depends on nothing. These two are independent extras:
+# turn both off to keep the ending entirely under your control.
+finish_on_phrase = true    # you saying so out loud ends it
+finish_by_model = false    # the assistant ends it once it has enough context
 # Short spoken phrases that end the briefing on the spot, before the model is
 # even called. Matched accent- and punctuation-insensitively, and only on an
 # utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
-# stays part of the brief. Ignored when auto_finish = "never".
+# stays part of the brief. Ignored when finish_on_phrase = false.
 # finish_phrases = ["j'ai fini", "vas-y", "that's it"]
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.

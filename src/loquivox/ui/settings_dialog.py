@@ -89,6 +89,14 @@ class SettingsDialog:
     _fallback_check: Optional[Gtk.CheckButton] = None
     _trans_status: Optional[Gtk.Label] = None
 
+    # Talk mode
+    _talk_phrase_check: Optional[Gtk.CheckButton] = None
+    _talk_model_check: Optional[Gtk.CheckButton] = None
+    _talk_depth: Optional[Gtk.ComboBoxText] = None
+    _talk_semantic_check: Optional[Gtk.CheckButton] = None
+    _talk_speak_check: Optional[Gtk.CheckButton] = None
+    _talk_status: Optional[Gtk.Label] = None
+
     @classmethod
     def show(cls) -> None:
         """Show settings dialog (singleton)."""
@@ -124,6 +132,10 @@ class SettingsDialog:
         keys = cls._page()
         cls._build_api_keys_section(keys)
         notebook.append_page(cls._scroll(keys), Gtk.Label(label="API Keys"))
+
+        talk = cls._page()
+        cls._build_talk_section(talk)
+        notebook.append_page(cls._scroll(talk), Gtk.Label(label="Talk"))
 
         hotkeys = cls._page()
         cls._build_hotkeys_section(hotkeys)
@@ -870,6 +882,121 @@ class SettingsDialog:
             desc += " + format"
         cls._pp_status.set_markup(f"<small>✓ Applied live — {desc}.</small>")
         print(f"✨ Post-processing: level={level} translate={translate} format={fmt} lang={lang}")
+
+    # -----------------------------------------------------------------
+    # Talk mode section (written to config.toml [talk])
+    # -----------------------------------------------------------------
+    #: (id, label) for the "how far it digs" combo — mirrors CFG.TALK_DEPTH.
+    _TALK_DEPTHS = (
+        ("minimal", "Minimal — only asks when something is unclear"),
+        ("normal", "Normal — asks about what would change the text"),
+        ("deep", "Deep — pushes the reasoning further"),
+    )
+
+    @classmethod
+    def _build_talk_section(cls, vbox: Gtk.Box) -> None:
+        """Talk-mode knobs: who may end the briefing, and how it converses."""
+        header = Gtk.Label()
+        header.set_halign(Gtk.Align.START)
+        header.set_markup(
+            f"<b>Ending the conversation</b> "
+            f"<small>({CFG.HOTKEY_DEFS['talk'][0]} starts it)</small>"
+        )
+        vbox.pack_start(header, False, False, 6)
+
+        note = Gtk.Label()
+        note.set_halign(Gtk.Align.START)
+        note.set_line_wrap(True)
+        note.set_markup(
+            "<small><i>Enter always writes the text — that one can't be turned "
+            "off, so there is always a way out. These two are extras.</i></small>"
+        )
+        vbox.pack_start(note, False, False, 0)
+
+        cls._talk_phrase_check = Gtk.CheckButton(
+            label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
+        cls._talk_phrase_check.set_active(bool(CFG.TALK_FINISH_ON_PHRASE))
+        vbox.pack_start(cls._talk_phrase_check, False, False, 0)
+
+        cls._talk_model_check = Gtk.CheckButton(
+            label="When the assistant judges it has enough context")
+        cls._talk_model_check.set_active(bool(CFG.TALK_FINISH_BY_MODEL))
+        vbox.pack_start(cls._talk_model_check, False, False, 0)
+
+        header2 = Gtk.Label()
+        header2.set_halign(Gtk.Align.START)
+        header2.set_markup("<b>Conversation</b>")
+        vbox.pack_start(header2, False, False, 10)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.pack_start(cls._row_label("How far it digs:"), False, False, 0)
+        cls._talk_depth = Gtk.ComboBoxText()
+        for depth_id, label in cls._TALK_DEPTHS:
+            cls._talk_depth.append(depth_id, label)
+        cls._talk_depth.set_active_id(
+            CFG.TALK_DEPTH if CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
+        row.pack_start(cls._talk_depth, True, True, 0)
+        vbox.pack_start(row, False, False, 0)
+
+        cls._talk_semantic_check = Gtk.CheckButton(
+            label="End my turns on meaning, not on silence (needs onnxruntime)")
+        cls._talk_semantic_check.set_active(bool(CFG.TALK_SEMANTIC_TURNS))
+        vbox.pack_start(cls._talk_semantic_check, False, False, 0)
+
+        cls._talk_speak_check = Gtk.CheckButton(
+            label="Read the assistant's replies aloud, even with TTS off")
+        cls._talk_speak_check.set_active(bool(CFG.TALK_SPEAK_REPLIES))
+        vbox.pack_start(cls._talk_speak_check, False, False, 0)
+
+        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.connect("clicked", cls._on_apply_talk)
+        apply_row.pack_start(apply_btn, False, False, 0)
+        cls._talk_status = Gtk.Label()
+        cls._talk_status.set_halign(Gtk.Align.START)
+        cls._talk_status.set_line_wrap(True)
+        apply_row.pack_start(cls._talk_status, True, True, 0)
+        vbox.pack_start(apply_row, False, False, 10)
+
+        hint = Gtk.Label()
+        hint.set_halign(Gtk.Align.START)
+        hint.set_line_wrap(True)
+        hint.set_markup(
+            "<small><i>Timings, prompts and the turn-detection thresholds live "
+            "under [talk] in config.toml.</i></small>"
+        )
+        vbox.pack_start(hint, False, False, 0)
+
+    @classmethod
+    def _on_apply_talk(cls, _btn: Gtk.Button) -> None:
+        """Write the talk knobs to config.toml and reload — next session uses them."""
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        phrase = bool(cls._talk_phrase_check.get_active())
+        by_model = bool(cls._talk_model_check.get_active())
+        depth = cls._talk_depth.get_active_id() or "normal"
+        semantic = bool(cls._talk_semantic_check.get_active())
+        speak = bool(cls._talk_speak_check.get_active())
+        try:
+            update_section("talk", {
+                "finish_on_phrase": phrase,
+                "finish_by_model": by_model,
+                "depth": depth,
+                "semantic_turns": semantic,
+                "speak_replies": speak,
+            })
+        except ConfigWriteError as e:
+            cls._talk_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        from loquivox import config as config_module
+        config_module.reload_config()  # talk mode reads config_module.CFG live
+        ends = [name for name, on in (("Enter", True), ("spoken", phrase),
+                                      ("assistant", by_model)) if on]
+        cls._talk_status.set_markup(
+            f"<small>✓ Applied — ends on: {', '.join(ends)}.</small>"
+        )
+        print(f"🗣️  Talk: finish_on_phrase={phrase} finish_by_model={by_model} "
+              f"depth={depth} semantic_turns={semantic}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)

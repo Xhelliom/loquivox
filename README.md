@@ -139,11 +139,14 @@ actually want — the unstated assumption, the objection your reader will raise.
 
 **Three ways to say you're done**, all leading to the same finished text:
 
-| | |
-|:---|:---|
-| `Enter` | always works, whatever the settings |
-| *"j'ai fini"*, *"vas-y"*, *"that's it"* | said out loud — caught on the transcript before the model is even called |
-| the assistant decides | with `auto_finish = "model"`: it hands itself over once it could write the text well |
+| | | |
+|:---|:---|:---|
+| `Enter` | always works, whatever the settings | — |
+| *"j'ai fini"*, *"vas-y"*, *"that's it"* | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
+| the assistant decides | it hands itself over once it could write the text well | `finish_by_model` |
+
+The last two are independent toggles — in **Settings → Talk**, or under `[talk]` in
+`config.toml`. Turn both off and nothing writes the text until *you* press the key.
 
 **Turns end on meaning, not on a stopwatch.** A silence timer can't tell *"…and then, uh…"*
 from a finished sentence. So the pause is only a trigger: when Loquivox hears one, a small
