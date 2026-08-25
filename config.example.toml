@@ -143,6 +143,23 @@ turn_timeout = 60.0
 idle_timeout = 15.0
 # Hard stop on the conversation length (your turns).
 max_turns = 30
+
+# How much the assistant digs before writing:
+#   "minimal" — asks only when something is genuinely unclear
+#   "normal"  — asks about what would change the text (default)
+#   "deep"    — pushes the reasoning: assumptions, objections, missing examples
+depth = "normal"
+
+# Who can end the briefing, besides Enter (which always can):
+#   "never" — the key only
+#   "asked" — the key, or you saying you're done (default)
+#   "model" — both, plus the assistant deciding it has enough
+auto_finish = "asked"
+# Short spoken phrases that end the briefing on the spot, before the model is
+# even called. Matched accent- and punctuation-insensitively, and only on an
+# utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
+# stays part of the brief. Ignored when auto_finish = "never".
+# finish_phrases = ["j'ai fini", "vas-y", "that's it"]
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.
 review_timeout = 120.0

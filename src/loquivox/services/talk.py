@@ -12,6 +12,17 @@ The conversation is kept here, not in the global history: a ten-turn spoken
 briefing has no business landing in the F4 chat context (and vice versa). Only
 the finished text goes to the shared histories.
 
+Ending the briefing has three doors, and they all lead here (see
+``CFG.TALK_AUTO_FINISH``):
+  - the Enter key, always — handled by the talk loop, not by the model;
+  - saying so out loud ("j'ai fini", "vas-y", "that's it") — caught either by
+    ``user_said_done`` on the raw transcript, before any API call, or by the
+    model answering with the ``[[WRITE]]`` marker;
+  - the model deciding it has everything it needs, in ``auto_finish = "model"``
+    — same marker.
+The marker is stripped from what is spoken, shown and remembered: it is a
+protocol between the model and the loop, never part of the conversation.
+
 Prompts come from the live config module (``TALK_SYSTEM_PROMPT``,
 ``TALK_GENERATE_PROMPT``, ``TALK_GENERATE_REQUEST``) so they can be overridden
 in config.toml and reloaded without a restart. Every call is off the GTK main
@@ -19,10 +30,90 @@ thread — see ``handlers/mode.py``.
 """
 from __future__ import annotations
 
+import re
+import unicodedata
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.ai import AIService
+
+#: what the model appends to its reply to hand the floor to the writing phase
+FINISH_MARKER: str = "[[WRITE]]"
+_MARKER_RE = re.compile(r"\[\[\s*WRITE\s*\]\]", re.IGNORECASE)
+
+#: how insistently the assistant digs, appended to the system prompt
+_DEPTH_PROMPTS: Dict[str, str] = {
+    "minimal": (
+        "Keep questions to a strict minimum: ask only when something is genuinely "
+        "unclear or missing, and otherwise acknowledge in a few words and let the "
+        "user carry on."
+    ),
+    "normal": "",
+    "deep": (
+        "Once the basics are settled, push the thinking one step further: ask the "
+        "question that makes the user pin down what they actually want to obtain — "
+        "the unstated assumption, the objection their reader will raise, the "
+        "concrete example that is missing. Still one question, still two sentences."
+    ),
+}
+
+#: the end-of-briefing protocol, appended to the system prompt
+_FINISH_PROMPTS: Dict[str, str] = {
+    "never": (
+        "The user ends the briefing with a key press, which you never see. Never "
+        "announce that you are about to write the text."
+    ),
+    "asked": (
+        "The user decides when the briefing is over. The moment they say they are "
+        f"done — \"j'ai fini\", \"vas-y\", \"écris-le\", \"that's it\", \"go ahead\" — "
+        "reply with one short confirmation sentence and end that reply with the "
+        f"exact marker {FINISH_MARKER}. Emit that marker for no other reason: it "
+        "is what starts the writing."
+    ),
+    "model": (
+        "The user can end the briefing by saying they are done — \"j'ai fini\", "
+        "\"vas-y\", \"that's it\". You may also end it yourself, once you are "
+        "confident you could write the text well with what you already have. "
+        "Either way: reply with one short confirmation sentence and end that reply "
+        f"with the exact marker {FINISH_MARKER}. When in doubt, ask one more "
+        "question instead — emit the marker for no other reason."
+    ),
+}
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, strip accents and punctuation — for phrase matching."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^\w\s\']", " ", stripped).split())
+
+
+def user_said_done(text: str, max_words: int = 6) -> bool:
+    """
+    True when a turn is the user saying the briefing is over ("j'ai fini").
+
+    Deterministic and free — it runs on the transcript before the model is
+    called, so "vas-y" goes straight to the writing phase instead of costing a
+    round-trip. Only SHORT utterances are considered: "quand j'ai fini le
+    rapport, envoie-le" is a sentence about the text, not an order to write it.
+    Phrases come from ``CFG.TALK_FINISH_PHRASES``.
+    """
+    cfg = config_module.CFG
+    if cfg.TALK_AUTO_FINISH == "never":
+        return False
+    normalized = _normalize(text)
+    if not normalized or len(normalized.split()) > max_words:
+        return False
+    return any(_normalize(phrase) in normalized for phrase in cfg.TALK_FINISH_PHRASES)
+
+
+@dataclass
+class TalkReply:
+    """One spoken reply, plus whether it handed the floor to the writing phase."""
+
+    text: str
+    done: bool
 
 
 class TalkSession:
@@ -41,22 +132,43 @@ class TalkSession:
         """Record a spoken turn without asking for a reply (the closing one)."""
         self.turns.append({"role": "user", "content": text})
 
-    def reply(self, text: str) -> Optional[str]:
+    @staticmethod
+    def system_prompt() -> str:
+        """
+        The conversation-phase prompt: the configured base, plus how deep to dig
+        (``TALK_DEPTH``) and who may end the briefing (``TALK_AUTO_FINISH``).
+
+        The clauses are appended rather than baked in so a user who overrides
+        ``system_prompt`` in config.toml still gets the marker protocol — without
+        it, "j'ai fini" would just be another turn in the conversation.
+        """
+        cfg = config_module.CFG
+        parts = [cfg.TALK_SYSTEM_PROMPT]
+        parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
+        parts.append(_FINISH_PROMPTS.get(cfg.TALK_AUTO_FINISH, _FINISH_PROMPTS["asked"]))
+        return "\n\n".join(part for part in parts if part)
+
+    def reply(self, text: str) -> Optional[TalkReply]:
         """
         Add the user's spoken turn and return the assistant's spoken reply.
 
         Returns None if the call failed (``AIService`` swallows the error and
         the caller keeps the conversation alive); the user turn is kept either
-        way, so nothing said is lost from the brief.
+        way, so nothing said is lost from the brief. ``TalkReply.done`` is the
+        model handing the floor to the writing phase — the marker that carried
+        it is stripped here, so it reaches neither the speakers nor the history.
         """
         self.add_user(text)
         answer = AIService.complete(
-            [{"role": "system", "content": config_module.CFG.TALK_SYSTEM_PROMPT}]
-            + self.turns
+            [{"role": "system", "content": self.system_prompt()}] + self.turns
         )
-        if answer:
-            self.turns.append({"role": "assistant", "content": answer})
-        return answer
+        if not answer:
+            return None
+        done = bool(_MARKER_RE.search(answer))
+        clean = _MARKER_RE.sub("", answer).strip()
+        if clean:
+            self.turns.append({"role": "assistant", "content": clean})
+        return TalkReply(clean, done)
 
     def generate(self) -> Optional[str]:
         """
@@ -90,3 +202,23 @@ class TalkSession:
             f"{'🗣️' if t['role'] == 'user' else '🤖'} {t['content']}"
             for t in self.turns
         )
+
+
+if __name__ == "__main__":
+    # Self-check for the end-of-briefing logic (pure, no API call needed).
+    assert user_said_done("J'ai fini !")
+    assert user_said_done("vas-y")
+    assert user_said_done("That's it.")
+    assert user_said_done("ok, écris-le")
+    # A sentence ABOUT the text is not an order to write it.
+    assert not user_said_done("quand j'ai fini le rapport je te l'envoie, c'est bon")
+    assert not user_said_done("")
+
+    assert _MARKER_RE.search("D'accord, je rédige. [[WRITE]]")
+    assert _MARKER_RE.search("ok [[ write ]]")          # tolerant to spacing/case
+    assert _MARKER_RE.sub("", "Ok, je rédige. [[WRITE]]").strip() == "Ok, je rédige."
+    assert not _MARKER_RE.search("écris le texte maintenant")
+
+    prompt = TalkSession.system_prompt()
+    assert FINISH_MARKER in prompt or config_module.CFG.TALK_AUTO_FINISH == "never"
+    print("✓ talk end-of-briefing logic OK")

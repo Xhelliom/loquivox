@@ -98,9 +98,15 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
    hallucination guard, `TalkSession.reply` answers, and the reply is spoken
    with `wait=True` — blocking is deliberate, the next turn must not record the
    assistant's own voice.
-3. `_talk_generate` turns the conversation into one text and shows it in the
+3. The briefing ends on Enter, on a short spoken "j'ai fini" (`user_said_done`,
+   matched on the transcript before any API call), or on the model appending
+   its `[[WRITE]]` marker — `CFG.TALK_AUTO_FINISH` decides which of the last two
+   are live, and `TalkSession.system_prompt()` appends the matching protocol
+   clause so an overridden `system_prompt` still carries it. The marker is
+   stripped before the reply is spoken, shown or stored.
+4. `_talk_generate` turns the conversation into one text and shows it in the
    review panel; `_deliver_talk_text` types it (accept only) and leaves it on
-   the clipboard.
+   the clipboard. `V` in that panel goes back to the conversation, brief intact.
 
 The conversation lives in the `TalkSession`, never in `STATE.conversation_history`
 — a long spoken briefing must not pollute the F4 chat context. `STATE.vad` is the

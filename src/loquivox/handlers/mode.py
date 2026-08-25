@@ -445,9 +445,17 @@ class ModeHandler:
     @staticmethod
     def _talk_converse(session, keys) -> str:
         """
-        Run spoken turns until the user asks for the text ("finish"), drops the
-        conversation ("cancel"), or the turn budget runs out.
+        Run spoken turns until the briefing is over ("finish"), the user drops
+        the conversation ("cancel"), or the turn budget runs out.
+
+        Four things can end the briefing: Enter (handled in ``_talk_listen``),
+        the user saying so in a short utterance (caught here, before the model
+        is called), the model answering with its end-of-briefing marker
+        (``CFG.TALK_AUTO_FINISH``), and ``TALK_MAX_TURNS``. Everything said is
+        kept as part of the brief either way.
         """
+        from loquivox.services.talk import user_said_done
+
         cfg = config_module.CFG
         while session.user_turns < cfg.TALK_MAX_TURNS:
             idle_action = "finish" if session.user_turns else "cancel"
@@ -466,15 +474,27 @@ class ModeHandler:
                 continue  # nothing said (or a hallucination) — just listen again
 
             ChatManager.add_message("user", f"🗣️ {text}")
+            if user_said_done(text):
+                # "Vas-y, écris-le" — no point paying for a reply that would
+                # only say "ok"; the turn still counts as part of the brief.
+                session.add_user(text)
+                return "finish"
+
             OverlayManager.set_status("Thinking…")
             reply = session.reply(text)
-            if not reply:
+            if reply is None:
                 continue
-            ChatManager.add_message("assistant", reply)
-            OverlayManager.set_status("Speaking…")
-            # Blocking on purpose: the next turn starts recording the moment
-            # this returns, and must not capture the assistant's own voice.
-            TTSService.speak(reply, wait=True, force=cfg.TALK_SPEAK_REPLIES)
+            if reply.text:
+                ChatManager.add_message("assistant", reply.text)
+                OverlayManager.set_status("Speaking…")
+                # Blocking on purpose: the next turn starts recording the moment
+                # this returns, and must not capture the assistant's own voice.
+                TTSService.speak(reply.text, wait=True, force=cfg.TALK_SPEAK_REPLIES)
+            if reply.done:
+                # The model took the floor to the writing phase — either because
+                # the user said so, or (auto_finish = "model") because it judged
+                # the brief complete.
+                return "finish"
         print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
         return "finish"
 

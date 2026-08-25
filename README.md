@@ -130,6 +130,21 @@ never more) and you keep going: it asks who the text is for, what tone you want,
 absolutely be in it. When you're done briefing it, press `Enter` — and the entire conversation
 becomes **one finished text**, ready to paste.
 
+**It listens like an editor, not a dictaphone.** What it gets is a *transcript* —
+spoken language that wanders, backtracks, and where the recognizer mishears a name or a
+technical term. So it never quietly guesses: it quotes the odd bit back and asks what you
+meant, you re-say it, and the correction replaces what came before. Set `depth = "deep"` in
+`config.toml` and it goes further, asking the question that makes you pin down what you
+actually want — the unstated assumption, the objection your reader will raise.
+
+**Three ways to say you're done**, all leading to the same finished text:
+
+| | |
+|:---|:---|
+| `Enter` | always works, whatever the settings |
+| *"j'ai fini"*, *"vas-y"*, *"that's it"* | said out loud — caught on the transcript before the model is even called |
+| the assistant decides | with `auto_finish = "model"`: it hands itself over once it could write the text well |
+
 **Turns end on meaning, not on a stopwatch.** A silence timer can't tell *"…and then, uh…"*
 from a finished sentence. So the pause is only a trigger: when Loquivox hears one, a small
 audio model — [Smart Turn v3](https://github.com/pipecat-ai/smart-turn), 8 MB, ~10 ms on CPU,

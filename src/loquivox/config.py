@@ -279,6 +279,27 @@ class Config:
     TALK_IDLE_TIMEOUT: float = 15.0
     # Hard stop on the conversation length (user turns).
     TALK_MAX_TURNS: int = 30
+    # How much the assistant digs before writing:
+    #   "minimal" — only asks when something is genuinely unclear
+    #   "normal"  — asks about what would change the text (default)
+    #   "deep"    — pushes the reasoning: assumptions, objections, examples
+    TALK_DEPTH: str = "normal"
+    # Who can end the briefing, on top of the Enter key (which always can):
+    #   "never" — the key only
+    #   "asked" — the key, or you saying you're done (default)
+    #   "model" — both, plus the assistant deciding it has enough
+    TALK_AUTO_FINISH: str = "asked"
+    # Spoken phrases that end the briefing on their own (matched on a SHORT
+    # utterance only, accent- and punctuation-insensitive), before the model is
+    # even called. Ignored when auto_finish = "never".
+    TALK_FINISH_PHRASES: Tuple[str, ...] = (
+        # French
+        "j'ai fini", "j'ai termine", "c'est bon", "c'est tout", "vas-y",
+        "ecris-le", "ecris le texte", "redige", "on y va", "termine",
+        # English
+        "i'm done", "im done", "that's it", "that's all", "go ahead",
+        "write it", "write the text", "done",
+    )
     # How long the generated text waits for a verdict before being left on the
     # clipboard (seconds) — it is never typed without an explicit accept.
     TALK_REVIEW_TIMEOUT: float = 120.0
@@ -290,19 +311,28 @@ class Config:
     TALK_SYSTEM_PROMPT: str = (
         "You are on a live voice call with the user, working out a text they need "
         "to produce (an email, a message, a note, a snippet — anything). In this "
-        "phase you do NOT write that text: you understand it. Reply in at most two "
-        "short spoken sentences — no markdown, no lists, no headings — because your "
-        "answer is read aloud. Ask about one thing at a time when something "
-        "important is missing (audience, intent, tone, key facts, length). When you "
-        "have enough to write it, say so in one sentence instead of asking more. "
-        "Never produce the final text until you are explicitly asked for it. Always "
-        "answer in the language the user speaks."
+        "phase you do NOT write that text: you understand it.\n\n"
+        "What reaches you is a speech transcript, so it is spoken language, not "
+        "writing: it wanders, it backtracks, and the recognizer mishears words — a "
+        "name, a technical term, a number. Never quietly guess at a word that looks "
+        "wrong or a sentence that does not parse: quote the bit back and ask what "
+        "was meant. When the user corrects something, the correction replaces what "
+        "was said before it.\n\n"
+        "Reply in at most two short spoken sentences — no markdown, no lists, no "
+        "headings — because your answer is read aloud. Ask about one thing at a "
+        "time, and only about what would actually change the text: audience, "
+        "intent, tone, key facts, length. Never produce the final text until you "
+        "are explicitly asked for it. Always answer in the language the user "
+        "speaks."
     )
     # Generation phase: same conversation, new instructions — write the thing.
     TALK_GENERATE_PROMPT: str = (
         "You write the final text the user has just discussed with you by voice. "
         "The conversation is the brief: honour every instruction, fact and "
-        "preference expressed in it, and nothing else. Output ONLY the finished "
+        "preference expressed in it, and nothing else. It is a transcript of "
+        "speech, so read past the hesitations and repetitions, and where the user "
+        "corrected themselves keep only the corrected version. Output ONLY the "
+        "finished "
         "text — no preamble, no commentary, no surrounding quotes, no code fences "
         "unless the text itself is code. Write it in the language the user spoke, "
         "ready to paste as-is."
@@ -558,6 +588,15 @@ def _build_config() -> Config:
         overrides["TALK_MAX_TURNS"] = int(talk["max_turns"])
     if "review_timeout" in talk:
         overrides["TALK_REVIEW_TIMEOUT"] = float(talk["review_timeout"])
+    if "depth" in talk:
+        overrides["TALK_DEPTH"] = str(talk["depth"]).strip().lower()
+    if "auto_finish" in talk:
+        overrides["TALK_AUTO_FINISH"] = str(talk["auto_finish"]).strip().lower()
+    if "finish_phrases" in talk:
+        overrides["TALK_FINISH_PHRASES"] = tuple(
+            str(phrase).strip().lower() for phrase in talk["finish_phrases"]
+            if str(phrase).strip()
+        )
     if "semantic_turns" in talk:
         overrides["TALK_SEMANTIC_TURNS"] = bool(talk["semantic_turns"])
     if "turn_threshold" in talk:
