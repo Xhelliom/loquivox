@@ -36,7 +36,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.ai import AIService
@@ -61,38 +61,46 @@ _DEPTH_PROMPTS: Dict[str, str] = {
     ),
 }
 
-#: the end-of-briefing protocol, appended to the system prompt. Keyed by the
-#: two independent toggles: (the user may say so, the model may decide).
-_FINISH_PROMPTS: Dict[Tuple[bool, bool], str] = {
-    (False, False): (
-        "The user ends the briefing with a key press, which you never see. Never "
-        "announce that you are about to write the text, and never write it — not "
-        "even if they ask you to."
-    ),
-    (True, False): (
-        "The user decides when the briefing is over, and only the user. The moment "
-        "they say they are done — \"j'ai fini\", \"vas-y\", \"écris-le\", "
-        "\"that's it\", \"go ahead\" — reply with one short confirmation sentence "
-        f"and end that reply with the exact marker {FINISH_MARKER}. Never emit it "
-        "because YOU think the brief is complete: that call is theirs."
-    ),
-    (False, True): (
-        "You end the briefing yourself, and only yourself: once you are confident "
-        "you could write the text well with what you already have, reply with one "
-        "short confirmation sentence and end that reply with the exact marker "
-        f"{FINISH_MARKER}. Being asked to write is not by itself a reason to emit "
-        "it — the user has their own way of ending the briefing. When in doubt, "
-        "ask one more question instead."
-    ),
-    (True, True): (
-        "The briefing ends when the user says they are done — \"j'ai fini\", "
-        "\"vas-y\", \"that's it\" — or when you are confident you could write the "
-        "text well with what you already have. Either way: reply with one short "
-        "confirmation sentence and end that reply with the exact marker "
-        f"{FINISH_MARKER}. When in doubt, ask one more question instead — emit the "
-        "marker for no other reason."
-    ),
-}
+#: the end-of-briefing protocol, appended to the system prompt. One marker
+#: rule, plus a clause per enabled trigger — so the wording of the rule itself
+#: exists once and the four combinations can't drift apart.
+_MARKER_RULE: str = (
+    "Reply with one short confirmation sentence and end that reply with the "
+    f"exact marker {FINISH_MARKER}. When in doubt, ask one more question "
+    "instead — emit the marker for no other reason."
+)
+_NO_FINISH: str = (
+    "The user ends the briefing with a key press, which you never see. Never "
+    "announce that you are about to write the text, and never write it — not "
+    "even if they ask you to."
+)
+_TRIGGER_PHRASE: str = (
+    "the user says they are done (\"j'ai fini\", \"vas-y\", \"écris-le\", "
+    "\"that's it\", \"go ahead\")"
+)
+_TRIGGER_MODEL: str = (
+    "you are confident you could write the text well with what you already have"
+)
+_ONLY_USER: str = "Never end it because YOU think the brief is complete: that call is theirs."
+_ONLY_MODEL: str = (
+    "Being asked to write is not by itself a reason to end it — the user has "
+    "their own way of doing that."
+)
+
+
+def _finish_prompt(on_phrase: bool, by_model: bool) -> str:
+    """The end-of-briefing clause for the two independent toggles."""
+    if not (on_phrase or by_model):
+        return _NO_FINISH
+    triggers = [t for t, on in ((_TRIGGER_PHRASE, on_phrase),
+                                (_TRIGGER_MODEL, by_model)) if on]
+    parts = ["The briefing is over when " + ", or when ".join(triggers) + "."]
+    if on_phrase and not by_model:
+        parts.append(_ONLY_USER)
+    elif by_model and not on_phrase:
+        parts.append(_ONLY_MODEL)
+    parts.append(_MARKER_RULE)
+    return " ".join(parts)
 
 
 def _normalize(text: str) -> str:
@@ -182,8 +190,8 @@ class TalkSession:
         cfg = config_module.CFG
         parts = [cfg.TALK_SYSTEM_PROMPT]
         parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
-        parts.append(_FINISH_PROMPTS[(bool(cfg.TALK_FINISH_ON_PHRASE),
-                                     bool(cfg.TALK_FINISH_BY_MODEL))])
+        parts.append(_finish_prompt(bool(cfg.TALK_FINISH_ON_PHRASE),
+                                    bool(cfg.TALK_FINISH_BY_MODEL)))
         return "\n\n".join(part for part in parts if part)
 
     def reply(self, text: str) -> Optional[TalkReply]:
@@ -236,13 +244,6 @@ class TalkSession:
         first = next((t["content"] for t in self.turns if t["role"] == "user"), "")
         first = " ".join(first.split())
         return first if len(first) <= limit else first[: limit - 1] + "…"
-
-    def transcript(self) -> str:
-        """The conversation as plain text, for the tray history."""
-        return "\n".join(
-            f"{'🗣️' if t['role'] == 'user' else '🤖'} {t['content']}"
-            for t in self.turns
-        )
 
 
 if __name__ == "__main__":

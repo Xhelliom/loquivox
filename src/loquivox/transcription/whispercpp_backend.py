@@ -31,7 +31,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import urllib.request
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -39,7 +38,7 @@ import numpy as np
 from scipy.io.wavfile import write as wav_write
 
 from .base import BackendUnavailable, TranscriptionBackend
-from .util import WHISPER_RATE, to_mono_16k
+from .util import WHISPER_RATE, download_file, to_mono_16k
 
 # whisper.cpp emits non-speech markers on silence/noise, e.g. "[BLANK_AUDIO]",
 # "[ Silence ]", "(music)". Drop segments that are entirely such a marker so we
@@ -135,19 +134,11 @@ class WhisperCppBackend(TranscriptionBackend):
             raise BackendUnavailable(f"whisper.cpp model not found: {m}")
 
         dest = self._model_path()
-        dest.parent.mkdir(parents=True, exist_ok=True)
         url = f"{_MODEL_BASE_URL}/ggml-{m}.bin"
-        tmp = dest.with_suffix(".bin.part")
         print(f"⬇️  Downloading whisper.cpp model '{m}' from {url}")
         try:
-            with urllib.request.urlopen(url) as resp, open(tmp, "wb") as fh:
-                shutil.copyfileobj(resp, fh)
-            tmp.replace(dest)
+            download_file(url, dest)
         except Exception as e:
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
             raise BackendUnavailable(
                 f"whisper.cpp model download failed for '{m}': {e}"
             ) from e

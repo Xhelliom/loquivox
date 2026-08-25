@@ -69,18 +69,34 @@ class ModeHandler:
         was_active = STATE.recording or STATE.stream_session is not None
         # Supersede any in-flight transcription so its result is discarded.
         STATE.recording_generation += 1
+        ModeHandler.reset_capture()
+        OverlayManager.hide()
+        if was_active:
+            print("✖️  Cancelled — nothing inserted")
+
+    @staticmethod
+    def reset_capture() -> None:
+        """
+        Close whatever capture is open and forget it: the stream, the live
+        session, the buffer, the mode. Safe from any thread and on an already
+        idle state — it is the teardown both ``cancel_active`` and the talk
+        session end with, so neither can forget half of it.
+        """
         if STATE.recording:
             try:
                 AudioService.stop_recording()  # closes the stream, no processing
             except Exception:
                 pass
-        STATE.audio_buffer = []
+        session = STATE.stream_session
         STATE.stream_session = None
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+        STATE.audio_buffer = []
         STATE.current_mode = None
         STATE.paused = False
-        OverlayManager.hide()
-        if was_active:
-            print("✖️  Cancelled — nothing inserted")
 
     @staticmethod
     def process_audio_async(mode: str, audio_data: np.ndarray,
@@ -104,12 +120,7 @@ class ModeHandler:
     def _process_worker(mode: str, audio_data: np.ndarray, generation: int,
                         level_override: Optional[int] = None) -> None:
         """Worker thread for processing audio."""
-        transcribed = None
-        try:
-            transcribed = AudioService.transcribe(audio_data)
-        except Exception:
-            pass
-
+        transcribed = ModeHandler.finalize_transcript(None, audio_data)
         if transcribed:
             transcribed = ModeHandler._maybe_postprocess(mode, transcribed, level_override)
             # Run processing (API calls etc) on the GTK main thread
@@ -153,16 +164,7 @@ class ModeHandler:
     def _stream_worker(mode: str, session, audio_data: Optional[np.ndarray],
                        generation: int, level_override: Optional[int] = None) -> None:
         """Worker thread: finalize the stream (with batch fallback) and process."""
-        from loquivox.transcription import get_dispatcher
-
-        transcribed = None
-        try:
-            transcribed = get_dispatcher().finish_stream(
-                session, audio_data, STATE.capture_rate
-            )
-        except Exception:
-            pass
-
+        transcribed = ModeHandler.finalize_transcript(session, audio_data)
         if transcribed:
             transcribed = ModeHandler._maybe_postprocess(mode, transcribed, level_override)
             GLib.idle_add(lambda: ModeHandler.process(mode, transcribed, generation))
@@ -182,10 +184,7 @@ class ModeHandler:
             return
 
         # --- Hallucination Guard ---
-        # Whisper often emits canned phrases ("Thank you", "Merci", "Untertitel")
-        # on silence; filter them to prevent weird loops.
-        clean = transcribed_text.strip().lower().rstrip(".!?")
-        if clean in CFG.HALLUCINATIONS or len(clean) < 2:
+        if ModeHandler.is_hallucination(transcribed_text):
             print(f"⚠️ Ignored Hallucination: '{transcribed_text}'")
             OverlayManager.hide(generation)
             return
@@ -203,6 +202,35 @@ class ModeHandler:
         finally:
             # Clear the 'transcribing' indicator once insertion is done.
             OverlayManager.hide(generation)
+
+    @staticmethod
+    def is_hallucination(text: str) -> bool:
+        """
+        True for what Whisper emits on silence ("Thank you", "Merci",
+        "Untertitel") rather than for speech — those would otherwise be typed,
+        or answered in talk mode. Every transcript passes through here.
+        """
+        clean = text.strip().lower().rstrip(".!?")
+        return clean in CFG.HALLUCINATIONS or len(clean) < 2
+
+    @staticmethod
+    def finalize_transcript(session, audio: Optional[np.ndarray]) -> Optional[str]:
+        """
+        Turn a finished capture into text: the live session when a streaming
+        backend owns one (with the buffered audio as its fallback), else a batch
+        transcription. Returns None on failure — this is the single place that
+        knows which of the two paths applies.
+        """
+        from loquivox.transcription import get_dispatcher
+
+        try:
+            if session is not None:
+                return get_dispatcher().finish_stream(session, audio, STATE.capture_rate)
+            if audio is not None:
+                return AudioService.transcribe(audio)
+        except Exception:
+            pass
+        return None
 
     @staticmethod
     def _handle_dictation(text: str) -> None:
@@ -423,28 +451,23 @@ class ModeHandler:
                     return
                 print("🗣️  Talk mode — speak freely. Enter: write the text · "
                       "Space: end this turn · Esc: drop the conversation")
-                ModeHandler._talk_capture_screen(session)
+                if config_module.CFG.TALK_SCREENSHOT:
+                    threading.Thread(target=ModeHandler._talk_screen_worker,
+                                     args=(session,), daemon=True).start()
                 while True:
-                    if ModeHandler._talk_converse(session, keys) == "cancel":
+                    if ModeHandler._talk_converse(session, keys):  # cancelled
                         print("✖️  Talk mode cancelled — nothing written")
                         return
-                    if ModeHandler._talk_generate(session, keys) != "talk":
-                        return
+                    if not ModeHandler._talk_generate(session, keys):
+                        return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
-            if STATE.recording:  # a turn died mid-flight — close the stream
-                try:
-                    AudioService.stop_recording()
-                except Exception:
-                    pass
-            STATE.stream_session = None
-            STATE.audio_buffer = []
-            STATE.current_mode = None
+            ModeHandler.reset_capture()  # a turn may have died mid-flight
             STATE.talk_active = False
             OverlayManager.hide()
 
     @staticmethod
-    def _talk_capture_screen(session) -> None:
+    def _talk_screen_worker(session) -> None:
         """
         Hand the session what is on screen right now, in the background.
 
@@ -463,16 +486,6 @@ class ModeHandler:
         The prompt tells the model to ignore Loquivox's own windows instead.
         """
         cfg = config_module.CFG
-        if not cfg.TALK_SCREENSHOT:
-            return
-        threading.Thread(
-            target=ModeHandler._talk_screen_worker, args=(session,), daemon=True
-        ).start()
-
-    @staticmethod
-    def _talk_screen_worker(session) -> None:
-        """Worker: capture, describe, attach. Never raises, never blocks a turn."""
-        cfg = config_module.CFG
         image = ImageService.take_screenshot(
             path=f"{cfg.TEMP_SCREEN_PATH}.talk.png",
             region=cfg.TALK_SCREENSHOT_REGION,
@@ -482,7 +495,7 @@ class ModeHandler:
         if not image:
             return
         description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
-        if not description or cfg.TALK_SCREEN_EMPTY.lower() in description.lower():
+        if not description or config_module.TALK_SCREEN_EMPTY.lower() in description.lower():
             print("👁️  Screen context: nothing relevant on screen")
             return
         if not STATE.talk_active:
@@ -492,10 +505,10 @@ class ModeHandler:
               f"{'…' if len(description) > 120 else ''}")
 
     @staticmethod
-    def _talk_converse(session, keys) -> str:
+    def _talk_converse(session, keys) -> bool:
         """
-        Run spoken turns until the briefing is over ("finish"), the user drops
-        the conversation ("cancel"), or the turn budget runs out.
+        Run spoken turns until the briefing is over. Returns True if the user
+        dropped the conversation, False once it is ready to be written.
 
         Four things can end the briefing: Enter (handled in ``_talk_listen``),
         the user saying so in a short utterance (caught here, before the model
@@ -511,7 +524,7 @@ class ModeHandler:
             idle_action = "finish" if session.user_turns else "cancel"
             audio, action = ModeHandler._talk_listen(keys, idle_action)
             if action == "cancel":
-                return "cancel"
+                return True
 
             text = ModeHandler._talk_transcribe(audio)
             if action == "finish":
@@ -519,7 +532,7 @@ class ModeHandler:
                 if text:
                     ChatManager.add_message("user", f"🗣️ {text}")
                     session.add_user(text)
-                return "finish"
+                return False
             if not text:
                 continue  # nothing said (or a hallucination) — just listen again
 
@@ -528,7 +541,7 @@ class ModeHandler:
                 # "Vas-y, écris-le" — no point paying for a reply that would
                 # only say "ok"; the turn still counts as part of the brief.
                 session.add_user(text)
-                return "finish"
+                return False
 
             OverlayManager.set_status("Thinking…")
             reply = session.reply(text)
@@ -544,9 +557,9 @@ class ModeHandler:
                 # The model took the floor to the writing phase — either because
                 # the user said so in words the phrase list doesn't cover, or
                 # (finish_by_model) because it judged the brief complete.
-                return "finish"
+                return False
         print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
-        return "finish"
+        return False
 
     @staticmethod
     def _talk_listen(keys, idle_action: str) -> Tuple[Optional[np.ndarray], str]:
@@ -564,22 +577,22 @@ class ModeHandler:
         from the microphone, not paused mid-sentence.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
-        from loquivox.services.turn_detector import ready_detector
+        from loquivox.services.turn_detector import WINDOW_SEC, ready_detector, turn_complete
         from loquivox.services.vad import VoiceActivityDetector
 
         cfg = config_module.CFG
         STATE.vad = None
         STATE.current_mode = "talk"
-        OverlayManager.show("talk")
+        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
         AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS)
         # A streaming backend may detect turns server-side (OpenAI Realtime's
         # semantic_vad). When it does, it is the authority and neither the local
         # model nor the silence window gets a vote.
         stream = STATE.stream_session
-        remote_turns = bool(getattr(stream, "semantic_turns", False))
+        remote_turns = stream is not None and stream.semantic_turns
         # ready_detector() never blocks: while the model is still downloading
         # in the background, this turn simply ends on silence like before.
-        semantic = ready_detector() is not None if not remote_turns else False
+        semantic = not remote_turns and ready_detector() is not None
         if cfg.TALK_VAD:
             STATE.vad = VoiceActivityDetector(
                 STATE.capture_rate,
@@ -599,16 +612,19 @@ class ModeHandler:
         # reaches the app underneath, and nothing here can block on the network.
         with keys.exclusive():
             while True:
-                pressed = keys.poll(mapping, 0.1)
+                # A short poll: this is what stands between the detector saying
+                # "finished" and the recording actually stopping.
+                pressed = keys.poll(mapping, 0.03)
                 if pressed is not None:
                     action = pressed
                     break
-                if remote_turns and getattr(stream, "turn_ended", False):
+                if remote_turns and stream.turn_ended:
                     break
                 vad = STATE.vad
                 if vad is not None:
                     if vad.ended and not remote_turns:
-                        if ModeHandler._talk_turn_complete(vad, semantic):
+                        if turn_complete(vad, lambda: AudioService.snapshot_tail(WINDOW_SEC),
+                                         STATE.capture_rate):
                             break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
                         action = idle_action
@@ -618,125 +634,75 @@ class ModeHandler:
 
         STATE.vad = None
         audio = AudioService.stop_recording()
-        if action == "cancel":
-            # Nothing will be transcribed — close the live session by hand,
-            # since only _talk_transcribe would have finalized it.
-            stream, STATE.stream_session = STATE.stream_session, None
-            if stream is not None:
-                try:
-                    stream.close()
-                except Exception:
-                    pass
-        else:
+        if action != "cancel":
             OverlayManager.set_transcribing()
+        # A cancelled turn leaves its live session open on purpose: the worker's
+        # `finally` runs reset_capture(), which is the one place that closes it.
         return audio, action
-
-    @staticmethod
-    def _talk_turn_complete(vad, semantic: bool) -> bool:
-        """
-        Decide whether the pause the VAD just heard really ends the turn.
-
-        Without the semantic model the trigger *is* the decision — plain silence
-        detection, as before. With it, Smart Turn reads the prosody of the last
-        8 seconds and answers "landed" or "still going"; "still going" re-arms
-        the VAD for a longer window, so trailing off buys you more time instead
-        of handing the floor over. The hard cap keeps that bounded: past
-        TALK_TURN_MAX_SILENCE_MS of silence the turn ends regardless, and a
-        model that cannot answer degrades to the plain behaviour.
-        """
-        from loquivox.services.turn_detector import WINDOW_SEC, ready_detector
-
-        if not semantic:
-            return True
-        cfg = config_module.CFG
-        if vad.silent_for * 1000 >= cfg.TALK_TURN_MAX_SILENCE_MS:
-            return True
-        detector = ready_detector()
-        if detector is None:
-            return True
-        audio = AudioService.snapshot_tail(WINDOW_SEC)
-        probability = detector.probability(audio, STATE.capture_rate)
-        if probability is None:
-            return True
-        if probability >= cfg.TALK_TURN_THRESHOLD:
-            return True
-        print(f"🤔 Turn not finished (p={probability:.2f}) — still listening")
-        vad.rearm(cfg.TALK_VAD_SILENCE_MS)
-        return False
 
     @staticmethod
     def _talk_transcribe(audio: Optional[np.ndarray]) -> Optional[str]:
         """
         Turn a recorded talk turn into text, or None if it held no usable speech.
 
-        Finalizes the live session when a streaming backend is in use (with the
-        buffered audio as its fallback), exactly like ``_stream_worker``, and
-        applies ``process()``'s hallucination guard — a spoken conversation
-        would otherwise happily reply to Whisper's "Merci" on silence.
+        Shares both halves with the one-shot modes: ``finalize_transcript`` for
+        the live-session-or-batch choice, and the hallucination guard — a spoken
+        conversation would otherwise happily reply to Whisper's "Merci" on
+        silence.
         """
-        from loquivox.transcription import get_dispatcher
-
         stream = STATE.stream_session
         STATE.stream_session = None
-        text = None
-        try:
-            if stream is not None:
-                text = get_dispatcher().finish_stream(stream, audio, STATE.capture_rate)
-            elif audio is not None:
-                text = AudioService.transcribe(audio)
-        except Exception:
-            text = None
-
-        text = (text or "").strip()
+        text = (ModeHandler.finalize_transcript(stream, audio) or "").strip()
         if not text:
             return None
-        clean = text.lower().rstrip(".!?")
-        if clean in CFG.HALLUCINATIONS or len(clean) < 2:
+        if ModeHandler.is_hallucination(text):
             print(f"⚠️ Talk mode ignored: '{text}'")
             return None
         return text
 
     @staticmethod
-    def _talk_generate(session, keys) -> str:
+    def _talk_generate(session, keys, max_redos: int = 5) -> bool:
         """
         Write the final text from the conversation and put it up for review.
 
-        Returns "talk" to go back to the conversation (V), or "done" once the
-        text has been delivered, dropped, or left on the clipboard. Nothing is
-        ever typed without an explicit accept — on timeout the text lands on the
-        clipboard instead, so the conversation is never wasted.
+        Returns True to go back to the conversation (V), False once the text has
+        been delivered, dropped, or left on the clipboard. Nothing is ever typed
+        without an explicit accept — on timeout the text lands on the clipboard
+        instead, so the conversation is never wasted.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
 
         if not session.user_turns:
             print("✖️  Nothing was said — talk mode closed")
-            return "done"
+            return False
 
         cfg = config_module.CFG
         brief = session.brief()
         mapping = KeyboardHandler.talk_review_keys()
+        redos = 0
         while True:
             OverlayManager.set_ai_panel("talk", brief)
             text = session.generate()
             if not text:
                 print("⚠️  Talk mode: no text was produced")
-                return "done"
+                return False
 
             OverlayManager.set_ai_panel("talk", brief, result=text)
             with keys.exclusive():
                 action = keys.poll(mapping, cfg.TALK_REVIEW_TIMEOUT) or "timeout"
             if action == "redo":
-                continue
+                redos += 1
+                if redos <= max_redos:
+                    continue
+                print("⚠️  Talk mode: too many rewrites — keeping the last one")
+                action = "copy"
             if action == "talk":
-                return "talk"
+                return True
             if action == "reject":
                 print("✖️  Generated text discarded")
-                return "done"
-            if action == "accept":
-                ModeHandler._deliver_talk_text(text, typed=True)
-            else:  # copy, or the review timing out
-                ModeHandler._deliver_talk_text(text, typed=False)
-            return "done"
+                return False
+            ModeHandler._deliver_talk_text(text, typed=(action == "accept"))
+            return False
 
     @staticmethod
     @run_on_main_thread

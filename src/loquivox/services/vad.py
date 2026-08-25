@@ -30,6 +30,7 @@ reads/writes on floats and bools, which the GIL makes atomic — no lock needed.
 """
 from __future__ import annotations
 
+import math
 from typing import List, Optional
 
 import numpy as np
@@ -76,7 +77,9 @@ class VoiceActivityDetector:
             return
 
         self.elapsed += len(audio) / self.sample_rate
-        rms = float(np.sqrt(np.mean(np.square(audio.astype(np.float64)))))
+        # One fused dot product, no float64 copy of the block: this runs in the
+        # PortAudio callback, where an overrun costs dropped audio.
+        rms = math.sqrt(float(audio @ audio) / len(audio))
 
         # Calibration window: listen to the room, decide nothing.
         if self.elapsed <= self._calibration:

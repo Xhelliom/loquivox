@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import selectors
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import evdev
 from evdev import InputDevice, ecodes
@@ -27,6 +27,11 @@ from loquivox.services.tts import TTSService
 from loquivox.state import STATE
 
 logger = logging.getLogger(__name__)
+
+#: "yes" wherever a modal waits for one — Enter, and the keypad's when it exists.
+_CONFIRM_CODES: Tuple[int, ...] = (
+    ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER),
+)
 
 
 class GrabbedKeys:
@@ -54,12 +59,17 @@ class GrabbedKeys:
     def __init__(self) -> None:
         self._devices = KeyboardHandler._find_keyboards()
         self._selector = selectors.DefaultSelector()
-        self._grabbed: List[InputDevice] = []
+        self._grabbed = False
+        # Classified once: a device cannot grow a mouse while we hold its fd,
+        # and capabilities() is an ioctl we would otherwise repeat per wait.
+        self._grabbable: List[InputDevice] = []
         for dev in self._devices:
             try:
                 self._selector.register(dev, selectors.EVENT_READ)
             except Exception:
                 continue
+            if not KeyboardHandler._is_pointer(dev):
+                self._grabbable.append(dev)
 
     def __enter__(self) -> "GrabbedKeys":
         return self
@@ -85,32 +95,34 @@ class GrabbedKeys:
             self._ungrab()
 
     def _grab(self) -> None:
-        for dev in self._devices:
-            if KeyboardHandler._is_pointer(dev) or dev in self._grabbed:
-                continue
+        for dev in self._grabbable:
             try:
                 dev.grab()
-                self._grabbed.append(dev)
             except Exception:
                 pass  # grab is best-effort; the keys still get read
+        self._grabbed = True
 
     def _ungrab(self) -> None:
-        for dev in self._grabbed:
+        if not self._grabbed:
+            return
+        for dev in self._grabbable:
             try:
                 dev.ungrab()
             except Exception:
                 pass
-        self._grabbed = []
+        self._grabbed = False
         # The key-ups that happened while we held the grab never reached the
         # listener, so its view of what is held is stale — drop it.
         KeyboardHandler._held.clear()
         KeyboardHandler._active.clear()
 
-    def poll(self, mapping: Dict[int, str], timeout: float) -> Optional[str]:
+    def poll(self, mapping: Dict[int, Any], timeout: float) -> Optional[Any]:
         """
         Wait up to ``timeout`` seconds for one of ``mapping``'s keys (keycode →
-        action) and return its action, or None if none came. Key-ups and
-        autorepeats are ignored, so a held key fires exactly once.
+        whatever the caller wants back) and return its value, or None if none
+        came. Key-ups and autorepeats are ignored, so a held key fires exactly
+        once. Values are opaque: a verdict string for the review panel, a
+        ``("set", level)`` tuple for the refinement chooser.
         """
         import time
 
@@ -144,6 +156,7 @@ class GrabbedKeys:
             except Exception:
                 pass
         self._devices = []
+        self._grabbable = []
         try:
             self._selector.close()
         except Exception:
@@ -337,8 +350,23 @@ class KeyboardHandler:
 
     @classmethod
     def _is_recording_mode(cls, mode: str) -> bool:
-        """Check if a mode triggers audio recording."""
-        return mode in CFG.MODES
+        """
+        True for the modes whose key records while it is held.
+
+        NOT ``mode in CFG.MODES``: that table is the overlay's appearance, and
+        'talk' has an entry there for its look while owning the microphone
+        through its own session rather than through the hold-key.
+        """
+        return mode in CFG.RECORDING_MODES
+
+    @classmethod
+    def trigger_codes(cls, action: str) -> Set[int]:
+        """
+        Keycodes currently bound to ``action``, from the live binding map — the
+        same source the listener matches on, so a rebind is picked up for free.
+        """
+        return {code for code, entries in cls._BY_TRIGGER.items()
+                if any(bound == action for bound, _mods in entries)}
 
     @classmethod
     def _handle_key_event(cls, event: evdev.InputEvent) -> None:
@@ -358,11 +386,6 @@ class KeyboardHandler:
         # event.value == 2 (autorepeat): ignore
 
     # Hotkeys that act on the session itself rather than starting a recording.
-    # 'talk' is here because its key only STARTS the session — everything after
-    # that is handled by the session's own grabbed keyboard, and its release
-    # must not stop anything.
-    _NON_RECORDING_ACTIONS = ("pin", "tts", "cancel", "pause", "refine", "talk")
-
     @classmethod
     def _on_press(cls, mode: str) -> None:
         """Handle key press for a recognized mode."""
@@ -383,10 +406,10 @@ class KeyboardHandler:
                 cls._stop_and_choose()
             return
 
-        # Talk mode: a whole spoken conversation, driven by its own worker.
+        # Talk mode: a whole spoken conversation, driven by its own worker,
+        # which owns the precondition (it owns the flag).
         if mode == "talk":
-            if not STATE.recording and not STATE.talk_active:
-                ModeHandler.start_talk_session()
+            ModeHandler.start_talk_session()
             return
 
         # Pin toggle (non-recording action)
@@ -438,7 +461,7 @@ class KeyboardHandler:
         """Handle key release for a recognized mode."""
         # Session-action keys only act on press; their release is a no-op
         # (and must not stop a recording that is still in progress, e.g. paused).
-        if mode in cls._NON_RECORDING_ACTIONS:
+        if not cls._is_recording_mode(mode):
             return
 
         if not STATE.recording:
@@ -525,86 +548,41 @@ class KeyboardHandler:
         Grab the keyboard and let the user choose a refinement level (0..MAX),
         shown live on the overlay. Returns the chosen level, or None if Esc is
         pressed. Selection: digits 0-N, ←/→ to step, the 'refine' key again to
-        cycle, Enter to confirm; auto-confirms on timeout. Always ungrabs.
+        cycle, Enter to confirm; auto-confirms on timeout.
         """
-        import time
-
         level = max(0, min(POSTPROCESS_MAX_LEVEL, int(default_level)))
-        # Keys that cycle (re-pressing the 'refine' hotkey trigger).
-        cycle_codes = {trig for trig, _ in resolve_hotkeys(CFG).get("refine", [])}
-        digits = {}
+        mapping: Dict[int, Any] = {ecodes.KEY_ESC: "cancel"}
+        mapping.update({code: "confirm" for code in _CONFIRM_CODES})
         for n in range(POSTPROCESS_MAX_LEVEL + 1):
-            digits[getattr(ecodes, f"KEY_{n}")] = n
-            kp = getattr(ecodes, f"KEY_KP{n}", None)
-            if kp is not None:
-                digits[kp] = n
-        confirm = {ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)}
+            mapping[getattr(ecodes, f"KEY_{n}")] = ("set", n)
+            keypad = getattr(ecodes, f"KEY_KP{n}", None)
+            if keypad is not None:
+                mapping[keypad] = ("set", n)
+        mapping.update({ecodes.KEY_UP: ("step", -1), ecodes.KEY_LEFT: ("step", -1),
+                        ecodes.KEY_DOWN: ("step", 1), ecodes.KEY_RIGHT: ("step", 1)})
+        for code in cls.trigger_codes("refine"):  # re-pressing the hotkey cycles
+            mapping.setdefault(code, "cycle")
 
-        devices = cls._find_keyboards()
-        if not devices:
-            return level  # no input device → just use the default
-        sel = selectors.DefaultSelector()
-        grabbed: List[InputDevice] = []
-        for dev in devices:
-            try:
-                sel.register(dev, selectors.EVENT_READ)
-            except Exception:
-                continue
-            if cls._is_pointer(dev):
-                continue  # read it, but never grab a pointer (would freeze the cursor)
-            try:
-                dev.grab()
-                grabbed.append(dev)
-            except Exception:
-                pass
-
-        OverlayManager.set_choosing(level)
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return level  # auto-confirm
-                for key_obj, _ in sel.select(timeout=remaining):
-                    try:
-                        events = list(key_obj.fileobj.read())
-                    except Exception:
-                        continue
-                    for event in events:
-                        if event.type != ecodes.EV_KEY or event.value != 1:
-                            continue
-                        code = event.code
-                        if code == ecodes.KEY_ESC:
-                            return None
-                        if code in confirm:
-                            return level
-                        if code in digits:
-                            level = digits[code]
-                        elif code in (ecodes.KEY_UP, ecodes.KEY_LEFT):
-                            level = max(0, level - 1)
-                        elif code in (ecodes.KEY_DOWN, ecodes.KEY_RIGHT):
-                            level = min(POSTPROCESS_MAX_LEVEL, level + 1)
-                        elif code in cycle_codes:
-                            level = (level + 1) % (POSTPROCESS_MAX_LEVEL + 1)
-                        else:
-                            continue
-                        deadline = time.monotonic() + timeout  # keep alive on activity
-                        OverlayManager.set_choosing(level)
-        finally:
-            for dev in grabbed:
-                try:
-                    dev.ungrab()
-                except Exception:
-                    pass
-            for dev in devices:
-                try:
-                    sel.unregister(dev)
-                except Exception:
-                    pass
-                try:
-                    dev.close()
-                except Exception:
-                    pass
+        with GrabbedKeys() as keys:
+            if not keys.alive:
+                return level  # no input device → just use the default
+            with keys.exclusive():
+                OverlayManager.set_choosing(level)
+                while True:
+                    # Every poll restarts the timeout, so activity keeps the
+                    # chooser alive; None means it ran out → auto-confirm.
+                    action = keys.poll(mapping, timeout)
+                    if action is None or action == "confirm":
+                        return level
+                    if action == "cancel":
+                        return None
+                    if action == "cycle":
+                        level = (level + 1) % (POSTPROCESS_MAX_LEVEL + 1)
+                    elif action[0] == "set":
+                        level = action[1]
+                    else:  # ("step", ±1)
+                        level = max(0, min(POSTPROCESS_MAX_LEVEL, level + action[1]))
+                    OverlayManager.set_choosing(level)
 
     # --- Talk mode key maps --------------------------------------------------
 
@@ -617,44 +595,39 @@ class KeyboardHandler:
         the VAD to hear the pause; Enter ends the conversation and writes the
         text; Esc drops the whole thing.
         """
-        mapping = {
-            ecodes.KEY_SPACE: "send",
-            ecodes.KEY_ENTER: "finish",
-            getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER): "finish",
-            ecodes.KEY_ESC: "cancel",
-        }
-        for trigger, _mods in resolve_hotkeys(CFG).get("talk", []):
-            mapping.setdefault(trigger, "send")
+        mapping: Dict[int, str] = {ecodes.KEY_SPACE: "send", ecodes.KEY_ESC: "cancel"}
+        mapping.update({code: "finish" for code in _CONFIRM_CODES})
+        for code in cls.trigger_codes("talk"):
+            mapping.setdefault(code, "send")
         return mapping
+
+    #: what the overlay shows while a talk turn is recording — the same keys as
+    #: ``talk_listen_keys``, in the form the hint strip draws.
+    TALK_HINTS: Tuple[Tuple[List[str], str], ...] = (
+        (["Space"], "end turn"), (["Enter"], "write it"), (["Esc"], "cancel"),
+    )
 
     @classmethod
     def talk_review_keys(cls) -> Dict[int, str]:
-        """Keycode → action while the generated text awaits its verdict."""
-        return {
-            ecodes.KEY_ENTER: "accept",
-            getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER): "accept",
-            ecodes.KEY_C: "copy",
-            ecodes.KEY_R: "redo",
-            ecodes.KEY_V: "talk",      # back into the conversation
-            ecodes.KEY_ESC: "reject",
-        }
+        """The review verdicts, with V dropping back into the conversation."""
+        return {**cls._REVIEW_KEYS, ecodes.KEY_V: "talk"}
 
     # --- AI action panel review (rewrite/vision) -----------------------------
 
-    @staticmethod
-    def _review_action(code: int) -> Optional[str]:
+    #: keycode → verdict in the AI review panel. One table, so the panel, its
+    #: talk variant and the hint line can never drift apart.
+    _REVIEW_KEYS: Dict[int, str] = {
+        ecodes.KEY_ESC: "reject",
+        ecodes.KEY_R: "redo",
+        ecodes.KEY_V: "redict",
+        ecodes.KEY_C: "copy",
+        **{code: "accept" for code in _CONFIRM_CODES},
+    }
+
+    @classmethod
+    def _review_action(cls, code: int) -> Optional[str]:
         """Map an evdev keycode to a review action (pure → testable without a device)."""
-        if code in (ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)):
-            return "accept"
-        if code == ecodes.KEY_ESC:
-            return "reject"
-        if code == ecodes.KEY_R:
-            return "redo"
-        if code == ecodes.KEY_V:
-            return "redict"
-        if code == ecodes.KEY_C:
-            return "copy"
-        return None
+        return cls._REVIEW_KEYS.get(code)
 
     @classmethod
     def capture_review(cls, mode: str, timeout: float = 90.0) -> str:
@@ -663,62 +636,14 @@ class KeyboardHandler:
         in the review panel. Returns "accept" / "reject" / "redo" / "redict" /
         "copy".
 
-        Mirrors ``capture_refinement``'s grab/select/ungrab loop. Times out to
-        "reject" (a review must NEVER auto-insert unreviewed text). Always
-        ungrabs. MUST run on a worker thread — it blocks.
+        Times out to "reject" — a review must NEVER auto-insert unreviewed text.
+        MUST run on a worker thread: it blocks.
         """
-        import time
-
-        devices = cls._find_keyboards()
-        if not devices:
-            return "reject"
-        sel = selectors.DefaultSelector()
-        grabbed: List[InputDevice] = []
-        for dev in devices:
-            try:
-                sel.register(dev, selectors.EVENT_READ)
-            except Exception:
-                continue
-            if cls._is_pointer(dev):
-                continue  # read it, but never grab a pointer (would freeze the cursor)
-            try:
-                dev.grab()
-                grabbed.append(dev)
-            except Exception:
-                pass
-
-        deadline = time.monotonic() + timeout
-        try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return "reject"  # auto-reject on timeout
-                for key_obj, _ in sel.select(timeout=remaining):
-                    try:
-                        events = list(key_obj.fileobj.read())
-                    except Exception:
-                        continue
-                    for event in events:
-                        if event.type != ecodes.EV_KEY or event.value != 1:
-                            continue
-                        action = cls._review_action(event.code)
-                        if action is not None:
-                            return action
-        finally:
-            for dev in grabbed:
-                try:
-                    dev.ungrab()
-                except Exception:
-                    pass
-            for dev in devices:
-                try:
-                    sel.unregister(dev)
-                except Exception:
-                    pass
-                try:
-                    dev.close()
-                except Exception:
-                    pass
+        with GrabbedKeys() as keys:
+            if not keys.alive:
+                return "reject"
+            with keys.exclusive():
+                return keys.poll(cls._REVIEW_KEYS, timeout) or "reject"
 
     @classmethod
     def record_instruction(cls, mode: str, timeout: float = 12.0) -> Optional[str]:
@@ -727,80 +652,26 @@ class KeyboardHandler:
         return its transcription, or None if cancelled / empty.
 
         Reuses thread-safe primitives (``AudioService`` start/stop/transcribe are
-        not GTK calls). Grabs the keyboard like ``capture_review``: the mode's own
-        trigger (or Enter) stops the recording, Esc cancels. Runs on the worker
-        thread. NOTE: ``start_recording`` bumps ``recording_generation`` — the
-        caller must re-read it afterwards.
+        not GTK calls). The mode's own trigger (or Enter) stops the recording,
+        Esc cancels, and running out of time stops it too — whatever was captured
+        is transcribed. Runs on the worker thread. NOTE: ``start_recording`` bumps
+        ``recording_generation`` — the caller must re-read it afterwards.
         """
-        import time
+        mapping: Dict[int, str] = {ecodes.KEY_ESC: "cancel"}
+        mapping.update({code: "stop" for code in _CONFIRM_CODES})
+        for code in cls.trigger_codes(mode):
+            mapping.setdefault(code, "stop")
 
-        devices = cls._find_keyboards()
-        if not devices:
-            return None
-        stop_codes = {trig for trig, _ in resolve_hotkeys(CFG).get(mode, [])}
-        stop_codes |= {ecodes.KEY_ENTER, getattr(ecodes, "KEY_KPENTER", ecodes.KEY_ENTER)}
+        with GrabbedKeys() as keys:
+            if not keys.alive:
+                return None
+            OverlayManager.show(mode)
+            AudioService.start_recording()
+            with keys.exclusive():
+                action = keys.poll(mapping, timeout)  # None on timeout → auto-stop
+            audio = AudioService.stop_recording()
 
-        OverlayManager.show(mode)
-        AudioService.start_recording()
-
-        sel = selectors.DefaultSelector()
-        grabbed: List[InputDevice] = []
-        for dev in devices:
-            try:
-                sel.register(dev, selectors.EVENT_READ)
-            except Exception:
-                continue
-            if cls._is_pointer(dev):
-                continue  # read it, but never grab a pointer (would freeze the cursor)
-            try:
-                dev.grab()
-                grabbed.append(dev)
-            except Exception:
-                pass
-
-        cancelled = False
-        deadline = time.monotonic() + timeout
-        try:
-            done = False
-            while not done:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break  # auto-stop → transcribe whatever was captured
-                for key_obj, _ in sel.select(timeout=remaining):
-                    try:
-                        events = list(key_obj.fileobj.read())
-                    except Exception:
-                        continue
-                    for event in events:
-                        if event.type != ecodes.EV_KEY or event.value != 1:
-                            continue
-                        if event.code == ecodes.KEY_ESC:
-                            cancelled = True
-                            done = True
-                            break
-                        if event.code in stop_codes:
-                            done = True
-                            break
-                    if done:
-                        break
-        finally:
-            for dev in grabbed:
-                try:
-                    dev.ungrab()
-                except Exception:
-                    pass
-            for dev in devices:
-                try:
-                    sel.unregister(dev)
-                except Exception:
-                    pass
-                try:
-                    dev.close()
-                except Exception:
-                    pass
-
-        audio = AudioService.stop_recording()
-        if cancelled or audio is None:
+        if action == "cancel" or audio is None:
             return None
         OverlayManager.set_transcribing()
         try:

@@ -65,6 +65,7 @@ class AudioService:
             return
 
         data_copy = indata.copy()
+        mono = data_copy[:, 0]
 
         # Always buffer: the batch path needs it, and it's the safety net the
         # streaming path falls back to if the live session fails.
@@ -74,7 +75,7 @@ class AudioService:
         detector = STATE.vad
         if detector is not None:
             try:
-                detector.feed(data_copy[:, 0])
+                detector.feed(mono)
             except Exception:
                 pass
 
@@ -82,7 +83,7 @@ class AudioService:
         session = STATE.stream_session
         if session is not None:
             try:
-                session.feed(data_copy[:, 0])
+                session.feed(mono)
             except Exception:
                 pass
 
@@ -91,7 +92,7 @@ class AudioService:
         # at 16 kHz), so thinning them left the overlay with near-empty chunks.
         try:
             if STATE.viz_queue.qsize() < 5:
-                STATE.viz_queue.put_nowait(data_copy[:, 0])
+                STATE.viz_queue.put_nowait(mono)
         except Exception:
             pass
 
@@ -157,20 +158,23 @@ class AudioService:
         ``STATE.capture_rate`` — what the semantic turn detector reads while
         the microphone is still open.
 
-        Takes a shallow copy of the chunk list first: the callback thread only
-        ever appends, so a snapshot can miss the newest chunk but never tear.
+        Reads backwards from a snapshot of the buffer's LENGTH rather than
+        copying the list: the callback thread only ever appends, so every index
+        below that length stays valid and only the newest chunk can be missed.
+        Cost is proportional to the tail asked for, not to the whole recording.
         """
-        chunks = list(STATE.audio_buffer)
-        if not chunks:
+        buffer = STATE.audio_buffer
+        index = len(buffer)
+        if not index:
             return None
         needed = max(1, int(seconds * STATE.capture_rate))
         tail, total = [], 0
-        for chunk in reversed(chunks):
+        while index and total < needed:
+            index -= 1
+            chunk = buffer[index]
             tail.append(chunk)
             total += len(chunk)
-            if total >= needed:
-                break
-        data = np.concatenate(list(reversed(tail)), axis=0)
+        data = np.concatenate(tail[::-1], axis=0)
         if data.ndim > 1:
             data = data[:, 0]
         return data[-needed:] if len(data) > needed else data

@@ -108,7 +108,9 @@ tts        = ["F10"]
 # Turn detection, in two layers. The energy VAD hears the pause; the semantic
 # model decides whether that pause actually ends your sentence.
 #
-# vad = false disables both (only Space / the talk key end a turn).
+# vad = false disables both, leaving only Space / the talk key to end a turn —
+# and with no detector there is no idle timeout either, so a session you walk
+# away from waits out turn_timeout instead.
 vad = true
 
 # Semantic turn detection: Smart Turn v3 reads the prosody of your last 8
@@ -124,9 +126,10 @@ turn_threshold = 0.5
 semantic_trigger_ms = 250
 # Silence after which the turn ends whatever the model thinks (ms).
 max_silence_ms = 4000
-# Use a local model file instead of downloading one, or pin the download URL.
-# turn_model_path = "~/models/smart-turn-v3.2-cpu.onnx"
-# turn_model_url = ""
+# The model: empty downloads the newest CPU build once into ~/.cache/loquivox
+# and reuses it from there. A path uses that file and never downloads; an
+# http(s) URL pins which build to fetch.
+# turn_model = "~/models/smart-turn-v3.2-cpu.onnx"
 # Activation level (RMS of the captured audio). Raise it in a noisy room, lower
 # it if your turns end while you are still speaking. The detector also
 # calibrates against the room noise on top of this floor.

@@ -18,12 +18,17 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
-    def show(mode: str) -> None:
-        """Show overlay for given mode."""
-        OverlayManager._show_impl(mode)
+    def show(mode: str, hints=None) -> None:
+        """
+        Show the overlay for ``mode``.
+
+        ``hints`` overrides the hotkey strip with a fixed list — for a caller
+        that has grabbed the keyboard, whose keys are not the global bindings.
+        """
+        OverlayManager._show_impl(mode, hints)
 
     @staticmethod
-    def _show_impl(mode: str) -> None:
+    def _show_impl(mode: str, hints=None) -> None:
         # Late import to avoid circular dependency
         from loquivox.ui.recording_overlay import GtkOverlay
         if STATE.overlay_window:
@@ -31,7 +36,7 @@ class OverlayManager:
                 STATE.overlay_window.close()
             except Exception:
                 pass
-        STATE.overlay_window = GtkOverlay(mode)
+        STATE.overlay_window = GtkOverlay(mode, hints)
 
     @staticmethod
     @run_on_main_thread

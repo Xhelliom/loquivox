@@ -30,13 +30,13 @@ import json
 import threading
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
 import loquivox.config as config_module
 from loquivox.services._whisper_features import compute_whisper_log_mel_features
-from loquivox.transcription.util import WHISPER_RATE, to_mono_16k
+from loquivox.transcription.util import WHISPER_RATE, download_file, to_mono_16k
 
 #: where the downloaded model is cached
 MODEL_DIR: Path = Path.home() / ".cache" / "loquivox"
@@ -161,38 +161,35 @@ def resolve_model_url(configured: str = "", timeout: float = 15.0) -> str:
     return DEFAULT_MODEL_URL
 
 
+def cached_model() -> Optional[Path]:
+    """The best model already sitting in the cache, or None."""
+    if not MODEL_DIR.is_dir():
+        return None
+    for path in sorted(MODEL_DIR.glob("*.onnx"), key=lambda p: _rank_model_file(p.name),
+                       reverse=True):
+        if path.stat().st_size >= MIN_MODEL_BYTES:
+            return path
+    return None
+
+
 def ensure_model(url: str, path: Path, timeout: float = 60.0) -> Optional[Path]:
     """
     Return the local model path, downloading it once (~8 MB) if missing.
 
-    Written to a ``.part`` file and renamed only once it looks like a real
-    model, so an interrupted or redirected download can never leave a corrupt
-    file behind that would fail forever after.
+    The write is atomic and size-checked (see ``download_file``), so a partial
+    or redirected download can never leave a corrupt file behind that would
+    fail forever after.
     """
     if path.exists() and path.stat().st_size >= MIN_MODEL_BYTES:
         return path
-    tmp = path.with_suffix(".part")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
         print(f"⬇️  Downloading the turn-detection model (~8 MB) → {path}")
-        with urllib.request.urlopen(url, timeout=timeout) as response, open(tmp, "wb") as out:
-            while True:
-                block = response.read(64 * 1024)
-                if not block:
-                    break
-                out.write(block)
-        if tmp.stat().st_size < MIN_MODEL_BYTES:
-            raise RuntimeError(f"got {tmp.stat().st_size} bytes — not a model")
-        tmp.replace(path)
+        download_file(url, path, min_bytes=MIN_MODEL_BYTES, timeout=timeout)
         return path
     except Exception as e:
         print(f"⚠️  Could not fetch the turn-detection model: {e}")
         print("   Talk mode falls back to silence detection. Set "
-              "[talk] turn_model_path in config.toml to use a local copy.")
-        try:
-            tmp.unlink(missing_ok=True)
-        except Exception:
-            pass
+              "[talk] turn_model in config.toml to use a local copy.")
         return None
 
 
@@ -218,15 +215,19 @@ def get_turn_detector() -> Optional[SmartTurnDetector]:
     with _resolve_lock:
         if _resolved:
             return _detector
-        override = (cfg.TALK_TURN_MODEL_PATH or "").strip()
-        if override:
-            path = Path(override).expanduser()
+        configured = (cfg.TALK_TURN_MODEL or "").strip()
+        if configured and not configured.startswith(("http://", "https://")):
+            path = Path(configured).expanduser()
             if not path.exists():
-                print(f"⚠️  [talk] turn_model_path not found: {path}")
+                print(f"⚠️  [talk] turn_model not found: {path}")
                 path = None
         else:
-            url = resolve_model_url(cfg.TALK_TURN_MODEL_URL)
-            path = ensure_model(url, MODEL_DIR / url.rsplit("/", 1)[-1])
+            # A model already in the cache is used as it is: no repository
+            # listing, no round-trip, and no stall when the machine is offline.
+            path = cached_model()
+            if path is None:
+                url = resolve_model_url(configured)
+                path = ensure_model(url, MODEL_DIR / url.rsplit("/", 1)[-1])
         detector = SmartTurnDetector(path) if path else None
         if detector is not None and not detector.load():
             detector = None
@@ -246,6 +247,35 @@ def ready_detector() -> Optional[SmartTurnDetector]:
     if not config_module.CFG.TALK_SEMANTIC_TURNS:
         return None
     return _detector if _resolved else None
+
+
+def turn_complete(vad, snapshot: Callable[[], Optional[np.ndarray]],
+                  sample_rate: int) -> bool:
+    """
+    Decide whether the pause the energy VAD just heard really ends the turn.
+
+    With no model loaded the trigger *is* the decision — plain silence
+    detection, as it was before this module existed. With one, Smart Turn reads
+    the prosody of the last seconds and answers "landed" or "still going"; a
+    "still going" re-arms the VAD for a longer window, so trailing off buys more
+    time instead of handing the floor over. ``TALK_TURN_MAX_SILENCE_MS`` caps
+    that, and a model that cannot answer degrades to the plain behaviour.
+
+    ``snapshot`` is called only if the model is going to be asked — reading the
+    tail of a live recording is not free, and most pauses never get that far.
+    """
+    cfg = config_module.CFG
+    detector = ready_detector()
+    if detector is None:
+        return True
+    if vad.silent_for * 1000 >= cfg.TALK_TURN_MAX_SILENCE_MS:
+        return True
+    probability = detector.probability(snapshot(), sample_rate)
+    if probability is None or probability >= cfg.TALK_TURN_THRESHOLD:
+        return True
+    print(f"🤔 Turn not finished (p={probability:.2f}) — still listening")
+    vad.rearm(cfg.TALK_VAD_SILENCE_MS)
+    return False
 
 
 def prewarm_async() -> None:

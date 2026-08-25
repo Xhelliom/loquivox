@@ -34,6 +34,11 @@ POSTPROCESS_LEVELS: tuple = (
     (5, "Custom"),   # uses POSTPROCESS_CUSTOM_PROMPT
 )
 POSTPROCESS_MAX_LEVEL: int = 5
+
+#: What the vision model is told to answer when a talk-mode screenshot holds
+#: nothing worth passing on — interpolated into the prompt below, so the
+#: sentinel the code matches on and the sentence the model reads are one string.
+TALK_SCREEN_EMPTY: str = "(nothing relevant on screen)"
 POSTPROCESS_CUSTOM_LEVEL: int = 5
 
 # One-line description per hotkey action — single source of truth for the
@@ -267,11 +272,11 @@ class Config:
     TALK_SEMANTIC_TRIGGER_MS: int = 250
     # Silence after which the turn ends whatever the model says (milliseconds).
     TALK_TURN_MAX_SILENCE_MS: int = 4000
-    # Model file: empty = the newest CPU build of pipecat-ai/smart-turn-v3,
-    # downloaded once (~8 MB) to ~/.cache/loquivox. A path here uses a local
-    # copy instead and skips the download entirely.
-    TALK_TURN_MODEL_URL: str = ""
-    TALK_TURN_MODEL_PATH: str = ""
+    # The model: empty = the newest CPU build of pipecat-ai/smart-turn-v3,
+    # downloaded once (~8 MB) to ~/.cache/loquivox and reused from there. A
+    # local path uses that file and never downloads; an http(s) URL pins the
+    # build to fetch.
+    TALK_TURN_MODEL: str = ""
     # A turn stops after this long no matter what (seconds).
     TALK_TURN_TIMEOUT: float = 60.0
     # Silence with nothing said at all for this long ends the conversation and
@@ -331,10 +336,8 @@ class Config:
         "Quote error messages, subject lines, names and figures verbatim rather "
         "than summarising them. Ignore Loquivox's own small recording overlay and "
         "chat panel if they are visible. If nothing on screen could plausibly be "
-        "useful, answer exactly: (nothing relevant on screen)"
+        f"useful, answer exactly: {TALK_SCREEN_EMPTY}"
     )
-    #: the vision model's way of saying the screen holds nothing worth passing on
-    TALK_SCREEN_EMPTY: str = "(nothing relevant on screen)"
 
     # Speak the assistant's conversational replies even when TTS is toggled off
     # — talk mode is a voice conversation, the read-back is the point.
@@ -384,6 +387,11 @@ class Config:
         "vision":     {"icon": "📸", "text": "Vision Mode...",  "bg": "bg", "fg": "accent"},
         "talk":       {"icon": "🗣️", "text": "Talk Mode...",    "bg": "bg", "fg": "accent"},
     })
+
+    #: The modes whose hotkey records audio while it is held. MODES above is the
+    #: overlay's appearance table and is NOT this list: 'talk' has a look there
+    #: but owns the microphone through its own session, not through the key.
+    RECORDING_MODES: Tuple[str, ...] = ("dictation", "ai", "ai_rewrite", "vision")
 
     # --- Hotkey Definitions ---
     # format: "id": (Label, [chord specs])
@@ -655,10 +663,10 @@ def _build_config() -> Config:
         overrides["TALK_SEMANTIC_TRIGGER_MS"] = int(talk["semantic_trigger_ms"])
     if "max_silence_ms" in talk:
         overrides["TALK_TURN_MAX_SILENCE_MS"] = int(talk["max_silence_ms"])
-    if "turn_model_url" in talk:
-        overrides["TALK_TURN_MODEL_URL"] = str(talk["turn_model_url"]).strip()
-    if "turn_model_path" in talk:
-        overrides["TALK_TURN_MODEL_PATH"] = str(talk["turn_model_path"]).strip()
+    # `turn_model_path`/`turn_model_url` were two keys before one took both jobs.
+    for legacy in ("turn_model_url", "turn_model_path", "turn_model"):
+        if str(talk.get(legacy, "")).strip():
+            overrides["TALK_TURN_MODEL"] = str(talk[legacy]).strip()
     if "speak_replies" in talk:
         overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
     if str(talk.get("system_prompt", "")).strip():

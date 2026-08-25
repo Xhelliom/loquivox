@@ -1044,6 +1044,7 @@ class SettingsDialog:
         depth = cls._talk_depth.get_active_id() or "normal"
         semantic = bool(cls._talk_semantic_check.get_active())
         speak = bool(cls._talk_speak_check.get_active())
+        screenshot = bool(cls._talk_shot_check.get_active())
         try:
             update_section("talk", {
                 "finish_on_phrase": phrase,
@@ -1051,7 +1052,7 @@ class SettingsDialog:
                 "depth": depth,
                 "semantic_turns": semantic,
                 "speak_replies": speak,
-                "screenshot": bool(cls._talk_shot_check.get_active()),
+                "screenshot": screenshot,
                 "screenshot_region": cls._talk_shot_region.get_active_id() or "screen",
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
@@ -1067,8 +1068,7 @@ class SettingsDialog:
             f"<small>✓ Applied — ends on: {', '.join(ends)}.</small>"
         )
         print(f"🗣️  Talk: finish_on_phrase={phrase} finish_by_model={by_model} "
-              f"depth={depth} semantic_turns={semantic} "
-              f"screenshot={bool(cls._talk_shot_check.get_active())}")
+              f"depth={depth} semantic_turns={semantic} screenshot={screenshot}")
 
     # -----------------------------------------------------------------
     # API keys section (#stored in secrets.env, applied live)

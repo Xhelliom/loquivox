@@ -33,12 +33,14 @@ shown in a GTK overlay, with optional TTS read-back.
 
 - The first spec in each list is the primary key; the rest are aliases (incl.
   media keys). Specs support chords like `"ALT+SPACE"` or `"CTRL+SHIFT+D"`.
-- Recording modes are `dictation`, `ai`, `ai_rewrite`, `vision` (see
-  `CFG.MODES`). The rest (`pin`, `tts`, `cancel`, `pause`, `refine`) are
-  non-recording session actions — see `KeyboardHandler._NON_RECORDING_ACTIONS`.
-- `talk` is in both lists: it has a `CFG.MODES` entry (overlay look) but its key
-  only *starts* a session, so the listener treats it as non-recording. It never
-  goes through `ModeHandler.process()` — see the talk-mode section below.
+- Recording modes — the ones whose key records while it is held — are listed in
+  `CFG.RECORDING_MODES`; `KeyboardHandler._is_recording_mode` is the only test,
+  and everything else (`pin`, `tts`, `cancel`, `pause`, `refine`, `talk`) is a
+  session action whose key-up does nothing.
+- `CFG.MODES` is a *different* table: the overlay's appearance. `talk` has an
+  entry there for its look while owning the microphone through its own session
+  rather than through the hold-key, which is why it is not in `RECORDING_MODES`
+  and never goes through `ModeHandler.process()` — see the talk-mode section.
 - Hold-to-talk by default; `STATE.toggle_mode` switches to press-to-start/stop.
 - Hotkeys are user-overridable in `config.toml` `[hotkeys]` and live-editable in
   the Settings dialog (which calls `KeyboardHandler.reload_hotkeys()`).

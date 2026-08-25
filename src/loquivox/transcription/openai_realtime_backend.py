@@ -65,14 +65,13 @@ class OpenAIRealtimeSession(StreamingSession):
         if self._error:
             raise BackendUnavailable(f"OpenAI Realtime connect failed: {self._error}")
 
-    #: transcription models the API rejects any turn_detection config on —
-    #: it must be omitted or null (gpt-realtime-whisper and friends).
-    _NO_TURN_DETECTION = ("whisper",)
-
-    @classmethod
-    def _supports_turn_detection(cls, model: str) -> bool:
-        """False for models that require ``turn_detection: null``."""
-        if any(tag in (model or "").lower() for tag in cls._NO_TURN_DETECTION):
+    @staticmethod
+    def _supports_turn_detection(model: str) -> bool:
+        """
+        False for the models the API rejects any turn_detection config on — it
+        must be omitted or null there (gpt-realtime-whisper and friends).
+        """
+        if "whisper" in (model or "").lower():
             print(f"ℹ️  {model} takes no server-side turn detection — "
                   "talk mode will use the local detector")
             return False

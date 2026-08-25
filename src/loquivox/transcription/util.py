@@ -9,14 +9,46 @@ live here rather than being duplicated per backend.
 from __future__ import annotations
 
 import io
+import shutil
+import urllib.request
 from math import gcd
-from typing import Tuple
+from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 from scipy.io.wavfile import write as wav_write
 from scipy.signal import resample_poly
 
 WHISPER_RATE = 16000  # every Whisper variant runs internally at 16 kHz
+
+
+def download_file(url: str, dest: Path, *, min_bytes: int = 0,
+                  timeout: Optional[float] = None) -> None:
+    """
+    Fetch ``url`` into ``dest``, atomically.
+
+    The body lands in a sibling ``.part`` file and is renamed only once it is
+    complete and at least ``min_bytes`` long, so an interrupted download — or a
+    captive-portal HTML page — can never leave behind something that looks like
+    a usable model. Raises on any failure, having removed the partial file;
+    callers decide what that means (a fallback, or ``BackendUnavailable``).
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_suffix(dest.suffix + ".part")
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response, \
+                open(partial, "wb") as out:
+            shutil.copyfileobj(response, out)
+        size = partial.stat().st_size
+        if size < min_bytes:
+            raise RuntimeError(f"got {size} bytes, expected at least {min_bytes}")
+        partial.replace(dest)
+    except Exception:
+        try:
+            partial.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def resample_down(audio: np.ndarray, src_rate: int, target_rate: int) -> Tuple[np.ndarray, int]:

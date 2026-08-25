@@ -29,6 +29,16 @@ class ChatManager:
         ChatManager.refresh_overlay()
 
     @staticmethod
+    def _keep_open() -> bool:
+        """
+        True while the overlay must not fade out: pinned, being typed into, or
+        carrying a talk conversation — whose turns last far longer than the
+        auto-hide delay, so without this the WebView is destroyed and rebuilt
+        between every single turn.
+        """
+        return STATE.chat_pinned or STATE.chat_input_focused or STATE.talk_active
+
+    @staticmethod
     def toggle_pin() -> None:
         """Toggle chat overlay pin mode."""
         if not STATE.chat_enabled:
@@ -74,7 +84,7 @@ class ChatManager:
         # Don't arm the auto-hide while the text input is focused, or the
         # overlay would fade out from under the user mid-typing (an unrelated
         # refresh — e.g. a TTS toggle — would otherwise re-arm it).
-        if not STATE.chat_pinned and not STATE.chat_input_focused:
+        if not ChatManager._keep_open():
             STATE.chat_hide_timer = GLib.timeout_add_seconds(
                 CFG.CHAT_AUTO_HIDE_SEC,
                 ChatManager._auto_hide
@@ -91,7 +101,7 @@ class ChatManager:
         STATE.chat_input_focused = active
         if active:
             ChatManager._cancel_timer()
-        elif not STATE.chat_pinned and STATE.chat_overlay_window:
+        elif not ChatManager._keep_open() and STATE.chat_overlay_window:
             ChatManager._cancel_timer()
             STATE.chat_hide_timer = GLib.timeout_add_seconds(
                 CFG.CHAT_AUTO_HIDE_SEC, ChatManager._auto_hide
@@ -101,7 +111,7 @@ class ChatManager:
     def _auto_hide() -> bool:
         """Auto-hide callback."""
         STATE.chat_hide_timer = None
-        if not STATE.chat_pinned and STATE.chat_overlay_window:
+        if not ChatManager._keep_open() and STATE.chat_overlay_window:
             STATE.chat_overlay_window.start_fade_out(callback=ChatManager._destroy)
         return False
 
