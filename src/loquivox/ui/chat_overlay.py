@@ -33,6 +33,16 @@ except (ValueError, ImportError):
 # Use layer-shell only on Wayland when available
 USE_LAYER_SHELL = HAS_LAYER_SHELL and SESSION_TYPE == "wayland"
 
+#: the side conversation: a fixed panel on the right edge
+CHAT_WIDTH, CHAT_HEIGHT = 340, 450
+#: the talk bubble: fixed width, height driven by content, stacked directly
+#: above the recording overlay so the whole exchange is in one place
+TALK_WIDTH, TALK_MIN_HEIGHT, TALK_GAP = 560, 96, 16
+#: the recording overlay's own distance from the bottom edge (recording_overlay.py)
+TALK_OVERLAY_MARGIN = 80
+#: and never taller than this share of the screen — it is an overlay, not a window
+TALK_MAX_SCREEN = 0.6
+
 
 # ---------------------------------------------------------------------------
 # HTML / CSS / JS Templates
@@ -215,6 +225,29 @@ html, body {{
 .code-copy-btn svg {{ width: 14px; height: 14px; fill: currentColor; }}
 .code-copy-btn.copied {{ color: {success}; border-color: {success}; }}
 
+/* The finished text, up for review. Not a spoken turn: full width, squared
+   off, and labelled — you are looking at the thing you asked for, not at
+   someone answering you. Same message pipeline as everything else, so the
+   markdown rendering and the copy button come for free. */
+.result .message {{
+  max-width: 100%; flex: 1;
+  background: {surface};
+  color: {text};
+  border: 1px solid {accent_alpha40};
+  border-left: 3px solid {accent};
+  border-radius: 10px;
+  font-weight: 400;
+}}
+/* A result can be many lines tall; its copy button belongs at the top of it,
+   not floating halfway down. */
+.result .copy-btn {{ align-self: flex-start; margin-top: 10px; }}
+.result .text::before {{
+  content: 'Texte généré';
+  display: block; margin-bottom: 7px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.09em;
+  text-transform: uppercase; color: {accent}; opacity: 0.9;
+}}
+
 .status {{
   align-self: center; background: {white_alpha05}; color: {dim_text};
   font-size: 11px; padding: 3px 10px; border-radius: 10px;
@@ -254,6 +287,36 @@ html, body {{
 }}
 .send-btn:hover {{ transform: scale(1.06); }}
 .send-btn:active {{ transform: scale(0.96); }}
+
+/* --- Talk bubble ---------------------------------------------------------
+   The same window, re-anchored to the top edge and sized by its content.
+   Lighter and more rounded than the side panel, and ringed in the accent
+   colour: it sits over what you are working on, and you should know at a
+   glance that this one is listening. */
+.chat-window.talk {{
+  background-color: {bg_rgba_talk};
+  border: 1px solid {accent_alpha40};
+  border-radius: 22px;
+  box-shadow: 0 10px 40px {black_alpha40};
+}}
+/* The keyboard is grabbed for the whole session — there is nothing to type into. */
+.talk .chat-input-bar {{ display: none; }}
+.talk .chat-container {{ padding-bottom: 12px; }}
+.talk .chat-scroll-area {{ padding-bottom: 4px; }}
+/* The bubble is sized to its content: a trailing margin under the last turn
+   is empty space it would have to reserve. */
+.talk .chat-container > .message-wrapper:last-of-type,
+#live .message-wrapper {{ margin-bottom: 0; }}
+
+/* The turn being spoken or written right now: no entry animation (it is
+   rewritten several times a second) and a caret, so an unfinished sentence
+   never reads as a finished one. */
+.message-wrapper.live {{ animation: none; opacity: 1; transform: none; }}
+.live .text::after {{
+  content: '▌'; margin-left: 1px; opacity: 0.55;
+  animation: caret 1.05s steps(1) infinite;
+}}
+@keyframes caret {{ 50% {{ opacity: 0; }} }}
 '''
 
 CHAT_JS = '''
@@ -270,8 +333,49 @@ function copyText(btn, index) {
   setTimeout(() => { btn.innerHTML = copyIcon; btn.classList.remove('copied'); }, 1500);
 }
 
-function signalDrag() {
-  window.webkit.messageHandlers.signal.postMessage(JSON.stringify({action: 'Drag'}));
+function post(msg) {
+  window.webkit.messageHandlers.signal.postMessage(JSON.stringify(msg));
+}
+
+function signalDrag() { post({action: 'Drag'}); }
+function signalClose() { post({action: 'Close'}); }
+
+// --- Talk bubble: live text and content-driven height ----------------------
+let lastHeight = 0;
+
+function contentHeight() {
+  const hint = document.querySelector('.pin-hint');
+  const chat = document.getElementById('chat');
+  return Math.ceil((hint ? hint.offsetHeight + 16 : 0) +
+                   (chat ? chat.scrollHeight : 0)) + 12;
+}
+
+// Tell Python how tall the bubble should be. Ignored below a few pixels so a
+// sub-pixel reflow can't start a resize/relayout loop.
+function reportHeight() {
+  if (!window.TALK) return;
+  const h = contentHeight();
+  if (Math.abs(h - lastHeight) < 4) return;
+  lastHeight = h;
+  post({action: 'Resize', height: h});
+}
+
+// Rewrite the turn in progress in place — the live transcript while the user
+// speaks, then the reply as the model writes it. Patching this one node is why
+// the text can grow like an autocompletion: reloading the page for every
+// delta would restart every animation and lose the scroll position.
+function setLive(role, html) {
+  const live = document.getElementById('live');
+  if (!live) return;
+  if (!html) { live.innerHTML = ''; reportHeight(); return; }
+  let node = live.firstElementChild;
+  if (!node || !node.classList.contains(role)) {
+    live.innerHTML = '<div class="message-wrapper live ' + role +
+                     '"><div class="message"><div class="text"></div></div></div>';
+    node = live.firstElementChild;
+  }
+  node.querySelector('.text').innerHTML = html;
+  reportHeight();  // scrolling is the MutationObserver's job, once per change
 }
 
 function sendMessage() {
@@ -348,25 +452,35 @@ if (chat) {
   new MutationObserver(() => checkScroll(true)).observe(chat, { childList: true, subtree: true });
 }
 
-window.onload = () => checkScroll(false);
+window.onload = () => { checkScroll(false); reportHeight(); };
+
+// Height follows the content however it changes — a new message, a reply
+// being written, or a long line rewrapping after a resize.
+(function initTalk() {
+  if (!window.TALK) return;
+  const chat = document.getElementById('chat');
+  if (chat && window.ResizeObserver) new ResizeObserver(reportHeight).observe(chat);
+  reportHeight();
+})();
 '''
 
 CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><style>{CHAT_CSS}</style></head>
 <body>
-<div class="chat-window">
+<div class="chat-window{talk_class}">
   <div class="drag-handle" onmousedown="signalDrag()"></div>
   {pin_hint}
   <div class="chat-scroll-area" id="scroll-area">
-    <div id="chat" class="chat-container">{messages}</div>
+    <div id="chat" class="chat-container">{messages}<div id="live"></div></div>
   </div>
   <div class="chat-input-bar">
     <textarea id="chat-input" rows="1" placeholder="Type a message…"></textarea>
     <button class="send-btn" onclick="sendMessage()" title="Send">&#10148;</button>
   </div>
 </div>
-<script>{CHAT_JS}</script>
+<script>window.TALK = {TALK};
+{CHAT_JS}</script>
 </body>
 </html>'''
 
@@ -374,8 +488,13 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
 class ChatOverlay(Gtk.Window):
     """Chat overlay using WebKit2."""
 
-    def __init__(self):
+    def __init__(self, talk: bool = False):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
+        #: talk bubble (top edge, content-sized) vs side conversation panel
+        self.talk = talk
+        self._height = TALK_MIN_HEIGHT
+        self._ready = False        # the page is loaded and can run JS
+        self._pending_js: Optional[str] = None
         self._setup_window()
         self._setup_webview()
         self._init_animation()
@@ -395,20 +514,11 @@ class ChatOverlay(Gtk.Window):
         if visual and screen.is_composited():
             self.set_visual(visual)
 
-        w, h = 340, 450
-
         if USE_LAYER_SHELL:
             # --- Wayland: gtk-layer-shell ---
             GtkLayerShell.init_for_window(self)
             GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
             GtkLayerShell.set_namespace(self, "loquivox-chat")
-
-            # Anchor to right edge, vertically centered via margins
-            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
-            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, False)
-            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, False)
-            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, 20)
-
             # Allow keyboard interaction for WebView
             GtkLayerShell.set_keyboard_mode(
                 self, GtkLayerShell.KeyboardMode.ON_DEMAND
@@ -418,14 +528,129 @@ class ChatOverlay(Gtk.Window):
             self.set_keep_above(True)
             self.set_type_hint(Gdk.WindowTypeHint.UTILITY)
 
-            display = Gdk.Display.get_default()
-            monitor = display.get_primary_monitor() or display.get_monitor(0)
-            geometry = monitor.get_geometry()
-            x = geometry.x + geometry.width - w - 20
-            y = geometry.y + (geometry.height - h) // 2
+        self._apply_geometry()
+
+    @staticmethod
+    def _monitor_geometry():
+        """Geometry of the monitor the overlay lives on."""
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0)
+        return monitor.get_geometry()
+
+    def _max_height(self) -> int:
+        """The tallest the bubble may grow — past this it stops being an overlay."""
+        return int(self._monitor_geometry().height * TALK_MAX_SCREEN)
+
+    @staticmethod
+    def _talk_bottom() -> int:
+        """
+        How far the bubble's bottom edge sits above the screen's.
+
+        Directly on top of the recording overlay, which the user is already
+        watching: two floating windows at opposite ends of the screen would
+        mean reading the same exchange in two places.
+        """
+        return TALK_OVERLAY_MARGIN + CFG.OVERLAY_HEIGHT + TALK_GAP
+
+    def _apply_geometry(self) -> None:
+        """
+        Place and size the window for the mode it is in.
+
+        The side conversation keeps its fixed panel against the right edge. The
+        talk bubble sits centred just above the recording overlay instead, and
+        takes its height from its content (``_apply_height``) — anchored by its
+        bottom edge, so it grows upwards and the newest line never moves.
+
+        On layer-shell an unanchored axis centres the surface, which is exactly
+        what both placements want; on X11 the same thing is done by hand.
+        """
+        geometry = self._monitor_geometry()
+        if self.talk:
+            width = min(TALK_WIDTH, geometry.width - 2 * TALK_GAP)
+            height = self._height = max(
+                TALK_MIN_HEIGHT, min(self._height, self._max_height()))
+        else:
+            width, height = CHAT_WIDTH, CHAT_HEIGHT
+
+        if USE_LAYER_SHELL:
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, not self.talk)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, False)
+            GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, self.talk)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT,
+                                     0 if self.talk else 20)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM,
+                                     self._talk_bottom() if self.talk else 0)
+        else:
+            x = (geometry.x + (geometry.width - width) // 2 if self.talk
+                 else geometry.x + geometry.width - width - 20)
+            y = (geometry.y + geometry.height - height - self._talk_bottom()
+                 if self.talk else geometry.y + (geometry.height - height) // 2)
             self.move(x, y)
 
-        self.set_default_size(w, h)
+        self.set_size_request(width, height)
+        self.resize(width, height)
+
+    def _apply_height(self, height: int) -> None:
+        """Grow or shrink the bubble to the height its content just reported."""
+        if not self.talk or height <= 0:
+            return
+        height = max(TALK_MIN_HEIGHT, min(height, self._max_height()))
+        if height == self._height:
+            return
+        self._height = height
+        self._apply_geometry()
+
+    def set_talk_mode(self, talk: bool) -> None:
+        """
+        Switch between the talk bubble and the side conversation.
+
+        Re-anchoring beats tearing the window down and building another: the
+        WebView, its page and the conversation on it all survive, so starting
+        a session moves the panel instead of flashing a new one into place.
+        Caller re-renders afterwards — the ``talk`` class is baked into the HTML.
+        """
+        if self.talk == talk:
+            return
+        self.talk = talk
+        self._height = TALK_MIN_HEIGHT
+        self._apply_geometry()
+
+    def set_live(self, role: str, text: str) -> None:
+        """
+        Show the turn in progress: the transcript as it is heard, then the
+        reply as it is written. Empty ``text`` clears it.
+
+        Patched straight into the DOM — a full reload per delta would restart
+        every animation and lose the scroll position, which is the difference
+        between text that grows and text that flickers.
+        """
+        rendered = self._render_markdown(text) if text else ""
+        self._run_js(f"setLive({json.dumps(role)}, {json.dumps(rendered)});")
+
+    def _run_js(self, script: str) -> None:
+        """
+        Run a script in the page, deferring it if the page is still loading.
+
+        Only the last deferred script is kept: every caller here rewrites the
+        same node with the newest text, so replaying the backlog would just
+        redraw intermediate states nobody would see.
+        """
+        if not self._ready:
+            self._pending_js = script
+            return
+        try:
+            self.webview.run_javascript(script, None, None, None)
+        except Exception:
+            pass
+
+    def _on_load_changed(self, webview, event) -> None:
+        """Release deferred scripts once the page can run them."""
+        if event != WebKit2.LoadEvent.FINISHED:
+            return
+        self._ready = True
+        script, self._pending_js = self._pending_js, None
+        if script:
+            self._run_js(script)
 
     def _on_draw_window(self, widget: Gtk.Window, cr: cairo.Context) -> bool:
         """Clear window background to fixed transparency for rounded corners."""
@@ -448,6 +673,7 @@ class ChatOverlay(Gtk.Window):
         content_manager.connect("script-message-received::signal", self._on_script_message)
 
         self.webview.connect("decide-policy", self._on_policy_decision)
+        self.webview.connect("load-changed", self._on_load_changed)
         self.add(self.webview)
 
     def _on_script_message(self, manager, message) -> None:
@@ -481,6 +707,11 @@ class ChatOverlay(Gtk.Window):
                     # Late import to avoid a circular import at module load.
                     from loquivox.handlers.mode import ModeHandler
                     ModeHandler.submit_text_chat(content)
+            elif action == 'Resize':
+                self._apply_height(int(msg.get('height', 0)))
+            elif action == 'Close':
+                from loquivox.managers.chat import ChatManager
+                ChatManager.hide_manual()
             elif action == 'KeepAlive':
                 # Pause the auto-hide while the input box has focus, resume on blur.
                 from loquivox.managers.chat import ChatManager
@@ -569,20 +800,26 @@ class ChatOverlay(Gtk.Window):
         if status_text:
             html_messages.append(f'<div class="message status">{status_text}</div>')
 
-        # Build pin hint - simple text with gear icon
-        pin_label = CFG.HOTKEY_DEFS["pin"][0]
-        tts_label = CFG.HOTKEY_DEFS["tts"][0]
-        pin_status = f"{pin_label}: Unpin" if is_pinned else f"{pin_label}: Pin"
-        voice_status = f"{tts_label}: Mute" if is_tts else f"{tts_label}: Voice"
-
+        # Build the hint bar. During a talk session the global hotkeys are
+        # grabbed, so showing F9/F10 there would name keys that do nothing —
+        # the session's own keys are shown instead.
+        if self.talk:
+            labels = ["🗣️ Talk", "Space: end turn", "Enter: write it", "Esc: cancel"]
+        else:
+            pin_label = CFG.HOTKEY_DEFS["pin"][0]
+            tts_label = CFG.HOTKEY_DEFS["tts"][0]
+            labels = [
+                f"{pin_label}: Unpin" if is_pinned else f"{pin_label}: Pin",
+                f"{tts_label}: Mute" if is_tts else f"{tts_label}: Voice",
+            ]
+        separator = '<span style="opacity:0.2; margin:0 4px">|</span>'
         pin_hint = (
-            f'<div class="pin-hint">'
-            f'<span>{pin_status}</span>'
-            f'<span style="opacity:0.2; margin:0 4px">|</span>'
-            f'<span>{voice_status}</span>'
-            f'<span style="opacity:0.2; margin:0 4px">|</span>'
-            f'<a href="settings://open" class="settings-link" title="Settings">⚙️</a>'
-            f'</div>'
+            '<div class="pin-hint">'
+            + separator.join(f'<span>{label}</span>' for label in labels)
+            + separator
+            + '<a href="settings://open" class="settings-link" title="Settings">⚙️</a>'
+            + '<a href="#" onclick="signalClose(); return false;" title="Hide">✕</a>'
+            + '</div>'
         )
 
         # Prepare dynamic CSS with centralized colors
@@ -604,12 +841,16 @@ class ChatOverlay(Gtk.Window):
         formatted_css = CHAT_CSS.format(
             bg=scheme["bg"],
             bg_rgba=hex_to_rgba(scheme["bg"], 0.95),
+            # The bubble floats over what the user is working on: it must dim
+            # the content underneath, never hide it.
+            bg_rgba_talk=hex_to_rgba(scheme["bg"], 0.78),
             surface=scheme["surface"],
             surface_alpha80=hex_to_rgba(scheme["surface"], 0.8),
             accent=scheme["accent"],
             accent_alpha10=hex_to_rgba(scheme["accent"], 0.1),
             accent_alpha20=hex_to_rgba(scheme["accent"], 0.2),
             accent_alpha30=hex_to_rgba(scheme["accent"], 0.3),
+            accent_alpha40=hex_to_rgba(scheme["accent"], 0.4),
             text=scheme["text"],
             text_on_accent=scheme["text"] if STATE.color_scheme == "Pink Orchid" else get_contrast_text(scheme["accent"]),
             success=scheme["accent"],
@@ -624,9 +865,15 @@ class ChatOverlay(Gtk.Window):
 
         html = CHAT_HTML_TEMPLATE.replace("{messages}", "\n".join(html_messages))
         html = html.replace("{pin_hint}", pin_hint)
+        html = html.replace("{talk_class}", " talk" if self.talk else "")
+        html = html.replace("{TALK}", "true" if self.talk else "false")
         html = html.replace("{CHAT_CSS}", formatted_css)
         html = html.replace("{CHAT_JS}", CHAT_JS)
 
+        # The page is about to be replaced: anything queued for the old one is
+        # stale, and JS can't run again until the new one has finished loading.
+        self._ready = False
+        self._pending_js = None
         self.webview.load_html(html, None)
 
     def _on_policy_decision(self, webview, decision, decision_type) -> bool:

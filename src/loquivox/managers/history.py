@@ -58,9 +58,9 @@ class HistoryManager:
         """Clear all history."""
         STATE.answer_history = []
         STATE.conversation_history = []
-        STATE.chat_messages = []
         # Late imports to avoid circular dependencies
         from loquivox.ui.tray import TrayManager
         from loquivox.managers.chat import ChatManager
+        ChatManager.clear()
         TrayManager.update_menu()
         ChatManager.refresh_overlay()

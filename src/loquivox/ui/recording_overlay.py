@@ -41,6 +41,19 @@ except (ValueError, ImportError):
     HAS_LAYER_SHELL = False
 
 
+def review_hint_line(mode: str) -> str:
+    """
+    The keys a generated result offers, as one line.
+
+    Written once and read twice: this panel reviews a rewrite or a vision
+    answer, and the chat bubble reviews talk mode's text. V re-dictates the
+    instruction everywhere except talk, where it drops back into the
+    conversation with the brief intact.
+    """
+    back = "V 🗣️" if mode == "talk" else "V 🎤"
+    return f"Entrée ✓   ·   C ⧉   ·   R ↻   ·   {back}   ·   Échap ✗"
+
+
 class GtkOverlay(Gtk.Window):
     """Floating recording overlay with a smoothed EQ-style waveform."""
 
@@ -826,13 +839,7 @@ class GtkOverlay(Gtk.Window):
             self._draw_block(cr, self._font_family, self.ai_result, 16, 66,
                              w - 30, h - 92, 9.0, txt, a)
 
-        # Bottom hint line — V re-dictates the instruction, except in talk mode
-        # where it drops back into the conversation.
-        if thinking:
-            hint = "Échap pour annuler"
-        else:  # V re-dictates the instruction, or resumes the conversation
-            back = "V 🗣️" if self.mode == "talk" else "V 🎤"
-            hint = f"Entrée ✓   ·   C ⧉   ·   R ↻   ·   {back}   ·   Échap ✗"
+        hint = ("Échap pour annuler" if thinking else review_hint_line(self.mode))
         self._draw_text(cr, self._font_family, hint, w / 2, h - 15, 7.5, fg, a)
 
     @staticmethod

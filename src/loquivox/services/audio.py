@@ -4,7 +4,7 @@ Audio recording and transcription service.
 from __future__ import annotations
 
 import queue
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -79,11 +79,16 @@ class AudioService:
             except Exception:
                 pass
 
-        # Feed the live streaming session, if one is active.
+        # Feed the live streaming session everything it has not had yet: it
+        # opens ~1s after the microphone is armed, and what is said in that
+        # second is the start of a sentence, not silence. Only this callback
+        # touches stream_fed, so the catch-up needs no lock.
         session = STATE.stream_session
         if session is not None:
             try:
-                session.feed(mono)
+                for chunk in STATE.audio_buffer[STATE.stream_fed:]:
+                    session.feed(chunk[:, 0])
+                STATE.stream_fed = len(STATE.audio_buffer)
             except Exception:
                 pass
 
@@ -97,7 +102,9 @@ class AudioService:
             pass
 
     @staticmethod
-    def start_recording(*, semantic_turns: bool = False) -> None:
+    def start_recording(*, semantic_turns: bool = False, stream: bool = True,
+                        prefix: Optional[np.ndarray] = None,
+                        detector: Optional[Callable[[int], Any]] = None) -> None:
         """
         Start audio recording stream (and a live session if the backend streams).
 
@@ -105,8 +112,22 @@ class AudioService:
         itself (OpenAI Realtime's semantic VAD) instead of transcribing one
         push-to-talk segment — talk mode only; every other mode wants the
         recording to end exactly when the key is released.
+
+        ``stream=False`` captures without opening a live session: talk mode
+        listens that way while the assistant is speaking, where the only
+        question is whether the user is cutting in — sending the reply's own
+        echo to a transcription API would be both wrong and paid for.
+
+        ``prefix`` seeds the buffer with audio captured before this recording
+        started — the words that interrupted a reply, which belong to the turn
+        about to be recorded, not to the one that was cut off.
+
+        ``detector`` builds the turn detector from the capture rate, and is
+        installed here rather than by the caller because WHEN matters: see the
+        comment below.
         """
-        STATE.audio_buffer = []
+        STATE.audio_buffer = [prefix.reshape(-1, 1)] if prefix is not None else []
+        STATE.stream_fed = 0
         STATE.stream_session = None
         STATE.paused = False
         AudioService._clear_viz_queue()
@@ -129,9 +150,18 @@ class AudioService:
         STATE.recording = True
         STATE.recording_generation += 1
 
+        # Arm the turn detector BEFORE opening the live session. That open
+        # takes about a second on a cloud backend, and a detector installed
+        # after it would spend its calibration window a second into the turn —
+        # in the middle of a sentence the user began the moment the microphone
+        # opened. Calibrating on speech leaves the level above their voice, and
+        # the turn then either never ends or ends mid-sentence.
+        if detector is not None:
+            STATE.vad = detector(rate)
+
         # Open the live session AFTER recording is armed so early audio is
         # buffered (and replayable via fallback) even if the session is slow.
-        if streaming_backend is not None:
+        if stream and streaming_backend is not None:
             session = dispatcher.start_stream(
                 rate, AudioService._on_partial, semantic_turns=semantic_turns
             )
@@ -181,10 +211,17 @@ class AudioService:
 
     @staticmethod
     def _on_partial(text: str) -> None:
-        """Live-transcript callback from a streaming session → update overlay."""
+        """
+        Live-transcript callback from a streaming session → update the overlay,
+        and in talk mode the bubble too: what is being said is the first half
+        of the exchange it exists to show.
+        """
         # Late import to avoid a circular import at module load.
         from loquivox.managers.overlay import OverlayManager
         OverlayManager.set_live_text(text)
+        if STATE.talk_active:
+            from loquivox.managers.chat import ChatManager
+            ChatManager.stream("user", text)
 
     @staticmethod
     def _clear_viz_queue() -> None:

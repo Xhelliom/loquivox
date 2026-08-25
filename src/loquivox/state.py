@@ -57,6 +57,10 @@ class SettingsManager:
                 "show_refine_badge": state.show_refine_badge,
                 "show_hotkey_bar": state.show_hotkey_bar,
                 "tts_voice": state.tts_voice,
+                "tts_model": state.tts_model,
+                "ai_provider": state.ai_provider,
+                "ai_chat_model": state.ai_chat_model,
+                "ai_vision_model": state.ai_vision_model,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
                 "chat_enabled": state.chat_enabled,
@@ -91,6 +95,10 @@ class AppState:
     # Active live-transcription session (StreamingSession) while a streaming
     # backend is recording; None for the batch path.
     stream_session: Optional[Any] = None
+    # How many buffered chunks the live session has already been fed — the
+    # session opens after the microphone, so the audio callback replays the
+    # backlog instead of dropping the first words of the turn.
+    stream_fed: int = 0
     # Monotonic counter bumped on each new recording; used to discard a
     # transcription whose recording was superseded before it returned.
     recording_generation: int = 0
@@ -117,6 +125,9 @@ class AppState:
     # True while the chat overlay's text input has focus — suppresses auto-hide
     # so the overlay can't vanish mid-typing.
     chat_input_focused: bool = False
+    #: the × on the bubble was clicked — nothing reopens it until the user
+    #: asks (pin hotkey, or the next talk session)
+    chat_hidden: bool = False
     # True while a typed-chat request is in flight — serializes submissions so
     # two concurrent workers can't deliver answers out of order.
     chat_busy: bool = False
@@ -128,6 +139,12 @@ class AppState:
     # --- TTS ---
     tts_enabled: bool = False  # Disabled by default
     tts_voice: str = CFG.TTS_DEFAULT_VOICE
+    tts_model: str = CFG.MODEL_TTS
+
+    # --- Chat / vision provider (see api.get_ai_client) ---
+    ai_provider: str = CFG.AI_PROVIDER
+    ai_chat_model: str = CFG.MODEL_CHAT
+    ai_vision_model: str = CFG.MODEL_VISION
 
     # --- Hotkey Mode ---
     toggle_mode: bool = False  # False = hold-to-record, True = press-to-toggle
@@ -168,6 +185,11 @@ class AppState:
             self.show_hotkey_bar = saved["show_hotkey_bar"]
         if "tts_voice" in saved:
             self.tts_voice = saved["tts_voice"]
+        if "tts_model" in saved:
+            self.tts_model = saved["tts_model"]
+        for key in ("ai_provider", "ai_chat_model", "ai_vision_model"):
+            if saved.get(key):
+                setattr(self, key, saved[key])
         if "tts_enabled" in saved:
             self.tts_enabled = saved["tts_enabled"]
         if "chat_pinned" in saved:
