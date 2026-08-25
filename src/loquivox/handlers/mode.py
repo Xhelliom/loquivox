@@ -3,6 +3,7 @@ Unified handler for all recording modes.
 """
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Optional, Tuple
@@ -428,6 +429,7 @@ class ModeHandler:
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        ChatManager.set_talk(True)  # the bubble is up before the first word
         threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
 
     @staticmethod
@@ -455,7 +457,7 @@ class ModeHandler:
                     threading.Thread(target=ModeHandler._talk_screen_worker,
                                      args=(session,), daemon=True).start()
                 while True:
-                    if ModeHandler._talk_converse(session, keys):  # cancelled
+                    if ModeHandler._talk_conversation(session, keys):  # cancelled
                         print("✖️  Talk mode cancelled — nothing written")
                         return
                     if not ModeHandler._talk_generate(session, keys):
@@ -463,8 +465,23 @@ class ModeHandler:
         finally:
             STATE.vad = None
             ModeHandler.reset_capture()  # a turn may have died mid-flight
-            STATE.talk_active = False
             OverlayManager.hide()
+            GLib.idle_add(ModeHandler._talk_finished)
+
+    @staticmethod
+    def _talk_finished() -> bool:
+        """
+        Close the session on the main thread, once the generated text is shown.
+
+        ``_deliver_talk_text`` is queued on this same loop first, so clearing
+        the flag here (rather than from the worker, which gets there first)
+        means the final text lands while the overlay is still held open — and
+        the auto-hide countdown starts when it is on screen, not three seconds
+        before it appears.
+        """
+        STATE.talk_active = False
+        ChatManager.set_talk(False)
+        return False
 
     @staticmethod
     def _talk_screen_worker(session) -> None:
@@ -505,6 +522,75 @@ class ModeHandler:
               f"{'…' if len(description) > 120 else ''}")
 
     @staticmethod
+    def _talk_conversation(session, keys) -> bool:
+        """
+        Hold the briefing through the configured engine, and say whether the
+        user dropped it.
+
+        Two paths, one promise: a conversation you can interrupt. The cascade
+        builds it out of four swappable slots; the Realtime engine hands the
+        whole thing to a model that hears and answers directly. Either way the
+        turns land in the same ``TalkSession``, and the writing pass that
+        follows is a text completion that never learns which ran.
+        """
+        if config_module.CFG.TALK_ENGINE == "realtime":
+            return ModeHandler._talk_converse_realtime(session, keys)
+        return ModeHandler._talk_converse(session, keys)
+
+    @staticmethod
+    def _talk_converse_realtime(session, keys) -> bool:
+        """
+        Hold the briefing through one OpenAI Realtime session.
+
+        This loop owns nothing but the keyboard: the model decides when a turn
+        ends and stops talking when it is talked over, so there is no VAD to
+        poll and no reply to speak. The exclusive grab is safe for the same
+        reason it is in ``_talk_listen`` — nothing here touches the network,
+        the session does, on its own thread, so a hung request can never freeze
+        the keyboard.
+
+        Anything that stops it from opening (no key, no ``openai``, a model the
+        account cannot reach) falls back to the cascade rather than failing:
+        the user asked to talk, not to talk *this way*.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
+        from loquivox.services.realtime_talk import RealtimeTalk
+
+        cfg = config_module.CFG
+        STATE.current_mode = "talk"
+        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
+        talk = RealtimeTalk(session)
+        try:
+            talk.start()
+        except Exception as e:
+            print(f"⚠️  Realtime talk unavailable ({e}) — using the cascade")
+            return ModeHandler._talk_converse(session, keys)
+
+        mapping = KeyboardHandler.talk_listen_keys()
+        cancelled = False
+        try:
+            with keys.exclusive():
+                while True:
+                    pressed = keys.poll(mapping, 0.05)
+                    if pressed == "cancel":
+                        cancelled = True
+                        break
+                    if pressed == "finish":
+                        break
+                    # "send" (Space) means "end this turn now", which is the
+                    # server's call here — ignoring it beats ending the
+                    # briefing on a key that means something else.
+                    if talk.done or talk.error is not None:
+                        break
+                    if session.user_turns >= cfg.TALK_MAX_TURNS:
+                        break
+        finally:
+            talk.close()
+        if talk.error is not None:
+            print(f"⚠️  Realtime talk ended: {talk.error}")
+        return cancelled
+
+    @staticmethod
     def _talk_converse(session, keys) -> bool:
         """
         Run spoken turns until the briefing is over. Returns True if the user
@@ -520,9 +606,11 @@ class ModeHandler:
         from loquivox.services.talk import user_said_done
 
         cfg = config_module.CFG
+        prefix = None  # audio captured over a reply — the next turn's first words
         while session.user_turns < cfg.TALK_MAX_TURNS:
             idle_action = "finish" if session.user_turns else "cancel"
-            audio, action = ModeHandler._talk_listen(keys, idle_action)
+            audio, action = ModeHandler._talk_listen(keys, idle_action, prefix=prefix)
+            prefix = None
             if action == "cancel":
                 return True
 
@@ -544,15 +632,16 @@ class ModeHandler:
                 return False
 
             OverlayManager.set_status("Thinking…")
-            reply = session.reply(text)
+            reply = session.reply(
+                text, on_delta=lambda t: ChatManager.stream("assistant", t))
             if reply is None:
                 continue
             if reply.text:
                 ChatManager.add_message("assistant", reply.text)
                 OverlayManager.set_status("Speaking…")
-                # Blocking on purpose: the next turn starts recording the moment
-                # this returns, and must not capture the assistant's own voice.
-                TTSService.speak(reply.text, wait=True, force=cfg.TALK_SPEAK_REPLIES)
+                prefix = ModeHandler._talk_speak(reply.text)
+                if prefix is not None:
+                    session.mark_interrupted()
             if reply.done:
                 # The model took the floor to the writing phase — either because
                 # the user said so in words the phrase list doesn't cover, or
@@ -562,7 +651,8 @@ class ModeHandler:
         return False
 
     @staticmethod
-    def _talk_listen(keys, idle_action: str) -> Tuple[Optional[np.ndarray], str]:
+    def _talk_listen(keys, idle_action: str,
+                     prefix: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], str]:
         """
         Record one spoken turn and return ``(audio, action)``.
 
@@ -575,6 +665,9 @@ class ModeHandler:
         conversation. A turn where nothing at all was said for
         ``TALK_IDLE_TIMEOUT`` yields ``idle_action``: the user has walked away
         from the microphone, not paused mid-sentence.
+
+        ``prefix`` is the audio of an interruption — this turn began while the
+        assistant was still speaking, and starts with the words that cut it off.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
         from loquivox.services.turn_detector import WINDOW_SEC, ready_detector, turn_complete
@@ -584,18 +677,18 @@ class ModeHandler:
         STATE.vad = None
         STATE.current_mode = "talk"
         OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
-        AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS)
-        # A streaming backend may detect turns server-side (OpenAI Realtime's
-        # semantic_vad). When it does, it is the authority and neither the local
-        # model nor the silence window gets a vote.
-        stream = STATE.stream_session
-        remote_turns = stream is not None and stream.semantic_turns
+
         # ready_detector() never blocks: while the model is still downloading
         # in the background, this turn simply ends on silence like before.
-        semantic = not remote_turns and ready_detector() is not None
-        if cfg.TALK_VAD:
-            STATE.vad = VoiceActivityDetector(
-                STATE.capture_rate,
+        # Asked before recording starts because the detector has to be built
+        # before the microphone opens; when the backend ends turns server-side
+        # the local window is never read at all, so not knowing that yet is
+        # harmless.
+        semantic = ready_detector() is not None
+
+        def build_vad(rate: int) -> VoiceActivityDetector:
+            vad = VoiceActivityDetector(
+                rate,
                 threshold=cfg.TALK_VAD_THRESHOLD,
                 # With the model deciding, the pause is only a trigger — a much
                 # shorter one, since a finished sentence no longer waits out the
@@ -604,6 +697,22 @@ class ModeHandler:
                             else cfg.TALK_VAD_SILENCE_MS),
                 min_speech_ms=cfg.TALK_VAD_MIN_SPEECH_MS,
             )
+            if prefix is not None:
+                # This turn is already under way: its first words are in the
+                # buffer, not in what the microphone is about to hear. Without
+                # priming, the detector would see a turn where nobody ever
+                # spoke and sit out the whole TALK_IDLE_TIMEOUT.
+                vad.prime(len(prefix) / rate)
+            return vad
+
+        AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS,
+                                     prefix=prefix,
+                                     detector=build_vad if cfg.TALK_VAD else None)
+        # A streaming backend may detect turns server-side (OpenAI Realtime's
+        # semantic_vad). When it does, it is the authority and neither the local
+        # model nor the silence window gets a vote.
+        stream = STATE.stream_session
+        remote_turns = stream is not None and stream.semantic_turns
 
         mapping = KeyboardHandler.talk_listen_keys()
         action = "send"
@@ -641,6 +750,76 @@ class ModeHandler:
         return audio, action
 
     @staticmethod
+    def _talk_speak(text: str) -> Optional[np.ndarray]:
+        """
+        Speak a reply while listening for the user talking over it.
+
+        Returns what the microphone heard when they cut in — the start of their
+        next turn, which must survive the interruption — or None if the reply
+        was spoken to the end.
+
+        The detector is armed on the first sample that actually leaves for the
+        speakers, never before: its calibration window then measures the
+        reply's own echo, so the activation level lands above whatever the
+        speakers leak back into the microphone. On a headset there is nothing
+        to leak and it stays at the plain threshold, which is why this needs no
+        setting of its own for "do you wear headphones".
+
+        Nothing is transcribed here — the live session stays shut. The only
+        question being asked of the audio is "did they start speaking".
+        """
+        from loquivox.services.vad import VoiceActivityDetector
+
+        cfg = config_module.CFG
+        if not cfg.TALK_BARGE_IN:
+            # Blocking on purpose: the next turn starts recording the moment
+            # this returns, and must not capture the assistant's own voice.
+            TTSService.speak(text, wait=True, force=cfg.TALK_SPEAK_REPLIES)
+            return None
+
+        stop, started = threading.Event(), threading.Event()
+        AudioService.start_recording(stream=False)
+        speaker = threading.Thread(
+            target=TTSService.speak, args=(text,),
+            kwargs={"wait": True, "force": cfg.TALK_SPEAK_REPLIES,
+                    "stop": stop, "started": started},
+            daemon=True,
+        )
+        speaker.start()
+        while speaker.is_alive() and not started.wait(0.05):
+            pass
+        if started.is_set():
+            STATE.vad = VoiceActivityDetector(
+                STATE.capture_rate,
+                threshold=cfg.TALK_VAD_THRESHOLD,
+                # Never ends a turn on its own: `ended` would make the detector
+                # inert, and the only thing read here is how much speech it has
+                # heard. The pause that ends a turn is _talk_listen's business.
+                silence_ms=10 ** 6,
+                min_speech_ms=cfg.TALK_BARGE_IN_MS,
+                # The one detector that calibrates on speech on purpose: it is
+                # listening through the assistant's own echo and has to sit
+                # above it, so the usual ceiling would defeat it.
+                max_level=math.inf,
+            )
+        needed = cfg.TALK_BARGE_IN_MS / 1000.0
+        while speaker.is_alive():
+            vad = STATE.vad
+            if vad is not None and vad.speech_seconds >= needed:
+                stop.set()
+                break
+            time.sleep(0.03)
+        speaker.join(timeout=2.0)
+        # Read the tail before stop_recording(): it is the buffer being read.
+        tail = (AudioService.snapshot_tail(cfg.TALK_BARGE_IN_KEEP)
+                if stop.is_set() else None)
+        STATE.vad = None
+        AudioService.stop_recording()
+        if tail is not None:
+            print("✋ Cut off — listening")
+        return tail
+
+    @staticmethod
     def _talk_transcribe(audio: Optional[np.ndarray]) -> Optional[str]:
         """
         Turn a recorded talk turn into text, or None if it held no usable speech.
@@ -676,18 +855,23 @@ class ModeHandler:
             print("✖️  Nothing was said — talk mode closed")
             return False
 
+        from loquivox.ui.recording_overlay import review_hint_line  # lazy: cycle
+
         cfg = config_module.CFG
-        brief = session.brief()
         mapping = KeyboardHandler.talk_review_keys()
         redos = 0
         while True:
-            OverlayManager.set_ai_panel("talk", brief)
+            # The bubble reviews the text, so the recording overlay goes away:
+            # its hint strip still names the conversation's keys, which are not
+            # the ones that apply now. _talk_listen brings it back on V.
+            OverlayManager.hide()
+            ChatManager.refresh_overlay("✍️ Rédaction du texte…")
             text = session.generate()
             if not text:
                 print("⚠️  Talk mode: no text was produced")
                 return False
 
-            OverlayManager.set_ai_panel("talk", brief, result=text)
+            ChatManager.set_result(text, review_hint_line("talk"))
             with keys.exclusive():
                 action = keys.poll(mapping, cfg.TALK_REVIEW_TIMEOUT) or "timeout"
             if action == "redo":
@@ -719,7 +903,8 @@ class ModeHandler:
             ClipboardService.type_text(text)
         get_clipboard().copy(text)
         HistoryManager.add_answer(text)
-        ChatManager.add_message("assistant", text)
+        # Not added to the overlay: it is already there, as the result block
+        # the user just accepted.
         print("📋 Talk mode: text typed and copied" if typed
               else "📋 Talk mode: text copied to the clipboard")
 
