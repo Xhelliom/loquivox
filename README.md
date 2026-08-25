@@ -148,6 +148,12 @@ the exchange, stays translucent enough to read what is behind it, and closes wit
 (the pin hotkey brings it back). Live text needs a streaming transcription backend; with a
 batch one your turn simply appears when you finish it.
 
+**Or skip the review entirely.** Settings → Talk → *Paste the finished text
+straight away* pastes it where your cursor was the moment the conversation
+ended, with no key to press — the trade being that there is then no rewrite and
+no going back. Off by default: talk mode otherwise never types anything you
+have not accepted.
+
 **Tell it how to talk to you.** Settings → Talk has an *Instructions* box for the standing
 things: the language to answer in, the tone, the kind of work you usually discuss. It is
 added to the built-in prompt rather than replacing it, so the conversation still asks one

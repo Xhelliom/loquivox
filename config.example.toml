@@ -202,6 +202,12 @@ realtime_transcribe = "gpt-4o-mini-transcribe"
 # Read the assistant's spoken replies aloud even when TTS is toggled off.
 speak_replies = true
 
+# Paste the finished text as soon as it is written, where the cursor was when
+# the conversation ended — no review, so no rewrite and no going back to the
+# conversation. This is the one setting that gives up talk mode's "nothing is
+# typed without an explicit Enter", which is why it is off by default.
+auto_paste = false
+
 # Barge-in: speaking over a reply cuts it off and starts your next turn, the
 # way it works with a person. The detector arms on the first sample that
 # actually reaches the speakers, so it calibrates on the reply's own echo and

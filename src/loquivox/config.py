@@ -393,6 +393,11 @@ class Config:
 
     # Speak the assistant's conversational replies even when TTS is toggled off
     # — talk mode is a voice conversation, the read-back is the point.
+    #: Deliver the finished text without asking. Off by default, and the one
+    #: setting that gives up talk mode's "nothing is typed without an explicit
+    #: Enter": with it on, the text is pasted wherever the cursor was the
+    #: moment the conversation ended.
+    TALK_AUTO_PASTE: bool = False
     TALK_SPEAK_REPLIES: bool = True
 
     # Conversation phase: the model is a partner working out WHAT to write.
@@ -727,6 +732,8 @@ def _build_config() -> Config:
             overrides["TALK_TURN_MODEL"] = str(talk[legacy]).strip()
     if "speak_replies" in talk:
         overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
+    if "auto_paste" in talk:
+        overrides["TALK_AUTO_PASTE"] = bool(talk["auto_paste"])
     if str(talk.get("engine", "")).strip():
         overrides["TALK_ENGINE"] = str(talk["engine"]).strip().lower()
     if str(talk.get("realtime_model", "")).strip():

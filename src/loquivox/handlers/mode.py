@@ -857,6 +857,11 @@ class ModeHandler:
         been delivered, dropped, or left on the clipboard. Nothing is ever typed
         without an explicit accept — on timeout the text lands on the clipboard
         instead, so the conversation is never wasted.
+
+        ``TALK_AUTO_PASTE`` is the one way out of that: the text is pasted the
+        moment it exists, wherever the cursor was left when the conversation
+        ended. No review, so no rewrite and no going back — which is the trade
+        for not having to reach for the keyboard at all.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
 
@@ -878,6 +883,11 @@ class ModeHandler:
             text = session.generate()
             if not text:
                 print("⚠️  Talk mode: no text was produced")
+                return False
+
+            if cfg.TALK_AUTO_PASTE:
+                ChatManager.set_result(text, "📋 Collé au curseur")
+                ModeHandler._deliver_talk_text(text, typed=True)
                 return False
 
             ChatManager.set_result(text, review_hint_line("talk"))

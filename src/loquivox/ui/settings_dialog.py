@@ -111,6 +111,7 @@ class SettingsDialog:
     _talk_semantic_check: Optional[Gtk.CheckButton] = None
     _talk_speak_check: Optional[Gtk.CheckButton] = None
     _talk_instructions: Optional[Gtk.TextView] = None
+    _talk_autopaste_check: Optional[Gtk.CheckButton] = None
     _talk_shot_check: Optional[Gtk.CheckButton] = None
     _talk_shot_region: Optional[Gtk.ComboBoxText] = None
     _talk_shot_cursor: Optional[Gtk.SpinButton] = None
@@ -1401,6 +1402,17 @@ class SettingsDialog:
         cls._talk_speak_check.set_active(bool(CFG.TALK_SPEAK_REPLIES))
         vbox.pack_start(cls._talk_speak_check, False, False, 0)
 
+        cls._talk_autopaste_check = Gtk.CheckButton(
+            label="Paste the finished text straight away, without reviewing it")
+        cls._talk_autopaste_check.set_active(bool(CFG.TALK_AUTO_PASTE))
+        cls._talk_autopaste_check.set_tooltip_text(
+            "The text is copied and pasted where the cursor was when the "
+            "conversation ended — no Enter, and no chance to rewrite it or go "
+            "back to the conversation. Off by default: talk mode otherwise "
+            "never types anything you have not accepted."
+        )
+        vbox.pack_start(cls._talk_autopaste_check, False, False, 0)
+
         header_instr = Gtk.Label()
         header_instr.set_halign(Gtk.Align.START)
         header_instr.set_markup("<b>Instructions</b>")
@@ -1571,6 +1583,7 @@ class SettingsDialog:
         semantic = bool(cls._talk_semantic_check.get_active())
         speak = bool(cls._talk_speak_check.get_active())
         screenshot = bool(cls._talk_shot_check.get_active())
+        auto_paste = bool(cls._talk_autopaste_check.get_active())
         buffer = cls._talk_instructions.get_buffer()
         instructions = buffer.get_text(buffer.get_start_iter(),
                                        buffer.get_end_iter(), False).strip()
@@ -1583,6 +1596,7 @@ class SettingsDialog:
                 "speak_replies": speak,
                 "screenshot": screenshot,
                 "instructions": instructions,
+                "auto_paste": auto_paste,
                 "screenshot_region": cls._talk_shot_region.get_active_id() or "screen",
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
@@ -1596,6 +1610,8 @@ class SettingsDialog:
                                       ("assistant", by_model)) if on]
         instr_note = (f" · {len(instructions)} chars of instructions"
                       if instructions else "")
+        if auto_paste:
+            instr_note += " · pasted without review"
         cls._talk_status.set_markup(
             f"<small>✓ Applied — ends on: {', '.join(ends)}{instr_note}.</small>"
         )
