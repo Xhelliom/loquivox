@@ -191,6 +191,16 @@ panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
 recording overlay while reviewing: its hint strip names the conversation's
 keys, which are not the ones that apply then.
 
+Dictation is the one mode that adds a message with `summon=False`: its answer
+is the text landing at the cursor, and a layer-shell window mapping at that
+moment takes the keyboard focus `ClipboardService.type_text` aims Ctrl+V at.
+For the same reason the bubble asks for `KeyboardMode.NONE` (it has no input
+bar and the session holds the keyboard), and `_destroy` clears
+`chat_input_focused` — a window torn down while its input box had focus never
+emits the blur that would clear it, and `_keep_open()` then answers True
+forever: the overlay stops auto-hiding and keeps the focus every later paste
+was meant for.
+
 The ✕ on it calls `ChatManager.hide_manual`, which is deliberately stronger
 than the auto-hide (that one refuses to fire while pinned, typed into or
 mid-conversation — exactly when someone reaches for the close button). It sets

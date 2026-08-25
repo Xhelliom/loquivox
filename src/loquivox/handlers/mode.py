@@ -237,7 +237,10 @@ class ModeHandler:
     def _handle_dictation(text: str) -> None:
         """Handle dictation mode: transcribe and type."""
         HistoryManager.add_answer(f"[Dictation] {text}")
-        ChatManager.add_message("user", f"🎤 {text}")
+        # Recorded, not shown: dictation's answer is the text landing at the
+        # cursor. Opening a window for it would put something in front of what
+        # the user is typing into — see ChatManager.add_message.
+        ChatManager.add_message("user", f"🎤 {text}", summon=False)
         ClipboardService.type_text(text)
 
     @staticmethod

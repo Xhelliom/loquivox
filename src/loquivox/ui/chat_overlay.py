@@ -519,10 +519,6 @@ class ChatOverlay(Gtk.Window):
             GtkLayerShell.init_for_window(self)
             GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
             GtkLayerShell.set_namespace(self, "loquivox-chat")
-            # Allow keyboard interaction for WebView
-            GtkLayerShell.set_keyboard_mode(
-                self, GtkLayerShell.KeyboardMode.ON_DEMAND
-            )
         else:
             # --- X11: classic approach ---
             self.set_keep_above(True)
@@ -571,6 +567,18 @@ class ChatOverlay(Gtk.Window):
                 TALK_MIN_HEIGHT, min(self._height, self._max_height()))
         else:
             width, height = CHAT_WIDTH, CHAT_HEIGHT
+
+        # Keyboard focus only where there is something to type into. The talk
+        # bubble hides its input bar — the session has the keyboard grabbed —
+        # and a focused overlay is a paste that lands in the wrong window: both
+        # dictation and talk mode's own delivery aim Ctrl+V at whatever the
+        # compositor says is focused.
+        if USE_LAYER_SHELL:
+            GtkLayerShell.set_keyboard_mode(
+                self, GtkLayerShell.KeyboardMode.NONE if self.talk
+                else GtkLayerShell.KeyboardMode.ON_DEMAND)
+        else:
+            self.set_accept_focus(not self.talk)
 
         if USE_LAYER_SHELL:
             GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, not self.talk)

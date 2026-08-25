@@ -19,7 +19,8 @@ class ChatManager:
     """Manages chat overlay state and messages."""
 
     @staticmethod
-    def add_message(role: str, text: str, status: Optional[str] = None) -> None:
+    def add_message(role: str, text: str, status: Optional[str] = None,
+                    *, summon: bool = True) -> None:
         """
         Add a message to the chat overlay.
 
@@ -27,6 +28,12 @@ class ChatManager:
         "result" (talk mode's generated text) all go through this one path.
         ``status`` is the single line shown under it — the review keys, when
         the message is something to accept or reject.
+
+        ``summon=False`` records the message but never OPENS the overlay: plain
+        dictation types at the cursor and has nothing to show there, and a
+        layer-shell window mapping at that moment can take the keyboard focus
+        the next paste is aimed at. An overlay that is already up — pinned, or
+        carrying a conversation — still gets the message.
         """
         STATE.chat_messages.append({"role": role, "text": text})
 
@@ -35,7 +42,8 @@ class ChatManager:
             STATE.chat_messages = STATE.chat_messages[-CFG.CHAT_MESSAGE_LIMIT:]
 
         ChatManager._last_stream = 0.0  # the live node is about to be replaced
-        ChatManager.refresh_overlay(status)
+        if summon or STATE.chat_overlay_window is not None:
+            ChatManager.refresh_overlay(status)
 
     @staticmethod
     def clear() -> None:
@@ -234,7 +242,16 @@ class ChatManager:
 
     @staticmethod
     def _destroy() -> None:
-        """Destroy chat overlay window."""
+        """
+        Destroy the chat overlay window.
+
+        Clearing ``chat_input_focused`` is the point: a window torn down while
+        its input box had focus never emits the blur that would have cleared
+        the flag, and ``_keep_open()`` then answers True forever — the overlay
+        stops auto-hiding, sits over everything, and holds the keyboard focus
+        that dictation's paste is aimed at.
+        """
+        STATE.chat_input_focused = False
         if STATE.chat_overlay_window:
             STATE.chat_overlay_window.close()
             STATE.chat_overlay_window = None

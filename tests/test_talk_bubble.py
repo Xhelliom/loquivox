@@ -100,9 +100,55 @@ def test_new_session_starts_empty():
     print("✓ nouvelle session: bulle vide, et un seul texte candidat à la fois")
 
 
+def test_dictation_does_not_summon_the_overlay():
+    """Dictation types at the cursor; a window mapping there steals the paste."""
+    from loquivox.managers.chat import ChatManager
+    from loquivox.state import STATE
+
+    from gi.repository import GLib
+
+    def settle():   # refresh_overlay is marshalled onto the GTK loop
+        while GLib.MainContext.default().iteration(False):
+            pass
+
+    settle()        # drain whatever the earlier checks queued
+    shown = []
+    ChatManager._show_overlay = staticmethod(lambda status=None: shown.append(status))
+    ChatManager.clear()
+
+    STATE.chat_overlay_window = None
+    ChatManager.add_message("user", "🎤 dicté", summon=False)
+    settle()
+    assert shown == [], "dictation opened the overlay"
+    assert len(STATE.chat_messages) == 1, "…but the message must still be recorded"
+
+    # Already open (pinned, or mid-conversation): it still gets the message.
+    STATE.chat_overlay_window = object()
+    ChatManager.add_message("user", "🎤 encore", summon=False)
+    settle()
+    assert len(shown) == 1, shown
+    print("✓ la dictée n'ouvre plus la fenêtre (mais alimente celle qui l'est déjà)")
+
+
+def test_destroy_releases_the_input_focus_flag():
+    """A window torn down while focused never blurs — the flag would stick."""
+    from loquivox.managers.chat import ChatManager
+    from loquivox.state import STATE
+
+    STATE.chat_overlay_window = None
+    STATE.chat_input_focused = True
+    ChatManager._destroy()
+    assert not STATE.chat_input_focused, (
+        "_keep_open() would answer True forever: the overlay stops auto-hiding "
+        "and keeps the keyboard focus dictation's paste is aimed at")
+    print("✓ la fermeture relâche le focus de la zone de saisie")
+
+
 if __name__ == "__main__":
     test_stream_accumulates()
     test_partial_marker_never_shows()
     test_stream_throttle()
     test_new_session_starts_empty()
+    test_dictation_does_not_summon_the_overlay()
+    test_destroy_releases_the_input_focus_flag()
     print("✓ tous les checks de la bulle passent")
