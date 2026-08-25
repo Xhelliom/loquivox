@@ -151,17 +151,42 @@ class ChatManager:
                 CFG.CHAT_AUTO_HIDE_SEC, ChatManager._auto_hide
             )
 
+    #: the bubble waits this long before opening, so the recording overlay gets
+    #: the main thread — and its fade-in — to itself first. Building either
+    #: window blocks the GTK loop, and the one that has to answer the key press
+    #: instantly is the other one.
+    _OPEN_DELAY_MS: int = 450
+
     @staticmethod
-    @run_on_main_thread
     def set_talk(active: bool) -> None:
         """
-        Open the bubble the moment talk mode starts, and hand the window back
-        to the side conversation when the session ends.
+        Open the bubble when a talk session starts, and hand the window back to
+        the side conversation when it ends.
 
         The overlay normally appears with the first message; a spoken session
         has to be visible before that, because the first thing it shows is the
-        transcript of a sentence still being said.
+        transcript of a sentence still being said. Opening is deferred all the
+        same — the bubble has nothing to show until the first words come back,
+        and ``talk_active`` is re-read when the timer fires, so a session
+        dropped in the meantime opens nothing. Cosmetic only: the microphone
+        runs on its own thread and misses nothing either way.
         """
+        if not active:
+            ChatManager._apply_talk(False)
+            return
+        GLib.timeout_add(ChatManager._OPEN_DELAY_MS, ChatManager._open_talk)
+
+    @staticmethod
+    def _open_talk() -> bool:
+        """Open the bubble, unless the session is already over."""
+        if STATE.talk_active:
+            ChatManager._apply_talk(True)
+        return False
+
+    @staticmethod
+    @run_on_main_thread
+    def _apply_talk(active: bool) -> None:
+        """Put the window into (or out of) its talk livery. Main thread only."""
         if not STATE.chat_enabled:
             return
         # Whichever way the session turns, a bubble closed by hand does not

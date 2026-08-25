@@ -15,20 +15,25 @@ class AIService:
     """AI chat and vision completion service."""
 
     @staticmethod
-    def _complete(messages: List[Dict[str, Any]], model: str) -> Optional[str]:
+    def _create(messages: List[Dict[str, Any]], model: str, **extra):
         """
-        One completion through the provider the user picked.
+        Start a completion through the provider the user picked.
 
-        Groq's reasoning models otherwise answer with their <think> block inline
-        (qwen does), which would be typed at the cursor and read aloud; "hidden"
-        is Groq-only, so it is never sent to OpenAI.
+        The one place that knows the provider's quirks: Groq's reasoning models
+        otherwise answer with their <think> block inline (qwen does), which
+        would be typed at the cursor and read aloud, and "hidden" is Groq-only
+        so it is never sent to OpenAI.
         """
         provider = STATE.ai_provider
         kwargs = {"reasoning_format": "hidden"} if provider == "groq" else {}
-        response = get_ai_client(provider).chat.completions.create(
-            model=model, messages=messages, **kwargs
+        return get_ai_client(provider).chat.completions.create(
+            model=model, messages=messages, **kwargs, **extra
         )
-        return response.choices[0].message.content
+
+    @staticmethod
+    def _complete(messages: List[Dict[str, Any]], model: str) -> Optional[str]:
+        """One completion, waited for."""
+        return AIService._create(messages, model).choices[0].message.content
 
     @staticmethod
     def build_messages(user_content: str) -> List[Dict[str, Any]]:
@@ -55,13 +60,8 @@ class AIService:
         wants to display the whole thing, and accumulating here means the UI
         can drop a callback (it throttles) without losing text.
         """
-        provider = STATE.ai_provider
-        kwargs = {"reasoning_format": "hidden"} if provider == "groq" else {}
-        stream = get_ai_client(provider).chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
-        )
         text = ""
-        for chunk in stream:
+        for chunk in AIService._create(messages, model, stream=True):
             choices = getattr(chunk, "choices", None)
             delta = choices[0].delta.content if choices else None
             if not delta:

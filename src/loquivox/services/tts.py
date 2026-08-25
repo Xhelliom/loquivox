@@ -22,18 +22,18 @@ from typing import Optional
 import sounddevice as sd
 from scipy.io import wavfile
 
-from loquivox.api import get_client
+from loquivox.api import get_ai_client
 from loquivox.config import CFG
 from loquivox.state import STATE
 
 #: the cloud engines stream raw 24 kHz mono int16, no header
 CLOUD_PCM_RATE: int = 24000
-#: engines that run on this machine (no client, no key)
-LOCAL_PROVIDERS: frozenset = frozenset({"piper"})
+#: the engine that runs on this machine (no client, no key)
+LOCAL_PROVIDER: str = "piper"
 #: models whose API refused a PCM stream — spoken as a whole file instead
 _NO_PCM: set = set()
-#: engines already reported as missing — one warning, not one per reply
-_WARNED: set = set()
+#: the local engine has been reported missing — one warning, not one per reply
+_WARNED: bool = False
 
 
 class TTSService:
@@ -55,43 +55,36 @@ class TTSService:
         # to that engine's first one, which is always valid.
         voice = STATE.tts_voice if STATE.tts_voice in voices else (
             voices[0] if voices else STATE.tts_voice)
-        if provider in LOCAL_PROVIDERS and not TTSService._local_ready(provider):
+        if provider == LOCAL_PROVIDER and not TTSService._local_ready():
             model = CFG.MODEL_TTS
             provider, voices = CFG.TTS_ENGINES.get(model, ("groq", ()))
             voice = voices[0] if voices else STATE.tts_voice
         return provider, model, voice
 
     @staticmethod
-    def _local_ready(provider: str) -> bool:
-        """True when a local engine can actually speak; warns once if it can't."""
+    def _local_ready() -> bool:
+        """True when the local engine can actually speak; warns once if it can't."""
+        global _WARNED
         from loquivox.services import tts_piper
 
         if tts_piper.is_available():
             return True
-        if provider not in _WARNED:
-            _WARNED.add(provider)
-            print(f"⚠️  {provider} is not installed — speaking through the cloud "
-                  "engine (pip install piper-tts, or install piper)")
+        if not _WARNED:
+            _WARNED = True
+            print(f"⚠️  {LOCAL_PROVIDER} is not installed — speaking through the "
+                  "cloud engine (pip install piper-tts, or install piper)")
         return False
-
-    @staticmethod
-    def _client(provider: str):
-        """The API client that speaks for ``provider`` (cloud engines only)."""
-        if provider == "openai":
-            from openai import OpenAI
-            return OpenAI()
-        return get_client()
 
     @staticmethod
     @contextmanager
     def _pcm(provider: str, model: str, voice: str, text: str):
         """Yield ``(sample_rate, iterator of PCM bytes)`` from the chosen engine."""
-        if provider == "piper":
+        if provider == LOCAL_PROVIDER:
             from loquivox.services import tts_piper
             with tts_piper.stream(voice, text[:CFG.TTS_MAX_CHARS]) as source:
                 yield source
             return
-        with TTSService._client(provider).audio.speech.with_streaming_response.create(
+        with get_ai_client(provider).audio.speech.with_streaming_response.create(
             model=model, voice=voice, input=text[:CFG.TTS_MAX_CHARS],
             response_format="pcm",
         ) as response:
@@ -179,7 +172,7 @@ class TTSService:
                     out.stop()
             return True
         except Exception as e:
-            if playing or provider in LOCAL_PROVIDERS:
+            if playing or provider == LOCAL_PROVIDER:
                 print(f"❌ TTS Error: {e}")
                 return True
             _NO_PCM.add(model)
@@ -199,7 +192,7 @@ class TTSService:
             provider, model, voice = engine or TTSService._engine()
             if TTSService._stream_pcm(provider, model, voice, text, stop, started):
                 return
-            response = TTSService._client(provider).audio.speech.create(
+            response = get_ai_client(provider).audio.speech.create(
                 model=model,
                 voice=voice,
                 input=text[:CFG.TTS_MAX_CHARS],

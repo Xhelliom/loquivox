@@ -40,14 +40,6 @@ VOICES_DIR: Path = Path.home() / ".cache" / "loquivox" / "piper"
 HF_VOICE: str = "https://huggingface.co/rhasspy/piper-voices/resolve/main/{path}"
 #: a plausible voice is at least this big — smaller means an error page
 MIN_VOICE_BYTES: int = 1_000_000
-#: suggestions for the settings combo; any id the repository ships also works
-VOICES: tuple = (
-    "fr_FR-siwis-medium",
-    "fr_FR-upmc-medium",
-    "fr_FR-gilles-low",
-    "en_US-lessac-medium",
-    "en_GB-alba-medium",
-)
 
 _command: Optional[List[str]] = None
 _checked = False
@@ -201,6 +193,8 @@ if __name__ == "__main__":
         "fr/fr_FR/mls_1840/low/fr_FR-mls_1840-low.onnx"
     assert _repo_path("en_US-lessac-medium", ".onnx.json") == \
         "en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
-    for name in VOICES:
+    # The voices offered in Settings live in CFG.TTS_ENGINES — the one list.
+    from loquivox.config import CFG
+    for name in CFG.TTS_ENGINES["piper"][1]:
         assert _repo_path(name).endswith(f"/{name}.onnx"), name
     print(f"✓ Piper voice paths OK — installed: {is_available()}")

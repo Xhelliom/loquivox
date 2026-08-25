@@ -38,8 +38,6 @@ CHAT_WIDTH, CHAT_HEIGHT = 340, 450
 #: the talk bubble: fixed width, height driven by content, stacked directly
 #: above the recording overlay so the whole exchange is in one place
 TALK_WIDTH, TALK_MIN_HEIGHT, TALK_GAP = 560, 96, 16
-#: the recording overlay's own distance from the bottom edge (recording_overlay.py)
-TALK_OVERLAY_MARGIN = 80
 #: and never taller than this share of the screen — it is an overlay, not a window
 TALK_MAX_SCREEN = 0.6
 #: resizes are coalesced over this window (ms): each one allocates a new surface
@@ -568,7 +566,8 @@ class ChatOverlay(Gtk.Window):
         watching: two floating windows at opposite ends of the screen would
         mean reading the same exchange in two places.
         """
-        return TALK_OVERLAY_MARGIN + CFG.OVERLAY_HEIGHT + TALK_GAP
+        from loquivox.ui.recording_overlay import BOTTOM_MARGIN  # lazy: cycle
+        return BOTTOM_MARGIN + CFG.OVERLAY_HEIGHT + TALK_GAP
 
     def _apply_geometry(self) -> None:
         """
@@ -848,7 +847,9 @@ class ChatOverlay(Gtk.Window):
         # grabbed, so showing F9/F10 there would name keys that do nothing —
         # the session's own keys are shown instead.
         if self.talk:
-            labels = ["🗣️ Talk", "Space: end turn", "Enter: write it", "Esc: cancel"]
+            from loquivox.handlers.keyboard import KeyboardHandler  # lazy: cycle
+            labels = ["🗣️ Talk"] + [f"{'+'.join(keys)}: {what}"
+                                    for keys, what in KeyboardHandler.TALK_HINTS]
         else:
             pin_label = CFG.HOTKEY_DEFS["pin"][0]
             tts_label = CFG.HOTKEY_DEFS["tts"][0]

@@ -22,7 +22,7 @@ from loquivox.services.tts import TTSService  # noqa: E402
 
 def test_each_engine_keeps_its_own_voices() -> None:
     for model, (provider, voices) in CFG.TTS_ENGINES.items():
-        assert provider in ("groq", "openai") or provider in tts_module.LOCAL_PROVIDERS, \
+        assert provider in ("groq", "openai") or provider in (tts_module.LOCAL_PROVIDER,), \
             f"{model}: unknown provider {provider}"
         assert voices, f"{model}: no voices"
         STATE.tts_model = model
@@ -32,7 +32,7 @@ def test_each_engine_keeps_its_own_voices() -> None:
             if picked_provider != provider:
                 # A local engine that is not installed here degrades to the
                 # cloud one — that is the contract, not a failure.
-                assert provider in tts_module.LOCAL_PROVIDERS, provider
+                assert provider in (tts_module.LOCAL_PROVIDER,), provider
                 continue
             assert picked_model == model
             assert picked_voice == voice
@@ -40,7 +40,7 @@ def test_each_engine_keeps_its_own_voices() -> None:
 
 def test_a_foreign_voice_falls_back_instead_of_reaching_the_api() -> None:
     for model, (provider, voices) in CFG.TTS_ENGINES.items():
-        if provider in tts_module.LOCAL_PROVIDERS:
+        if provider in (tts_module.LOCAL_PROVIDER,):
             continue  # may not be installed here — covered by the test above
         STATE.tts_model = model
         STATE.tts_voice = "not-a-voice-anywhere"
@@ -112,7 +112,7 @@ def _play(chunks, fail=False, stop=None):
     out = _FakeOut()
     tts_module.sd = type("sd", (), {"RawOutputStream": lambda **kw: out})
     tts_module._NO_PCM.clear()
-    tts_module.TTSService._client = staticmethod(
+    tts_module.get_ai_client = (
         lambda _provider: _FakeClient(_FakeSpeech(chunks, fail)))
     ok = TTSService._stream_pcm("openai", "some-model", "alloy", "hello", stop)
     return ok, out

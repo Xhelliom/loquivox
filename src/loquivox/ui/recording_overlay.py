@@ -41,6 +41,11 @@ except (ValueError, ImportError):
     HAS_LAYER_SHELL = False
 
 
+#: distance from the bottom edge of the screen. The talk bubble stacks itself
+#: on top of this, so it lives here rather than as a literal in three places.
+BOTTOM_MARGIN: int = 80
+
+
 def review_hint_line(mode: str) -> str:
     """
     The keys a generated result offers, as one line.
@@ -90,8 +95,7 @@ class GtkOverlay(Gtk.Window):
         listed), or on the fixed list the caller supplied, so the window is
         sized once and never resizes as they come and go mid-session.
         """
-        items = ((cls.hint_items(transcribing=False, paused=False) if hints is None
-                  else hints) if STATE.show_hints else ())
+        items = cls._visible_hints(hints, transcribing=False, paused=False)
         if not items and not badge:
             return CFG.OVERLAY_WIDTH
         # Measure by laying the strips out on a throwaway 1x1 surface — same code
@@ -158,7 +162,7 @@ class GtkOverlay(Gtk.Window):
 
             # Anchor to bottom center
             GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
-            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, 80)
+            GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, BOTTOM_MARGIN)
 
             # No keyboard interaction needed
             GtkLayerShell.set_keyboard_mode(
@@ -172,36 +176,46 @@ class GtkOverlay(Gtk.Window):
             monitor = display.get_primary_monitor() or display.get_monitor(0)
             geometry = monitor.get_geometry()
             x = (geometry.width - w) // 2
-            y = geometry.height - h - 80
+            y = geometry.height - h - BOTTOM_MARGIN
             self.move(x, y)
 
         self.set_default_size(w, h)
 
-    def _setup_ui(self) -> None:
-        """Setup drawing area and animation state."""
+    def _reset_state(self) -> None:
+        """
+        The drawing state of an overlay that has just been shown.
+
+        Written once and used twice: at construction, and by ``reset()`` when a
+        live window is shown again — so a field added here cannot leak across
+        talk turns by being cleared in only one of the two.
+        """
         self.transcribing = False
         self.paused = False
         self.live_text = ""
         # Free-form state label (talk mode: "Thinking…", "Speaking…").
         self.status_text = ""
         # Refinement chooser state (grows the overlay while picking a level).
-        from loquivox.config import POSTPROCESS_LEVELS
         self.choosing = False
-        self.choose_level = 0
-        self._base_h = CFG.OVERLAY_HEIGHT
-        self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
-        self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         # AI action panel (rewrite/vision): enlarged, two phases.
         self.ai_panel = False
         self.ai_phase = "thinking"      # "thinking" | "review"
         self.ai_instruction = ""
         self.ai_result = ""
+        self._closing = False           # cancels a fade-out already under way
+
+    def _setup_ui(self) -> None:
+        """Setup drawing area and animation state."""
+        self._reset_state()
+        from loquivox.config import POSTPROCESS_LEVELS
+        self.choose_level = 0
+        self._base_h = CFG.OVERLAY_HEIGHT
+        self._choose_w = max(CFG.OVERLAY_WIDTH, 280)
+        self._choose_h = 40 + len(POSTPROCESS_LEVELS) * 22 + 26  # title + rows + hint
         self._panel_w = max(CFG.OVERLAY_WIDTH, 440)
         self._panel_h = 210
         self._tick = 0
         self._last_audio_tick = 0
         self._opacity = 0.0           # eases 0→1 on show
-        self._closing = False
         self._bars: List[float] = [0.0] * self.NUM_BARS
         self._level = 0.0             # newest eased level, shifted in each frame
 
@@ -224,15 +238,7 @@ class GtkOverlay(Gtk.Window):
         would have set.
         """
         self._hints = hints
-        self.transcribing = False
-        self.paused = False
-        self.live_text = ""
-        self.status_text = ""
-        self.choosing = False
-        self.ai_panel = False
-        self.ai_instruction = ""
-        self.ai_result = ""
-        self._closing = False          # cancels a fade-out already under way
+        self._reset_state()
         self._base_w = self.width(self.refine_badge, self._hints)
         self._resize(self._base_w, self._base_h)
         self.drawing_area.queue_draw()
@@ -295,7 +301,7 @@ class GtkOverlay(Gtk.Window):
             display = Gdk.Display.get_default()
             monitor = display.get_primary_monitor() or display.get_monitor(0)
             g = monitor.get_geometry()
-            self.move((g.width - w) // 2, g.height - h - 80)
+            self.move((g.width - w) // 2, g.height - h - BOTTOM_MARGIN)
 
     def set_live_text(self, text: str) -> None:
         """Update the live partial-transcript text shown while streaming."""
@@ -421,9 +427,7 @@ class GtkOverlay(Gtk.Window):
             cr, w, h, scheme=scheme, mode=self.mode, text=text,
             bars=self._bars, tick=self._tick, font_family=self._font_family,
             transcribing=self.transcribing, a=a, ellipsize_start=live,
-            hints=((self._hints if self._hints is not None
-                    else self.hint_items(self.transcribing, self.paused))
-                   if STATE.show_hints else ()),
+            hints=self._visible_hints(self._hints, self.transcribing, self.paused),
             badge=self.refine_badge,
         )
 
@@ -437,6 +441,17 @@ class GtkOverlay(Gtk.Window):
         if not specs:
             return None
         return [part.title() for part in specs[0].split("+") if part]
+
+    @classmethod
+    def _visible_hints(cls, hints, transcribing: bool, paused: bool):
+        """
+        The hints to draw: the caller's fixed list, else the ones that apply
+        right now — and nothing at all when the user turned them off. Measuring
+        and drawing must agree on this, or the strip outgrows its window.
+        """
+        if not STATE.show_hints:
+            return ()
+        return hints if hints is not None else cls.hint_items(transcribing, paused)
 
     @classmethod
     def hint_items(cls, transcribing: bool, paused: bool) -> List[Tuple[List[str], str]]:

@@ -8,7 +8,7 @@ from typing import Optional
 
 import cairo
 
-from loquivox.config import CFG
+from loquivox import config as config_module
 from loquivox.state import STATE, SettingsManager
 
 import gi
@@ -257,10 +257,10 @@ class SettingsDialog:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.pack_start(cls._row_label("Provider:"), False, False, 0)
         provider = Gtk.ComboBoxText()
-        for pid in CFG.AI_PROVIDERS:
+        for pid in config_module.CFG.AI_PROVIDERS:
             provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid.title()))
-        provider.set_active_id(STATE.ai_provider if STATE.ai_provider in CFG.AI_PROVIDERS
-                               else CFG.AI_PROVIDERS[0])
+        provider.set_active_id(STATE.ai_provider if STATE.ai_provider in config_module.CFG.AI_PROVIDERS
+                               else config_module.CFG.AI_PROVIDERS[0])
         row.pack_start(provider, True, True, 0)
         vbox.pack_start(row, False, False, 0)
 
@@ -331,7 +331,6 @@ class SettingsDialog:
     @classmethod
     def _on_preset(cls, _btn: Gtk.Button, name: str, sections: dict, state: dict) -> None:
         """Apply a preset: config.toml for the engines, settings.json for the voice."""
-        from loquivox import config as config_module
         from loquivox.config_io import ConfigWriteError, update_section
 
         try:
@@ -378,20 +377,20 @@ class SettingsDialog:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.pack_start(cls._row_label("Engine:"), False, False, 0)
         cls._engine_combo = Gtk.ComboBoxText()
-        for eid in CFG.TALK_ENGINES:
+        for eid in config_module.CFG.TALK_ENGINES:
             cls._engine_combo.append(eid, {
                 "cascade": "Cascade — transcribe, answer, speak",
                 "realtime": "Realtime — speech to speech (OpenAI)",
             }.get(eid, eid.title()))
         cls._engine_combo.set_active_id(
-            CFG.TALK_ENGINE if CFG.TALK_ENGINE in CFG.TALK_ENGINES else "cascade")
+            config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
         row.pack_start(cls._engine_combo, True, True, 0)
         vbox.pack_start(row, False, False, 0)
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.pack_start(cls._row_label("Realtime model:"), False, False, 0)
         cls._realtime_model = Gtk.Entry()   # ids change often — free text
-        cls._realtime_model.set_text(CFG.TALK_REALTIME_MODEL)
+        cls._realtime_model.set_text(config_module.CFG.TALK_REALTIME_MODEL)
         row.pack_start(cls._realtime_model, True, True, 0)
         vbox.pack_start(row, False, False, 0)
 
@@ -400,11 +399,11 @@ class SettingsDialog:
         # A closed list, not free text: the API rejects an unknown voice, and
         # it does so only once the session is already opening.
         cls._realtime_voice = Gtk.ComboBoxText()
-        for vid in CFG.TALK_REALTIME_VOICES:
+        for vid in config_module.CFG.TALK_REALTIME_VOICES:
             cls._realtime_voice.append(vid, vid.title())
         cls._realtime_voice.set_active_id(
-            CFG.TALK_REALTIME_VOICE if CFG.TALK_REALTIME_VOICE
-            in CFG.TALK_REALTIME_VOICES else CFG.TALK_REALTIME_VOICES[0])
+            config_module.CFG.TALK_REALTIME_VOICE if config_module.CFG.TALK_REALTIME_VOICE
+            in config_module.CFG.TALK_REALTIME_VOICES else config_module.CFG.TALK_REALTIME_VOICES[0])
         row.pack_start(cls._realtime_voice, True, True, 0)
         cls._realtime_test = Gtk.Button(label="▶ Test")
         cls._realtime_test.set_tooltip_text(
@@ -441,7 +440,6 @@ class SettingsDialog:
     @classmethod
     def _sample_line(cls) -> str:
         """The test line, in whatever language is being transcribed."""
-        from loquivox import config as config_module
 
         lang = (config_module.CFG.WHISPER_LANGUAGE or "").strip().lower()[:2]
         return cls._SAMPLES.get(lang, cls._SAMPLES[""])
@@ -472,7 +470,6 @@ class SettingsDialog:
     @classmethod
     def _on_apply_engine(cls, _btn: Gtk.Button) -> None:
         """Write [talk] engine/model/voice and reload — talk mode reads CFG live."""
-        from loquivox import config as config_module
         from loquivox.config_io import ConfigWriteError, update_section
 
         engine = cls._engine_combo.get_active_id() or "cascade"
@@ -499,11 +496,10 @@ class SettingsDialog:
         A preset writes the same keys these combos edit; leaving them showing
         the old value would make the tab lie about what the app is doing.
 
-        Read through ``config_module`` and not the ``CFG`` imported at the top
+        Read through ``config_module`` — as every reader in this file does
         of this file: ``reload_config()`` rebinds the singleton, so the imported
         name still points at the config as it was before the preset.
         """
-        from loquivox import config as config_module
 
         live = config_module.CFG
         if cls._engine_combo is not None:
@@ -549,11 +545,11 @@ class SettingsDialog:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.pack_start(cls._row_label("Engine:"), False, False, 0)
         cls._tts_engine_combo = Gtk.ComboBoxText()
-        for model in CFG.TTS_ENGINES:
+        for model in config_module.CFG.TTS_ENGINES:
             cls._tts_engine_combo.append(model, cls._ENGINE_LABELS.get(model, model))
         cls._tts_engine_combo.set_active_id(
-            STATE.tts_model if STATE.tts_model in CFG.TTS_ENGINES
-            else next(iter(CFG.TTS_ENGINES)))
+            STATE.tts_model if STATE.tts_model in config_module.CFG.TTS_ENGINES
+            else next(iter(config_module.CFG.TTS_ENGINES)))
         row.pack_start(cls._tts_engine_combo, True, True, 0)
         vbox.pack_start(row, False, False, 0)
 
@@ -654,9 +650,9 @@ class SettingsDialog:
             "pill": "Pill — waveform capsule",
             "classic": "Classic — icon + bars",
         }
-        for sid in CFG.OVERLAY_STYLES:
+        for sid in config_module.CFG.OVERLAY_STYLES:
             style_combo.append(sid, _STYLE_LABELS.get(sid, sid.title()))
-        active_style = STATE.overlay_style if STATE.overlay_style in CFG.OVERLAY_STYLES else CFG.DEFAULT_OVERLAY_STYLE
+        active_style = STATE.overlay_style if STATE.overlay_style in config_module.CFG.OVERLAY_STYLES else config_module.CFG.DEFAULT_OVERLAY_STYLE
         style_combo.set_active_id(active_style)
         style_combo.connect("changed", cls._on_overlay_style_changed)
         vbox.pack_start(style_combo, False, False, 0)
@@ -708,7 +704,7 @@ class SettingsDialog:
         cls._listbox = Gtk.ListBox()
         cls._listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         cls._listbox.connect("row-activated", cls._on_scheme_selected)
-        for name in CFG.COLOR_SCHEMES.keys():
+        for name in config_module.CFG.COLOR_SCHEMES.keys():
             row = cls._create_theme_row(name)
             cls._listbox.add(row)
             if name == STATE.color_scheme:
@@ -724,9 +720,9 @@ class SettingsDialog:
         """
         from loquivox.ui.recording_overlay import GtkOverlay
 
-        scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
+        scheme = config_module.CFG.COLOR_SCHEMES.get(STATE.color_scheme, config_module.CFG.COLOR_SCHEMES[config_module.CFG.DEFAULT_SCHEME])
         badge = GtkOverlay.refine_badge_for("dictation")
-        bw, bh = GtkOverlay.width(badge), CFG.OVERLAY_HEIGHT
+        bw, bh = GtkOverlay.width(badge), config_module.CFG.OVERLAY_HEIGHT
         aw, ah = widget.get_allocated_width(), widget.get_allocated_height()
 
         # Looping, calm waveform like the overlay's idle/recording motion.
@@ -766,7 +762,7 @@ class SettingsDialog:
         # Backend selector
         grid.attach(cls._row_label("Backend:"), 0, 0, 1, 1)
         cls._backend_combo = Gtk.ComboBoxText()
-        current = CFG.BACKEND.strip().lower()
+        current = config_module.CFG.BACKEND.strip().lower()
         active_idx = 0
         for i, (bid, label, _stream, _key, _attr) in enumerate(cls._BACKENDS):
             cls._backend_combo.append_text(label)
@@ -788,8 +784,8 @@ class SettingsDialog:
         for label, code in cls._LANGUAGES:
             cls._lang_entry.append(code, f"{label}" + (f" ({code})" if code else ""))
         # Select the row matching the current code, else put the raw code in.
-        if not cls._lang_entry.set_active_id(CFG.WHISPER_LANGUAGE):
-            cls._lang_entry.get_child().set_text(CFG.WHISPER_LANGUAGE)
+        if not cls._lang_entry.set_active_id(config_module.CFG.WHISPER_LANGUAGE):
+            cls._lang_entry.get_child().set_text(config_module.CFG.WHISPER_LANGUAGE)
         grid.attach(cls._lang_entry, 1, 2, 1, 1)
 
         # Microphone: "System default" + every detected capture device.
@@ -801,10 +797,10 @@ class SettingsDialog:
             cls._mic_combo.append(name, name)
         # Restore the saved choice; if it's set but not currently present
         # (mic unplugged), still show it so the selection isn't silently lost.
-        if not cls._mic_combo.set_active_id(CFG.INPUT_DEVICE):
-            if CFG.INPUT_DEVICE:
-                cls._mic_combo.append(CFG.INPUT_DEVICE, f"{CFG.INPUT_DEVICE} (not connected)")
-                cls._mic_combo.set_active_id(CFG.INPUT_DEVICE)
+        if not cls._mic_combo.set_active_id(config_module.CFG.INPUT_DEVICE):
+            if config_module.CFG.INPUT_DEVICE:
+                cls._mic_combo.append(config_module.CFG.INPUT_DEVICE, f"{config_module.CFG.INPUT_DEVICE} (not connected)")
+                cls._mic_combo.set_active_id(config_module.CFG.INPUT_DEVICE)
             else:
                 cls._mic_combo.set_active(0)
         grid.attach(cls._mic_combo, 1, 3, 1, 1)
@@ -814,7 +810,7 @@ class SettingsDialog:
         grid.attach(cls._row_label("Vocabulary:"), 0, 4, 1, 1)
         cls._vocab_entry = Gtk.Entry()
         cls._vocab_entry.set_hexpand(True)
-        cls._vocab_entry.set_text(CFG.VOCABULARY)
+        cls._vocab_entry.set_text(config_module.CFG.VOCABULARY)
         cls._vocab_entry.set_placeholder_text("proper nouns, jargon, foreign words…")
         cls._vocab_entry.set_tooltip_text(
             "Comma-separated words the engine tends to drop or misspell — "
@@ -842,7 +838,7 @@ class SettingsDialog:
 
         # Offline fallback toggle
         cls._fallback_check = Gtk.CheckButton(label="Offline fallback (whisper.cpp) when a backend is unavailable")
-        cls._fallback_check.set_active(bool(CFG.FALLBACK_BACKEND))
+        cls._fallback_check.set_active(bool(config_module.CFG.FALLBACK_BACKEND))
         vbox.pack_start(cls._fallback_check, False, False, 0)
 
         # Apply button + status line
@@ -891,7 +887,7 @@ class SettingsDialog:
             combo.set_sensitive(True)
             for m in cls._MODELS.get(bid, []):
                 combo.append_text(m)
-            combo.get_child().set_text(getattr(CFG, cfg_attr))
+            combo.get_child().set_text(getattr(config_module.CFG, cfg_attr))
 
         cap = "🔴 live transcription" if is_stream else "📝 batch (transcribing… indicator)"
         doc = cls._MODEL_DOCS.get(bid)
@@ -905,7 +901,7 @@ class SettingsDialog:
         if cls._whisper_status is None:
             return
         from loquivox.transcription.whispercpp_backend import WhisperCppBackend
-        model = CFG.WHISPERCPP_MODEL
+        model = config_module.CFG.WHISPERCPP_MODEL
         installed, downloaded = WhisperCppBackend(model).local_status()
         if not installed:
             msg = "whisper.cpp: ⚪ engine not found (<tt>whisper-cli</tt> missing)"
@@ -934,7 +930,7 @@ class SettingsDialog:
         def status(markup: str) -> None:
             GLib.idle_add(lambda: cls._whisper_status.set_markup(f"<small>{markup}</small>"))
 
-        model = CFG.WHISPERCPP_MODEL
+        model = config_module.CFG.WHISPERCPP_MODEL
         backend = WhisperCppBackend(model)
 
         # The engine is a bundled binary (whisper-cli), not a pip package — if
@@ -991,7 +987,6 @@ class SettingsDialog:
             return
 
         # 2) apply live: rebuild CFG + reconfigure the dispatcher
-        from loquivox import config as config_module
         from loquivox.transcription import get_dispatcher, reconfigure_dispatcher
         fresh = config_module.reload_config()
         reconfigure_dispatcher(fresh)
@@ -1061,7 +1056,6 @@ class SettingsDialog:
                     cls._set_trans_status(f"❌ {human} install failed — {msg}")
                     return False
                 # Rebuild backends now that the package exists, then re-report.
-                from loquivox import config as config_module
                 from loquivox.transcription import reconfigure_dispatcher
                 reconfigure_dispatcher(config_module.reload_config())
                 cls._report_backend_availability(bid)
@@ -1165,7 +1159,7 @@ class SettingsDialog:
         cls._pp_scale.set_hexpand(True)
         for level, label in POSTPROCESS_LEVELS:
             cls._pp_scale.add_mark(level, Gtk.PositionType.BOTTOM, label)
-        cls._pp_scale.set_value(int(CFG.POSTPROCESS_LEVEL or 0))
+        cls._pp_scale.set_value(int(config_module.CFG.POSTPROCESS_LEVEL or 0))
         # Snap to whole levels while dragging, and show the level name live.
         cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
         cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
@@ -1175,22 +1169,22 @@ class SettingsDialog:
         # Translate — a separate axis; when on it overrides the level.
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         cls._pp_translate_check = Gtk.CheckButton(label="Translate to")
-        cls._pp_translate_check.set_active(bool(CFG.POSTPROCESS_TRANSLATE))
+        cls._pp_translate_check.set_active(bool(config_module.CFG.POSTPROCESS_TRANSLATE))
         cls._pp_translate_check.connect("toggled", cls._on_pp_translate_toggled)
         trow.pack_start(cls._pp_translate_check, False, False, 0)
         cls._pp_lang = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
             if code:  # translation needs a real target
                 cls._pp_lang.append(code, f"{label} ({code})")
-        if not cls._pp_lang.set_active_id(CFG.POSTPROCESS_TARGET_LANG):
-            cls._pp_lang.get_child().set_text(CFG.POSTPROCESS_TARGET_LANG)
+        if not cls._pp_lang.set_active_id(config_module.CFG.POSTPROCESS_TARGET_LANG):
+            cls._pp_lang.get_child().set_text(config_module.CFG.POSTPROCESS_TARGET_LANG)
         trow.pack_start(cls._pp_lang, True, True, 0)
         vbox.pack_start(trow, False, False, 0)
 
         # Format — a separate axis that COMBINES with the level / translate.
         cls._pp_format_check = Gtk.CheckButton(
             label="Format as structured text (paragraphs + bullet lists)")
-        cls._pp_format_check.set_active(bool(CFG.POSTPROCESS_FORMAT))
+        cls._pp_format_check.set_active(bool(config_module.CFG.POSTPROCESS_FORMAT))
         cls._pp_format_check.set_tooltip_text(
             "Lays the result out in plain-text paragraphs and lists. Combines "
             "with the refinement level (or works alone when level is Off).")
@@ -1207,7 +1201,7 @@ class SettingsDialog:
 
         cls._pp_prompt_view = Gtk.TextView()
         cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
-        cls._pp_prompt_view.get_buffer().set_text(CFG.POSTPROCESS_CUSTOM_PROMPT)
+        cls._pp_prompt_view.get_buffer().set_text(config_module.CFG.POSTPROCESS_CUSTOM_PROMPT)
         cls._pp_prompt_scroll = Gtk.ScrolledWindow()
         cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         cls._pp_prompt_scroll.set_min_content_height(80)
@@ -1304,7 +1298,6 @@ class SettingsDialog:
         except ConfigWriteError as e:
             cls._pp_status.set_markup(f"<small>❌ {e}</small>")
             return
-        from loquivox import config as config_module
         config_module.reload_config()  # PostProcessor reads config_module.CFG live
         if translate:
             desc = f"translate → {lang}"
@@ -1342,7 +1335,7 @@ class SettingsDialog:
         active = get_dispatcher().active
         if active is not None and active.name == "openai_realtime":
             from loquivox.transcription.openai_realtime_backend import OpenAIRealtimeSession
-            return not OpenAIRealtimeSession._supports_turn_detection(CFG.OPENAI_MODEL)
+            return not OpenAIRealtimeSession._supports_turn_detection(config_module.CFG.OPENAI_MODEL)
         return True
 
     @classmethod
@@ -1352,7 +1345,7 @@ class SettingsDialog:
         header.set_halign(Gtk.Align.START)
         header.set_markup(
             f"<b>Ending the conversation</b> "
-            f"<small>({CFG.HOTKEY_DEFS['talk'][0]} starts it)</small>"
+            f"<small>({config_module.CFG.HOTKEY_DEFS['talk'][0]} starts it)</small>"
         )
         vbox.pack_start(header, False, False, 6)
 
@@ -1367,12 +1360,12 @@ class SettingsDialog:
 
         cls._talk_phrase_check = Gtk.CheckButton(
             label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
-        cls._talk_phrase_check.set_active(bool(CFG.TALK_FINISH_ON_PHRASE))
+        cls._talk_phrase_check.set_active(bool(config_module.CFG.TALK_FINISH_ON_PHRASE))
         vbox.pack_start(cls._talk_phrase_check, False, False, 0)
 
         cls._talk_model_check = Gtk.CheckButton(
             label="When the assistant judges it has enough context")
-        cls._talk_model_check.set_active(bool(CFG.TALK_FINISH_BY_MODEL))
+        cls._talk_model_check.set_active(bool(config_module.CFG.TALK_FINISH_BY_MODEL))
         vbox.pack_start(cls._talk_model_check, False, False, 0)
 
         header2 = Gtk.Label()
@@ -1386,25 +1379,25 @@ class SettingsDialog:
         for depth_id, label in cls._TALK_DEPTHS:
             cls._talk_depth.append(depth_id, label)
         cls._talk_depth.set_active_id(
-            CFG.TALK_DEPTH if CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
+            config_module.CFG.TALK_DEPTH if config_module.CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
         row.pack_start(cls._talk_depth, True, True, 0)
         vbox.pack_start(row, False, False, 0)
 
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
                 " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
-        cls._talk_semantic_check.set_active(bool(CFG.TALK_SEMANTIC_TURNS))
+        cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         vbox.pack_start(cls._talk_semantic_check, False, False, 0)
 
         cls._talk_speak_check = Gtk.CheckButton(
             label="Read the assistant's replies aloud, even with TTS off")
-        cls._talk_speak_check.set_active(bool(CFG.TALK_SPEAK_REPLIES))
+        cls._talk_speak_check.set_active(bool(config_module.CFG.TALK_SPEAK_REPLIES))
         vbox.pack_start(cls._talk_speak_check, False, False, 0)
 
         cls._talk_autopaste_check = Gtk.CheckButton(
             label="Paste the finished text straight away, without reviewing it")
-        cls._talk_autopaste_check.set_active(bool(CFG.TALK_AUTO_PASTE))
+        cls._talk_autopaste_check.set_active(bool(config_module.CFG.TALK_AUTO_PASTE))
         cls._talk_autopaste_check.set_tooltip_text(
             "The text is copied and pasted where the cursor was when the "
             "conversation ended — no Enter, and no chance to rewrite it or go "
@@ -1430,7 +1423,6 @@ class SettingsDialog:
         )
         vbox.pack_start(instr_note, False, False, 0)
 
-        from loquivox import config as config_module
         instr_scroll = Gtk.ScrolledWindow()
         instr_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         instr_scroll.set_size_request(-1, 120)
@@ -1468,7 +1460,7 @@ class SettingsDialog:
 
         cls._talk_shot_check = Gtk.CheckButton(
             label="Send a screenshot as context when the session starts")
-        cls._talk_shot_check.set_active(bool(CFG.TALK_SCREENSHOT))
+        cls._talk_shot_check.set_active(bool(config_module.CFG.TALK_SCREENSHOT))
         cls._talk_shot_check.connect("toggled", cls._on_talk_shot_toggled)
         vbox.pack_start(cls._talk_shot_check, False, False, 0)
 
@@ -1478,7 +1470,7 @@ class SettingsDialog:
         cls._talk_shot_region.append("screen", "The whole screen")
         cls._talk_shot_region.append("cursor", "A box around the cursor (X11 / Hyprland)")
         cls._talk_shot_region.set_active_id(
-            "cursor" if CFG.TALK_SCREENSHOT_REGION == "cursor" else "screen")
+            "cursor" if config_module.CFG.TALK_SCREENSHOT_REGION == "cursor" else "screen")
         cls._talk_shot_region.set_tooltip_text(
             "Wayland gives no way to locate the pointer, except on Hyprland — "
             "elsewhere this falls back to the whole screen."
@@ -1489,14 +1481,14 @@ class SettingsDialog:
         cursor_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         cursor_row.pack_start(cls._row_label("Box width (px):"), False, False, 0)
         cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
-        cls._talk_shot_cursor.set_value(int(CFG.TALK_SCREENSHOT_CURSOR_PX))
+        cls._talk_shot_cursor.set_value(int(config_module.CFG.TALK_SCREENSHOT_CURSOR_PX))
         cursor_row.pack_start(cls._talk_shot_cursor, False, False, 0)
         vbox.pack_start(cursor_row, False, False, 0)
 
         max_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         max_row.pack_start(cls._row_label("Downscale to (px):"), False, False, 0)
         cls._talk_shot_max = Gtk.SpinButton.new_with_range(0, 7680, 128)
-        cls._talk_shot_max.set_value(int(CFG.TALK_SCREENSHOT_MAX_PX))
+        cls._talk_shot_max.set_value(int(config_module.CFG.TALK_SCREENSHOT_MAX_PX))
         cls._talk_shot_max.set_tooltip_text(
             "Longest edge of the uploaded image — what keeps a 4K capture small. "
             "0 uploads it as captured."
@@ -1604,7 +1596,6 @@ class SettingsDialog:
         except ConfigWriteError as e:
             cls._talk_status.set_markup(f"<small>❌ {e}</small>")
             return
-        from loquivox import config as config_module
         config_module.reload_config()  # talk mode reads config_module.CFG live
         ends = [name for name, on in (("Enter", True), ("spoken", phrase),
                                       ("assistant", by_model)) if on]
@@ -1690,7 +1681,6 @@ class SettingsDialog:
             cls._key_status.set_markup(f"<small>❌ {e}</small>")
             return
         # Re-evaluate backends now that keys changed.
-        from loquivox import config as config_module
         from loquivox.transcription import reconfigure_dispatcher
         reconfigure_dispatcher(config_module.reload_config())
         n = sum(1 for v in values.values() if v.strip())
@@ -1726,7 +1716,7 @@ class SettingsDialog:
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
-        for i, (mode_id, (_label, specs)) in enumerate(CFG.HOTKEY_DEFS.items()):
+        for i, (mode_id, (_label, specs)) in enumerate(config_module.CFG.HOTKEY_DEFS.items()):
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
             lbl = Gtk.Label(label=name + ":")
             lbl.set_halign(Gtk.Align.START)
@@ -1792,7 +1782,6 @@ class SettingsDialog:
 
         # Apply live: reload config and rebuild the keyboard listener's map so
         # the new bindings take effect immediately — no service restart needed.
-        from loquivox import config as config_module
         from loquivox.handlers.keyboard import KeyboardHandler
         KeyboardHandler.reload_hotkeys(config_module.reload_config())
 
@@ -1847,7 +1836,7 @@ class SettingsDialog:
     @classmethod
     def _voices(cls) -> tuple:
         """The voices of the currently selected engine."""
-        return CFG.TTS_ENGINES.get(STATE.tts_model, ("", ()))[1]
+        return config_module.CFG.TTS_ENGINES.get(STATE.tts_model, ("", ()))[1]
 
     @classmethod
     def _fill_voices(cls) -> None:
@@ -1953,7 +1942,7 @@ class SettingsDialog:
 
         find_name(row.get_child())
 
-        if name in CFG.COLOR_SCHEMES:
+        if name in config_module.CFG.COLOR_SCHEMES:
             STATE.color_scheme = name
             print(f"🎨 Color scheme changed to: {name}")
             SettingsManager.save(STATE)
@@ -1967,7 +1956,7 @@ class SettingsDialog:
     @classmethod
     def _create_theme_row(cls, name: str) -> Gtk.ListBoxRow:
         """Create a visual card for a theme in the gallery."""
-        scheme = CFG.COLOR_SCHEMES[name]
+        scheme = config_module.CFG.COLOR_SCHEMES[name]
         row = Gtk.ListBoxRow()
         row.set_margin_top(4)
         row.set_margin_bottom(4)

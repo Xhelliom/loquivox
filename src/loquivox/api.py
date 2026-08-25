@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from groq import Groq
 
@@ -52,7 +52,7 @@ def get_client() -> Groq:
     return _client
 
 
-_ai_clients: Dict[str, Any] = {}
+_openai_client: Optional[Any] = None
 
 
 class OpenAIKeyMissing(RuntimeError):
@@ -66,16 +66,16 @@ def get_ai_client(provider: str):
     Both SDKs expose the same ``chat.completions.create`` and ``models.list``,
     which is why the AI service never has to know which one it holds.
     """
+    global _openai_client
     if provider != "openai":
         return get_client()
     with _lock:
-        client = _ai_clients.get("openai")
-        if client is None:
+        if _openai_client is None:
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
                 raise OpenAIKeyMissing(
                     "OPENAI_API_KEY is not set — add it in Settings → API Keys."
                 )
             from openai import OpenAI
-            client = _ai_clients["openai"] = OpenAI(api_key=api_key)
-        return client
+            _openai_client = OpenAI(api_key=api_key)
+        return _openai_client

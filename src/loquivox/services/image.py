@@ -43,12 +43,14 @@ class ImageService:
             print("❌ Screenshot failed")
             return None
 
-        if region == "cursor" or max_px:
-            ImageService._reframe(output, region=region, cursor_px=cursor_px,
-                                  max_px=max_px)
+        data = (ImageService._reframe(output, region=region, cursor_px=cursor_px,
+                                      max_px=max_px)
+                if (region == "cursor" or max_px) else None)
         try:
-            with open(output, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
+            if data is None:
+                with open(output, "rb") as f:
+                    data = f.read()
+            return base64.b64encode(data).decode("utf-8")
         finally:
             try:
                 os.remove(output)
@@ -56,10 +58,15 @@ class ImageService:
                 pass
 
     @staticmethod
-    def _reframe(path: str, *, region: str, cursor_px: int, max_px: int) -> None:
+    def _reframe(path: str, *, region: str, cursor_px: int,
+                 max_px: int) -> Optional[bytes]:
         """
-        Crop and/or downscale the capture in place. Best-effort: any failure
-        leaves the original file untouched, which is always still usable.
+        The capture cropped and/or downscaled, as PNG bytes.
+
+        Encoded straight to memory: the caller only ever base64s the result, so
+        writing it back over the file just to read it again would be a second
+        full PNG encode of a multi-megapixel image. Best-effort — None means
+        the caller sends the file as captured, which is always still usable.
         """
         try:
             import gi
@@ -90,6 +97,8 @@ class ImageService:
                     GdkPixbuf.InterpType.BILINEAR,
                 )
 
-            pixbuf.savev(path, "png", [], [])
+            ok, data = pixbuf.save_to_bufferv("png", [], [])
+            return data if ok else None
         except Exception as e:
             print(f"⚠️  Could not reframe the screenshot ({e}) — sending it as captured")
+            return None

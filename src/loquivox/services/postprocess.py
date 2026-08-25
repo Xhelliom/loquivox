@@ -140,9 +140,9 @@ class PostProcessor:
     @staticmethod
     @safe_execute("PostProcess")
     def _run(text: str, system_prompt: str) -> Optional[str]:
-        # Same provider/model as every other completion (see AIService._complete).
+        # Same provider/model as every other completion.
         from loquivox.services.ai import AIService
-        out = (AIService._complete(
+        out = (AIService.complete(
             [
                 {"role": "system", "content": system_prompt + _GUARD + _PRESERVE},
                 {"role": "user", "content": f"<text>{text}</text>"},

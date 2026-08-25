@@ -29,11 +29,6 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 
 
-#: how long the talk bubble waits before opening, so the recording overlay gets
-#: the main thread — and its fade-in — to itself first
-TALK_BUBBLE_DELAY_MS: int = 450
-
-
 class ModeHandler:
     """Unified handler for all recording modes."""
 
@@ -438,25 +433,23 @@ class ModeHandler:
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
         # Up front, before anything that can block. Opening the keyboards takes
-        # ~450 ms and the conversation engine up to a second more; the user
+        # ~350 ms and the conversation engine up to a second more; the user
         # pressed a key and needs to see that it registered, not to wonder.
-        from loquivox.handlers.keyboard import KeyboardHandler
-        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
-        # Sequenced, not simultaneous. Building either window blocks the GTK
-        # loop for ~100ms and both then fade in, so opening them together is
-        # what makes F6 feel sluggish. The recording overlay is the one that
-        # has to appear the instant the key is pressed — the bubble has nothing
-        # to show until the first words come back anyway. Cosmetic only: the
-        # microphone is on its own thread and misses nothing either way.
-        GLib.timeout_add(TALK_BUBBLE_DELAY_MS, ModeHandler._open_talk_bubble)
+        ModeHandler._show_talk_overlay()
+        ChatManager.set_talk(True)      # deferred — see ChatManager._OPEN_DELAY_MS
         threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
 
     @staticmethod
-    def _open_talk_bubble() -> bool:
-        """Open the bubble, once the recording overlay has had the floor."""
-        if STATE.talk_active:
-            ChatManager.set_talk(True)
-        return False
+    def _show_talk_overlay() -> None:
+        """
+        The recording overlay in its talk livery.
+
+        Its hint strip names the session's own keys, not the global hotkeys —
+        those are grabbed for the session's whole life and would be a lie.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+        STATE.current_mode = "talk"
+        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
 
     @staticmethod
     def _talk_worker() -> None:
@@ -583,8 +576,7 @@ class ModeHandler:
         from loquivox.services.realtime_talk import RealtimeTalk
 
         cfg = config_module.CFG
-        STATE.current_mode = "talk"
-        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
+        ModeHandler._show_talk_overlay()
         OverlayManager.set_status("Connecting…")
         talk = RealtimeTalk(session)
         try:
@@ -709,8 +701,7 @@ class ModeHandler:
 
         cfg = config_module.CFG
         STATE.vad = None
-        STATE.current_mode = "talk"
-        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
+        ModeHandler._show_talk_overlay()
 
         # ready_detector() never blocks: while the model is still downloading
         # in the background, this turn simply ends on silence like before.
@@ -832,7 +823,10 @@ class ModeHandler:
                 # inert, and the only thing read here is how much speech it has
                 # heard. The pause that ends a turn is _talk_listen's business.
                 silence_ms=10 ** 6,
-                min_speech_ms=cfg.TALK_BARGE_IN_MS,
+                # min_speech_ms is left at its default: it only gates the branch
+                # that sets `ended`, which silence_ms above makes unreachable.
+                # The barge-in threshold is the explicit speech_seconds check
+                # below — one place to tune, not two that look alike.
                 # The one detector that calibrates on speech on purpose: it is
                 # listening through the assistant's own echo and has to sit
                 # above it, so the usual ceiling would defeat it.

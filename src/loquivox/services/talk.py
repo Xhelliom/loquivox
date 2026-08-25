@@ -250,6 +250,17 @@ class TalkSession:
         )
         if not answer:
             return None
+        return self.add_assistant(answer)
+
+    def add_assistant(self, answer: str) -> TalkReply:
+        """
+        Record a reply, and say whether it hands the floor to the writing phase.
+
+        Both engines land here — the cascade with the model's completion, the
+        Realtime session with the transcript of what it just said — so the
+        end-of-briefing marker is read and stripped once, in one place, and
+        reaches neither the speakers, the screen nor the history.
+        """
         done = ends_briefing(answer)
         clean = _strip_marker(answer)
         if clean:

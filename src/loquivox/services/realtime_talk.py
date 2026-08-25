@@ -30,9 +30,10 @@ import numpy as np
 import sounddevice as sd
 
 import loquivox.config as config_module
-from loquivox.services.talk import (FINISH_MARKER, _MARKER_RE, _strip_marker,
-                                    ends_briefing,
-                                    user_said_done)
+from loquivox.services.audio import resolve_input_device
+from loquivox.services.talk import FINISH_MARKER, _strip_marker, user_said_done
+from loquivox.state import STATE
+from loquivox.transcription.streaming import float32_to_pcm16
 
 #: Realtime audio is 24 kHz mono PCM16, both ways
 RATE: int = 24000
@@ -91,6 +92,7 @@ class RealtimeTalk:
         self._player = threading.Thread(target=self._play, daemon=True)
         self._player.start()
         self._mic = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
+                                   device=resolve_input_device(),
                                    callback=self._on_audio)
         self._mic.start()
         print(f"🔊 Realtime talk — {self._model} / {self._voice}")
@@ -130,11 +132,18 @@ class RealtimeTalk:
         """PortAudio callback: push captured audio to the model."""
         if self._conn is None or self._stop:
             return
-        pcm = (np.clip(indata[:, 0], -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+        mono = indata[:, 0]
+        # The recording overlay draws whatever lands here; without it a whole
+        # realtime conversation shows a flat waveform.
+        try:
+            if STATE.viz_queue.qsize() < 5:
+                STATE.viz_queue.put_nowait(mono.copy())
+        except Exception:
+            pass
+        pcm = base64.b64encode(float32_to_pcm16(mono)).decode("ascii")
         try:
             asyncio.run_coroutine_threadsafe(
-                self._conn.input_audio_buffer.append(
-                    audio=base64.b64encode(pcm).decode("ascii")),
+                self._conn.input_audio_buffer.append(audio=pcm),
                 self._loop)
         except Exception:
             pass  # the loop is closing — the session is on its way out
@@ -279,12 +288,11 @@ class RealtimeTalk:
         """Record a spoken reply, stripping the end-of-briefing marker."""
         from loquivox.managers.chat import ChatManager
 
-        if ends_briefing(text):
+        reply = self._session.add_assistant(text)
+        if reply.done:
             self.done = True
-        clean = _MARKER_RE.sub("", text).strip()
-        if clean:
-            self._session.turns.append({"role": "assistant", "content": clean})
-            ChatManager.add_message("assistant", clean)
+        if reply.text:
+            ChatManager.add_message("assistant", reply.text)
 
 
 if __name__ == "__main__":
@@ -294,15 +302,9 @@ if __name__ == "__main__":
         def __init__(self, **kw) -> None:
             self.__dict__.update(kw)
 
-    class _Session:
-        turns: list = []
-
-        def add_user(self, text: str) -> None:
-            self.turns.append({"role": "user", "content": text})
-
-        @staticmethod
-        def system_prompt() -> str:
-            return "be brief"
+    # The real session: recording an assistant turn (and reading the marker) is
+    # its job now, and a fake would only re-implement what is being checked.
+    from loquivox.services.talk import TalkSession
 
     import loquivox.managers.chat as chat_module
     chat_module.ChatManager.add_message = staticmethod(lambda *a, **k: None)
@@ -310,7 +312,7 @@ if __name__ == "__main__":
     chat_module.ChatManager.stream = staticmethod(
         lambda role, text: live.append((role, text)))
 
-    talk = RealtimeTalk(_Session())
+    talk = RealtimeTalk(TalkSession())
     talk._handle(_Event(type="response.output_audio.delta",
                         delta=base64.b64encode(b"\x01\x02").decode()))
     assert talk._audio.qsize() == 1
@@ -345,7 +347,7 @@ if __name__ == "__main__":
     assert talk.done, "the model's marker must end the briefing"
     assert FINISH_MARKER not in talk._session.turns[-1]["content"]
 
-    spoken = RealtimeTalk(_Session())
+    spoken = RealtimeTalk(TalkSession())
     spoken._handle(_Event(type="conversation.item.input_audio_transcription.completed",
                           transcript="vas-y"))
     assert spoken.done, "a spoken finish phrase must end the briefing"

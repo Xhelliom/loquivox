@@ -36,7 +36,7 @@ def list_input_devices() -> list[str]:
     return names
 
 
-def _resolve_input_device():
+def resolve_input_device():
     """Map the configured device NAME to a PortAudio index, or ``None`` (default).
 
     Read from the live config module (not the import-time ``CFG``) so a change in
@@ -143,7 +143,7 @@ class AudioService:
             samplerate=rate,
             channels=1,
             dtype='float32',
-            device=_resolve_input_device(),  # None = system default mic
+            device=resolve_input_device(),  # None = system default mic
             callback=AudioService.audio_callback
         )
         STATE.stream.start()

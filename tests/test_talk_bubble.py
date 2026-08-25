@@ -85,9 +85,14 @@ def test_new_session_starts_empty():
     ChatManager._show_overlay = staticmethod(lambda status=None: None)
     STATE.chat_messages = [{"role": "user", "text": "session précédente"}]
     STATE.chat_enabled = True
+    STATE.talk_active = True
     ChatManager.set_talk(True)
-    while GLib.MainContext.default().iteration(False):
-        pass
+
+    # Opening is deferred so the recording overlay gets the main thread first.
+    assert STATE.chat_messages != [], "la bulle ne doit pas s'ouvrir tout de suite"
+    loop = GLib.MainLoop()
+    GLib.timeout_add(ChatManager._OPEN_DELAY_MS + 250, lambda: (loop.quit(), False)[1])
+    loop.run()
     assert STATE.chat_messages == [], STATE.chat_messages
 
     # A rewrite replaces the candidate instead of stacking a second one.
