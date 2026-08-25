@@ -29,6 +29,11 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib
 
 
+#: how long the talk bubble waits before opening, so the recording overlay gets
+#: the main thread — and its fade-in — to itself first
+TALK_BUBBLE_DELAY_MS: int = 450
+
+
 class ModeHandler:
     """Unified handler for all recording modes."""
 
@@ -432,8 +437,21 @@ class ModeHandler:
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
-        ChatManager.set_talk(True)  # the bubble is up before the first word
+        # Sequenced, not simultaneous. Building either window blocks the GTK
+        # loop for ~100ms and both then fade in, so opening them together is
+        # what makes F6 feel sluggish. The recording overlay is the one that
+        # has to appear the instant the key is pressed — the bubble has nothing
+        # to show until the first words come back anyway. Cosmetic only: the
+        # microphone is on its own thread and misses nothing either way.
+        GLib.timeout_add(TALK_BUBBLE_DELAY_MS, ModeHandler._open_talk_bubble)
         threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
+
+    @staticmethod
+    def _open_talk_bubble() -> bool:
+        """Open the bubble, once the recording overlay has had the floor."""
+        if STATE.talk_active:
+            ChatManager.set_talk(True)
+        return False
 
     @staticmethod
     def _talk_worker() -> None:

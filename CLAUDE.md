@@ -194,6 +194,14 @@ panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
 recording overlay while reviewing: its hint strip names the conversation's
 keys, which are not the ones that apply then.
 
+Opening it is sequenced, not simultaneous: `_handle_talk` defers
+`ChatManager.set_talk(True)` by `TALK_BUBBLE_DELAY_MS` so the recording overlay
+— the one that has to appear the instant the key is pressed — gets the main
+thread and its fade to itself. And `app.py` builds one throwaway `WebKit2.WebView`
+on a low-priority idle at startup: the FIRST view in a process costs 110–270 ms
+of blocked GTK loop and every one after it costs ~3 ms, so that cost used to
+land on whichever hotkey opened the overlay first.
+
 Two things stay off this window on purpose, both compositor cost rather than
 Python cost (the GTK loop measures fine either way — the spend is in the
 WebProcess and the compositor): no `backdrop-filter`, which would have the
