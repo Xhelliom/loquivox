@@ -583,7 +583,13 @@ class ModeHandler:
                     # "send" (Space) means "end this turn now", which is the
                     # server's call here — ignoring it beats ending the
                     # briefing on a key that means something else.
-                    if talk.done or talk.error is not None:
+                    if talk.error is not None:
+                        break
+                    # The transcript that ends the briefing arrives while its
+                    # audio is still queued, so this keeps looping until the
+                    # sentence has actually been heard — closing on the event
+                    # itself cuts the assistant off mid-word.
+                    if talk.done and talk.finished_speaking():
                         break
                     if session.user_turns >= cfg.TALK_MAX_TURNS:
                         break

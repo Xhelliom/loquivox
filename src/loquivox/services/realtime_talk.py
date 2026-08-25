@@ -23,6 +23,7 @@ import asyncio
 import base64
 import queue
 import threading
+import time
 from typing import Dict, Optional
 
 import numpy as np
@@ -37,6 +38,9 @@ from loquivox.services.talk import (FINISH_MARKER, _MARKER_RE, _strip_marker,
 RATE: int = 24000
 #: playback blocks; small enough that a barge-in cuts within ~40 ms
 BLOCK: int = 1024
+#: longest a closing session waits for the last reply to finish playing, in case
+#: the end-of-audio event never comes
+SPEECH_TAIL_TIMEOUT: float = 15.0
 
 
 class RealtimeTalk:
@@ -52,6 +56,12 @@ class RealtimeTalk:
         #: turn being transcribed right now, per role — shown live in the bubble
         self._live: Dict[str, str] = {}
         self._audio: "queue.Queue" = queue.Queue()
+        #: set while nothing more is coming for the reply being played. Starts
+        #: set: a session that has said nothing is not mid-sentence.
+        self._audio_done = threading.Event()
+        self._audio_done.set()
+        self._writing = False          # a chunk is on its way to the sound card
+        self._speech_deadline: Optional[float] = None
         self._loop = asyncio.new_event_loop()
         self._conn = None
         self._ready = threading.Event()
@@ -96,6 +106,24 @@ class RealtimeTalk:
         if not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
+    def finished_speaking(self) -> bool:
+        """
+        True once the reply that ended the briefing has actually been heard.
+
+        A reply's transcript is complete while its audio is still queued, so
+        the event that sets ``done`` lands mid-sentence — closing on it cuts
+        the assistant off in the middle of "Parfait, je vais rédiger…". Asked
+        as a predicate rather than waited on, so Esc keeps working while the
+        sentence finishes, and bounded, so a missing end-of-audio event cannot
+        hold a session open.
+        """
+        if self._audio_done.is_set() and self._audio.empty() and not self._writing:
+            return True
+        now = time.monotonic()
+        if self._speech_deadline is None:
+            self._speech_deadline = now + SPEECH_TAIL_TIMEOUT
+        return now >= self._speech_deadline
+
     # --- microphone → session ---------------------------------------------
 
     def _on_audio(self, indata: np.ndarray, frames: int, time_info, status) -> None:
@@ -122,7 +150,11 @@ class RealtimeTalk:
                     chunk = self._audio.get()
                     if chunk is None:
                         break
-                    out.write(chunk)
+                    self._writing = True
+                    try:
+                        out.write(chunk)
+                    finally:
+                        self._writing = False
         except Exception as e:
             print(f"❌ Realtime playback error: {e}")
 
@@ -139,6 +171,7 @@ class RealtimeTalk:
                 self._audio.get_nowait()
         except queue.Empty:
             pass
+        self._audio_done.set()  # nothing left to hear — this reply is over
 
     # --- the session itself ------------------------------------------------
 
@@ -196,7 +229,10 @@ class RealtimeTalk:
         if etype == "response.output_audio.delta":
             delta = getattr(event, "delta", "") or ""
             if delta:
+                self._audio_done.clear()
                 self._audio.put(base64.b64decode(delta))
+        elif etype in ("response.output_audio.done", "response.done"):
+            self._audio_done.set()
         elif etype == "input_audio_buffer.speech_started":
             self._flush_audio()
         elif etype.endswith("input_audio_transcription.delta"):
@@ -295,8 +331,17 @@ if __name__ == "__main__":
     assert "user" not in talk._live, talk._live
     assert talk._session.turns[-1]["content"].startswith("je voudrais")
     assert not talk.done
+    # The briefing ends on the transcript, but the voice is still playing:
+    # the session must not close until the sentence has been heard.
+    talk._handle(_Event(type="response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00\x01" * 32).decode()))
     talk._handle(_Event(type="response.output_audio_transcript.done",
                         transcript=f"D'accord, je rédige. {FINISH_MARKER}"))
+    assert talk.done and not talk.finished_speaking(), \
+        "closing here cuts the assistant off mid-sentence"
+    talk._handle(_Event(type="response.done"))
+    talk._audio.get_nowait()                       # the player drains it
+    assert talk.finished_speaking(), "the session never closes"
     assert talk.done, "the model's marker must end the briefing"
     assert FINISH_MARKER not in talk._session.turns[-1]["content"]
 

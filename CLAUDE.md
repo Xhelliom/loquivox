@@ -104,7 +104,10 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends.
   the whole conversation, speech in and speech out. The server owns turn-taking
   AND interruption; ~1.0s, and the reply keeps the prosody of speech. What is
   lost is the choice of LLM. Anything that stops it opening falls back to the
-  cascade.
+  cascade. Note that a reply's *transcript* is complete while its *audio* is
+  still queued, so `done` lands mid-sentence: the loop breaks on
+  `finished_speaking()`, never on `done` alone, or the assistant is cut off in
+  the middle of "Parfait, je vais rédiger…".
 
 Either way the turns land in the same `TalkSession`, because the writing pass
 is a text completion that never learns which engine ran. That is the whole
