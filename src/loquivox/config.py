@@ -149,8 +149,12 @@ class Config:
     CHAT_AUTO_HIDE_SEC: int = 3
 
     # --- AI Models ---
-    MODEL_CHAT: str = "llama-3.3-70b-versatile"
-    MODEL_VISION: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+    # Provider for chat + vision: "groq" or "openai" (same API dialect, see
+    # api.get_ai_client). Overridable per-user in Settings → Models.
+    AI_PROVIDER: str = "groq"
+    AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
+    MODEL_CHAT: str = "openai/gpt-oss-120b"
+    MODEL_VISION: str = "qwen/qwen3.6-27b"
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
@@ -221,8 +225,22 @@ class Config:
     # Cache window for focused-window / terminal detection (seconds).
     TERMINAL_CACHE_TTL: float = 0.2
 
-    # --- TTS Voices ---
-    TTS_VOICES: Tuple[str, ...] = ("diana", "hannah", "autumn", "austin", "daniel", "troy")
+    # --- TTS engines: model → (provider, voices) ---
+    # Groq's Orpheus is English-only (and gated behind a terms acceptance on
+    # console.groq.com); OpenAI's is multilingual — the one to pick to be
+    # answered in French. Each engine uses its own provider's key.
+    TTS_ENGINES: Dict[str, Tuple[str, Tuple[str, ...]]] = field(default_factory=lambda: {
+        "canopylabs/orpheus-v1-english": (
+            "groq", ("diana", "hannah", "autumn", "austin", "daniel", "troy")),
+        "gpt-4o-mini-tts": (
+            "openai", ("alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
+                       "marin", "nova", "onyx", "sage", "shimmer", "verse")),
+        # Local, offline, no key: the "voices" are Piper voice ids, fetched
+        # once into ~/.cache/loquivox/piper. A filesystem path works too.
+        "piper": ("piper", ("fr_FR-siwis-medium", "fr_FR-upmc-medium",
+                            "fr_FR-gilles-low", "en_US-lessac-medium",
+                            "en_GB-alba-medium")),
+    })
     TTS_DEFAULT_VOICE: str = "diana"
     TTS_MAX_CHARS: int = 4000
 
@@ -277,6 +295,40 @@ class Config:
     # local path uses that file and never downloads; an http(s) URL pins the
     # build to fetch.
     TALK_TURN_MODEL: str = ""
+    # Barge-in: speaking over a reply cuts it off, the way one does with a
+    # person. The detector is armed on the first sample that actually reaches
+    # the speakers, so its calibration window measures the ECHO of the reply —
+    # the activation level lands above whatever the speakers leak back into
+    # the microphone, and on a headset (no leak) it stays at the plain
+    # threshold. Without echo cancellation and with the volume up, the reply
+    # can still cut itself off: use a headset, or PipeWire's
+    # libpipewire-module-echo-cancel in monitor mode.
+    TALK_BARGE_IN: bool = True
+    # Speech needed before a reply is cut off (milliseconds). Long enough that
+    # a cough or a key click is not an interruption.
+    TALK_BARGE_IN_MS: int = 400
+    # How much of what the microphone heard is kept as the start of the next
+    # turn (seconds) — the words spoken over the reply must not be lost.
+    TALK_BARGE_IN_KEEP: float = 1.5
+    # How the conversation is held:
+    #   "cascade"  — STT → LLM → TTS, every slot swappable (local or cloud)
+    #   "realtime" — one OpenAI Realtime session, speech in and speech out:
+    #                the server owns turn-taking and interruptions and the
+    #                reply keeps the prosody of speech, but the conversation
+    #                is held by the Realtime model, not by [models] chat.
+    # The writing pass is a text completion either way.
+    TALK_ENGINE: str = "cascade"
+    TALK_ENGINES: Tuple[str, ...] = ("cascade", "realtime")
+    TALK_REALTIME_MODEL: str = "gpt-realtime-2.1"
+    TALK_REALTIME_VOICE: str = "marin"
+    # The voices gpt-realtime speaks with. Same names as the TTS ones and the
+    # same timbre, but a different model produces them — which is why the
+    # settings dialog previews them through the TTS engine.
+    TALK_REALTIME_VOICES: Tuple[str, ...] = (
+        "marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage",
+        "shimmer", "verse")
+    # Transcription model for the user's side — what lands in the brief.
+    TALK_REALTIME_TRANSCRIBE: str = "gpt-4o-mini-transcribe"
     # A turn stops after this long no matter what (seconds).
     TALK_TURN_TIMEOUT: float = 60.0
     # Silence with nothing said at all for this long ends the conversation and
@@ -362,6 +414,12 @@ class Config:
         "speaks."
     )
     # Generation phase: same conversation, new instructions — write the thing.
+    #: Standing instructions for the conversation: persona, language, tone. Added
+    #: to the built-in prompt rather than replacing it, so the briefing protocol
+    #: (ask, don't write; the end-of-briefing marker) survives whatever is put
+    #: here. Both engines read it — the cascade through ``system_prompt()``, the
+    #: Realtime session through the instructions it opens with.
+    TALK_INSTRUCTIONS: str = ""
     TALK_GENERATE_PROMPT: str = (
         "You write the final text the user has just discussed with you by voice. "
         "The conversation is the brief: honour every instruction, fact and "
@@ -669,8 +727,25 @@ def _build_config() -> Config:
             overrides["TALK_TURN_MODEL"] = str(talk[legacy]).strip()
     if "speak_replies" in talk:
         overrides["TALK_SPEAK_REPLIES"] = bool(talk["speak_replies"])
+    if str(talk.get("engine", "")).strip():
+        overrides["TALK_ENGINE"] = str(talk["engine"]).strip().lower()
+    if str(talk.get("realtime_model", "")).strip():
+        overrides["TALK_REALTIME_MODEL"] = str(talk["realtime_model"]).strip()
+    if str(talk.get("realtime_voice", "")).strip():
+        # Lowercased: the API rejects "Echo", and a config file is typed by hand.
+        overrides["TALK_REALTIME_VOICE"] = str(talk["realtime_voice"]).strip().lower()
+    if str(talk.get("realtime_transcribe", "")).strip():
+        overrides["TALK_REALTIME_TRANSCRIBE"] = str(talk["realtime_transcribe"]).strip()
+    if "barge_in" in talk:
+        overrides["TALK_BARGE_IN"] = bool(talk["barge_in"])
+    if "barge_in_ms" in talk:
+        overrides["TALK_BARGE_IN_MS"] = int(talk["barge_in_ms"])
+    if "barge_in_keep" in talk:
+        overrides["TALK_BARGE_IN_KEEP"] = float(talk["barge_in_keep"])
     if str(talk.get("system_prompt", "")).strip():
         overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
+    if "instructions" in talk:
+        overrides["TALK_INSTRUCTIONS"] = str(talk["instructions"]).strip()
     if str(talk.get("generate_prompt", "")).strip():
         overrides["TALK_GENERATE_PROMPT"] = str(talk["generate_prompt"]).strip()
 
@@ -683,6 +758,8 @@ def _build_config() -> Config:
         overrides["TERMINAL_CACHE_TTL"] = float(clip["terminal_cache_ttl"])
 
     models = data.get("models", {})
+    if "provider" in models:
+        overrides["AI_PROVIDER"] = str(models["provider"])
     if "chat" in models:
         overrides["MODEL_CHAT"] = str(models["chat"])
     if "vision" in models:
@@ -695,6 +772,8 @@ def _build_config() -> Config:
         overrides["OVERLAY_WIDTH"] = int(overlay["width"])
     if "height" in overlay:
         overrides["OVERLAY_HEIGHT"] = int(overlay["height"])
+    if "chat_auto_hide" in overlay:
+        overrides["CHAT_AUTO_HIDE_SEC"] = int(overlay["chat_auto_hide"])
 
     hotkeys = data.get("hotkeys", {})
     if hotkeys:

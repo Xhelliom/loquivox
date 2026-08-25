@@ -20,8 +20,8 @@ from __future__ import annotations
 from typing import Optional
 
 import loquivox.config as config_module
-from loquivox.api import get_client
 from loquivox.decorators import safe_execute
+from loquivox.state import STATE
 
 # System prompt per refinement level (1-4); level 0 = off (no call). Each insists
 # on returning ONLY the resulting text so the output can be typed verbatim. They
@@ -140,14 +140,15 @@ class PostProcessor:
     @staticmethod
     @safe_execute("PostProcess")
     def _run(text: str, system_prompt: str) -> Optional[str]:
-        response = get_client().chat.completions.create(
-            model=config_module.CFG.MODEL_CHAT,
-            messages=[
+        # Same provider/model as every other completion (see AIService._complete).
+        from loquivox.services.ai import AIService
+        out = (AIService._complete(
+            [
                 {"role": "system", "content": system_prompt + _GUARD + _PRESERVE},
                 {"role": "user", "content": f"<text>{text}</text>"},
             ],
-        )
-        out = (response.choices[0].message.content or "").strip()
+            STATE.ai_chat_model,
+        ) or "").strip()
         return out or None
 
     @classmethod

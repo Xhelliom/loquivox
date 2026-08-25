@@ -17,6 +17,7 @@ warnings.filterwarnings("ignore", message=".*Specified provider 'CUDAExecutionPr
 from loquivox.config import CFG, HOTKEY_DESCRIPTIONS
 from loquivox.handlers.keyboard import KeyboardHandler
 from loquivox.secrets import load_secrets
+from loquivox.state import STATE
 from loquivox.ui.hotkey_bar import HotkeyBar
 from loquivox.ui.tray import TrayManager
 
@@ -34,7 +35,8 @@ def main() -> None:
         desc = HOTKEY_DESCRIPTIONS.get(mode_id, "Unknown Mode")
         print(f" {i}. {label:<13}: {desc}")
         i += 1
-    print(f"\n🧠 Chat {CFG.MODEL_CHAT} · Vision {CFG.MODEL_VISION}")
+    print(f"\n🧠 {STATE.ai_provider}: chat {STATE.ai_chat_model} · "
+          f"vision {STATE.ai_vision_model}")
     print("📌 System tray icon active")
 
     # Start keyboard listener in background thread

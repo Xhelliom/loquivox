@@ -1,15 +1,19 @@
 """
-Groq API client — lazily initialized, thread-safe.
+Chat/vision API clients — lazily initialized, thread-safe.
 
-The client is created on first use (not at import time) so a missing
-GROQ_API_KEY no longer crashes the whole service at startup: the tray stays
-up and the error surfaces when transcription/AI is actually invoked.
+Clients are created on first use (not at import time) so a missing key no
+longer crashes the whole service at startup: the tray stays up and the error
+surfaces when transcription/AI is actually invoked.
+
+Groq is the default provider; OpenAI speaks the same chat-completions dialect,
+so ``get_ai_client()`` returns whichever one the user picked and the callers in
+``services/ai.py`` stay identical either way.
 """
 from __future__ import annotations
 
 import os
 import threading
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from groq import Groq
 
@@ -46,3 +50,32 @@ def get_client() -> Groq:
                     )
                 _client = Groq(api_key=api_key)
     return _client
+
+
+_ai_clients: Dict[str, Any] = {}
+
+
+class OpenAIKeyMissing(RuntimeError):
+    """Raised when OPENAI_API_KEY is unset and the OpenAI client is needed."""
+
+
+def get_ai_client(provider: str):
+    """
+    The chat/vision client for ``provider`` ("groq" or "openai"), cached.
+
+    Both SDKs expose the same ``chat.completions.create`` and ``models.list``,
+    which is why the AI service never has to know which one it holds.
+    """
+    if provider != "openai":
+        return get_client()
+    with _lock:
+        client = _ai_clients.get("openai")
+        if client is None:
+            api_key = os.environ.get("OPENAI_API_KEY")
+            if not api_key:
+                raise OpenAIKeyMissing(
+                    "OPENAI_API_KEY is not set — add it in Settings → API Keys."
+                )
+            from openai import OpenAI
+            client = _ai_clients["openai"] = OpenAI(api_key=api_key)
+        return client

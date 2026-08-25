@@ -69,9 +69,15 @@ class OpenAIRealtimeSession(StreamingSession):
     def _supports_turn_detection(model: str) -> bool:
         """
         False for the models the API rejects any turn_detection config on — it
-        must be omitted or null there (gpt-realtime-whisper and friends).
+        must be omitted or null there.
+
+        These are exactly the models that transcribe *while* you speak: the
+        4o family only emits its deltas once the buffer is committed, so a
+        server-closed turn and a live transcript are mutually exclusive. Talk
+        mode covers the gap with the local detector.
         """
-        if "whisper" in (model or "").lower():
+        name = (model or "").lower()
+        if "whisper" in name or "live" in name:
             print(f"ℹ️  {model} takes no server-side turn detection — "
                   "talk mode will use the local detector")
             return False
@@ -101,7 +107,10 @@ class OpenAIRealtimeSession(StreamingSession):
         try:
             self._loop.run_until_complete(self._session())
         except Exception as e:
-            self._error = e
+            # close() stops the loop under our feet on purpose — the teardown
+            # error that follows is not a transcription failure.
+            if not self._stop:
+                self._error = e
             self._ready.set()
         finally:
             self._finished.set()
@@ -140,9 +149,14 @@ class OpenAIRealtimeSession(StreamingSession):
                 self._ready.set()
                 async for event in conn:
                     if self._handle_event(event):
+                        # Release finish() here, not after the `async with`
+                        # exits: the websocket close handshake takes ~2s more,
+                        # and the transcript is already in hand.
+                        self._finished.set()
                         break
         except Exception as e:
-            self._error = e
+            if not self._stop:
+                self._error = e
             self._ready.set()
 
     def _handle_event(self, event) -> bool:
@@ -194,18 +208,23 @@ class OpenAIRealtimeSession(StreamingSession):
             # turn — committing again is an error. Just let the transcript of
             # the last chunk land, then join everything said this turn.
             self._await_segment(timeout)
+            error, text = self._error, (" ".join(self._segments).strip()
+                                        or self._interim.strip())
             self.close()
-            if self._error:
-                raise BackendUnavailable(f"OpenAI Realtime error: {self._error}")
-            return " ".join(self._segments).strip() or self._interim.strip() or None
+            if error:
+                raise BackendUnavailable(f"OpenAI Realtime error: {error}")
+            return text or None
         if self._conn is not None:
             self._submit(self._commit())
         # Wait for the .completed event (which ends the loop) or timeout.
         self._finished.wait(timeout)
+        # Read before close(): stopping the loop can raise in the session
+        # thread, and that late error must not shadow a good transcript.
+        error, text = self._error, (self._final or self._interim).strip()
         self.close()
-        if self._error:
-            raise BackendUnavailable(f"OpenAI Realtime error: {self._error}")
-        return (self._final or self._interim).strip() or None
+        if error:
+            raise BackendUnavailable(f"OpenAI Realtime error: {error}")
+        return text or None
 
     def _await_segment(self, timeout: float, grace: float = 0.4) -> None:
         """
@@ -227,7 +246,24 @@ class OpenAIRealtimeSession(StreamingSession):
             time.sleep(0.05)
 
     def close(self) -> None:
+        """
+        Let the session wind down; force it only if it does not.
+
+        The transcript is already in hand, and the websocket close handshake
+        takes ~2s that nothing waits for — so it runs on, on its own thread.
+        Stopping the loop from under it is what filled the log with "Task was
+        destroyed but it is pending"; the timer is the backstop for a session
+        that never gets there.
+        """
         self._stop = True
+        if self._loop.is_closed():
+            return
+        timer = threading.Timer(5.0, self._force_stop)
+        timer.daemon = True
+        timer.start()
+
+    def _force_stop(self) -> None:
+        """Last resort: a loop still running long after we stopped caring."""
         if not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 

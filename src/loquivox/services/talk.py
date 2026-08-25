@@ -36,7 +36,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.ai import AIService
@@ -44,6 +44,9 @@ from loquivox.services.ai import AIService
 #: what the model appends to its reply to hand the floor to the writing phase
 FINISH_MARKER: str = "[[WRITE]]"
 _MARKER_RE = re.compile(r"\[\[\s*WRITE\s*\]\]", re.IGNORECASE)
+#: the marker still being typed at the end of a streamed answer — it must
+#: never flash on screen on its way to being complete
+_PARTIAL_MARKER_RE = re.compile(r"\[\[?\s*W?R?I?T?E?\s*\]?\]?$", re.IGNORECASE)
 
 #: how insistently the assistant digs, appended to the system prompt
 _DEPTH_PROMPTS: Dict[str, str] = {
@@ -66,8 +69,9 @@ _DEPTH_PROMPTS: Dict[str, str] = {
 #: exists once and the four combinations can't drift apart.
 _MARKER_RULE: str = (
     "Reply with one short confirmation sentence and end that reply with the "
-    f"exact marker {FINISH_MARKER}. When in doubt, ask one more question "
-    "instead — emit the marker for no other reason."
+    f"exact marker {FINISH_MARKER}. Never put the marker in a reply that asks "
+    "a question: asking and finishing are opposites. When in doubt, ask one "
+    "more question instead — emit the marker for no other reason."
 )
 _NO_FINISH: str = (
     "The user ends the briefing with a key press, which you never see. Never "
@@ -101,6 +105,26 @@ def _finish_prompt(on_phrase: bool, by_model: bool) -> str:
         parts.append(_ONLY_MODEL)
     parts.append(_MARKER_RULE)
     return " ".join(parts)
+
+
+def _strip_marker(answer: str) -> str:
+    """The answer without its end-of-briefing marker, complete or half-typed."""
+    return _PARTIAL_MARKER_RE.sub("", _MARKER_RE.sub("", answer)).strip()
+
+
+def ends_briefing(answer: str) -> bool:
+    """
+    True when a reply really hands the floor to the writing phase.
+
+    The marker alone is not enough: a model that asks a question *and* appends
+    it is saying two contradictory things, and only one of them can be true —
+    a briefing where the assistant is still waiting for an answer is not over.
+    gpt-oss-120b does this on its very first question, which ended the
+    conversation after one exchange, so the question wins.
+    """
+    if not _MARKER_RE.search(answer):
+        return False
+    return "?" not in _MARKER_RE.sub("", answer)
 
 
 def _normalize(text: str) -> str:
@@ -179,9 +203,10 @@ class TalkSession:
     @staticmethod
     def system_prompt() -> str:
         """
-        The conversation-phase prompt: the configured base, plus how deep to dig
-        (``TALK_DEPTH``) and who may end the briefing (``TALK_FINISH_ON_PHRASE``
-        and ``TALK_FINISH_BY_MODEL``, independently).
+        The conversation-phase prompt: the configured base, the user's own
+        standing instructions (``TALK_INSTRUCTIONS`` — persona, language, tone),
+        how deep to dig (``TALK_DEPTH``) and who may end the briefing
+        (``TALK_FINISH_ON_PHRASE`` and ``TALK_FINISH_BY_MODEL``, independently).
 
         The clauses are appended rather than baked in so a user who overrides
         ``system_prompt`` in config.toml still gets the marker protocol — without
@@ -189,12 +214,18 @@ class TalkSession:
         """
         cfg = config_module.CFG
         parts = [cfg.TALK_SYSTEM_PROMPT]
+        if cfg.TALK_INSTRUCTIONS.strip():
+            # Before the protocol clauses, not after: the user sets the persona,
+            # the language and the tone — not whether the marker exists.
+            parts.append("Standing instructions from the user. They override the "
+                         "style guidance above:\n" + cfg.TALK_INSTRUCTIONS.strip())
         parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
         parts.append(_finish_prompt(bool(cfg.TALK_FINISH_ON_PHRASE),
                                     bool(cfg.TALK_FINISH_BY_MODEL)))
         return "\n\n".join(part for part in parts if part)
 
-    def reply(self, text: str) -> Optional[TalkReply]:
+    def reply(self, text: str,
+              on_delta: Optional[Callable[[str], None]] = None) -> Optional[TalkReply]:
         """
         Add the user's spoken turn and return the assistant's spoken reply.
 
@@ -203,20 +234,40 @@ class TalkSession:
         way, so nothing said is lost from the brief. ``TalkReply.done`` is the
         model handing the floor to the writing phase — the marker that carried
         it is stripped here, so it reaches neither the speakers nor the history.
+
+        ``on_delta`` receives the answer as it is written, for a caller showing
+        it live. It is handed the same stripped text the reply ends up with:
+        the end-of-briefing marker is an instruction to this module, and a
+        half-typed one must not flash on screen on its way to being complete.
         """
         self.add_user(text)
         answer = AIService.complete(
             [{"role": "system", "content": self.system_prompt()}]
             + self._context_messages()
-            + self.turns
+            + self.turns,
+            on_delta=None if on_delta is None
+            else lambda t: on_delta(_strip_marker(t)),
         )
         if not answer:
             return None
-        done = bool(_MARKER_RE.search(answer))
-        clean = _MARKER_RE.sub("", answer).strip()
+        done = ends_briefing(answer)
+        clean = _strip_marker(answer)
         if clean:
             self.turns.append({"role": "assistant", "content": clean})
         return TalkReply(clean, done)
+
+    def mark_interrupted(self) -> None:
+        """
+        Note that the user talked over the last reply, so the model does not
+        carry on as though the whole of it had been heard — it would otherwise
+        insist on a question that never reached the room.
+
+        ponytail: the marker, not a truncation. Cutting the text at what was
+        actually spoken would mean mapping words to playback time, and the
+        model only needs to know it was cut off, not exactly where.
+        """
+        if self.turns and self.turns[-1]["role"] == "assistant":
+            self.turns[-1]["content"] += " …[cut off by the user]"
 
     def generate(self) -> Optional[str]:
         """
@@ -255,6 +306,13 @@ if __name__ == "__main__":
     # A sentence ABOUT the text is not an order to write it.
     assert not user_said_done("quand j'ai fini le rapport je te l'envoie, c'est bon")
     assert not user_said_done("")
+
+    # The marker only ends the briefing when the reply is not still asking.
+    assert ends_briefing("D'accord, je rédige. [[WRITE]]")
+    assert not ends_briefing("Quelle était la date prévue ? [[WRITE]]"), \
+        "a question that ends the conversation after one exchange"
+    assert not ends_briefing("Pour qui est ce texte ?")
+    assert not ends_briefing("D'accord, je rédige.")
 
     assert _MARKER_RE.search("D'accord, je rédige. [[WRITE]]")
     assert _MARKER_RE.search("ok [[ write ]]")          # tolerant to spacing/case
