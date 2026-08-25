@@ -73,7 +73,7 @@ backend = "whispercpp"          # 100% local — nothing leaves your machine
 whispercpp_model = "large-v3-turbo"
 ```
 
-Or select it in **Settings → Transcription**. Set `backend = "auto"` to prefer the cloud when
+Or select it in **Settings → Models**. Set `backend = "auto"` to prefer the cloud when
 a key is available and fall back to the local engine otherwise — the local engine is also the
 automatic **fallback** (`fallback = "whispercpp"`) whenever the cloud backend fails: no
 network, no key, API error.
@@ -91,8 +91,11 @@ network, no key, API error.
 > [!IMPORTANT]
 > **Scope of the offline mode today:** local execution covers *speech-to-text*, which is what
 > dictation needs — so **dictation works fully offline**. The AI features (chat, rewrite,
-> vision, TTS, and the optional dictation refinement) still call **Groq Cloud** and require
-> `GROQ_API_KEY`. Pointing them at a self-hosted chat model is not supported yet.
+> vision and the optional dictation refinement) call a cloud provider: **Groq** or
+> **OpenAI**, picked in Settings → Models. Pointing them at a self-hosted chat model is
+> not supported yet. The voice is the exception — Settings → Models offers OpenAI's
+> multilingual voices (`OPENAI_API_KEY`, Groq's Orpheus only speaks English) and
+> **Piper**, which speaks French on your machine with no key and no network.
 
 ---
 
@@ -129,6 +132,33 @@ Press `F6` and just talk — no key to hold. The assistant answers out loud (two
 never more) and you keep going: it asks who the text is for, what tone you want, what must
 absolutely be in it. When you're done briefing it, press `Enter` — and the entire conversation
 becomes **one finished text**, ready to paste.
+
+**Two ways to hold the conversation**, in Settings → Models. *Cascade* chains
+transcription, the chat model and the voice — every one of which can run on your
+machine — and answers in about 1.8 s. *Realtime* hands the whole conversation to
+one OpenAI model that hears and answers directly: about 1.0 s, and it keeps the
+prosody of speech. Either way, the text it writes at the end comes from your
+chosen chat model. Presets pick a whole setup in one click, including a **fully
+local voice** (Piper, no key, no network, first sample in 0.2 s).
+
+**You can watch it happen.** A bubble opens on the hotkey, just above the recording
+indicator: your words appear as they are heard, the reply as it is written — sentence by
+sentence, not in one block when the model has finished thinking. It grows and shrinks with
+the exchange, stays translucent enough to read what is behind it, and closes with the ✕
+(the pin hotkey brings it back). Live text needs a streaming transcription backend; with a
+batch one your turn simply appears when you finish it.
+
+**Tell it how to talk to you.** Settings → Talk has an *Instructions* box for the standing
+things: the language to answer in, the tone, the kind of work you usually discuss. It is
+added to the built-in prompt rather than replacing it, so the conversation still asks one
+question at a time and still knows when to stop.
+
+**Cut it off whenever you like.** Start talking while it is still speaking and it
+stops mid-sentence and listens — your first words are kept as the start of your turn,
+not lost to the interruption. It works out how loudly it can hear itself by listening
+to its own reply, so a headset needs no setting at all; on speakers with the volume up,
+`libpipewire-module-echo-cancel` keeps it from cutting itself off. Turn it off with
+`barge_in = false`.
 
 **It listens like an editor, not a dictaphone.** What it gets is a *transcript* —
 spoken language that wanders, backtracks, and where the recognizer mishears a name or a

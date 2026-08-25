@@ -76,9 +76,18 @@ target_language = "en"
 format = false
 
 [models]
-# Groq chat / vision / TTS model ids.
-chat = "llama-3.3-70b-versatile"
-vision = "meta-llama/llama-4-scout-17b-16e-instruct"
+# Chat / vision provider: "groq" (default) or "openai" — both speak the same
+# chat-completions API, and each uses its own key. Pick it, and the two model
+# ids, in Settings → Models (stored in settings.json); these are only defaults.
+provider = "groq"
+# Groq chat / vision model ids, and the default TTS engine.
+# TTS is picked in Settings → Models (stored in settings.json); this is only the
+# default. "canopylabs/orpheus-v1-english" speaks English via Groq (accept its
+# terms on console.groq.com first), "gpt-4o-mini-tts" is multilingual and speaks
+# French via OPENAI_API_KEY, and "piper" runs locally with no key at all
+# (pip install -e '.[tts]'; the voice is fetched once, ~60 MB).
+chat = "openai/gpt-oss-120b"
+vision = "qwen/qwen3.6-27b"
 tts = "canopylabs/orpheus-v1-english"
 
 [clipboard]
@@ -166,8 +175,47 @@ finish_by_model = false    # the assistant ends it once it has enough context
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.
 review_timeout = 120.0
+# Standing instructions for the conversation: the language to speak, the
+# persona, the tone, the kind of work you usually discuss. ADDED to the
+# built-in prompt, never replacing it, so talk mode keeps asking one question
+# at a time and keeps knowing when to stop. Both engines read it. Editable in
+# Settings → Talk. Use system_prompt below instead to replace the base outright.
+# instructions = """
+# Tu réponds toujours en français, simplement et sans formalisme.
+# Le contexte est technique : sois précis, et demande une précision plutôt que
+# de deviner. Les seuls mots anglais sont les termes techniques.
+# """
+
+# How the conversation is held:
+#   "cascade"  — transcribe → answer → speak. Four swappable slots (any of them
+#                local), the local turn detector, ~1.8s before you hear a reply.
+#   "realtime" — one OpenAI Realtime session, speech in and speech out: the
+#                server owns turn-taking and interruptions, ~1.0s, and the reply
+#                keeps the prosody of speech. The [models] chat model no longer
+#                answers in talk mode (it still writes the final text).
+engine = "cascade"
+# Only read when engine = "realtime".
+realtime_model = "gpt-realtime-2.1"
+realtime_voice = "marin"
+realtime_transcribe = "gpt-4o-mini-transcribe"
+
 # Read the assistant's spoken replies aloud even when TTS is toggled off.
 speak_replies = true
+
+# Barge-in: speaking over a reply cuts it off and starts your next turn, the
+# way it works with a person. The detector arms on the first sample that
+# actually reaches the speakers, so it calibrates on the reply's own echo and
+# sits above it — on a headset there is nothing to calibrate against and it
+# stays at [talk] threshold. With speakers, no echo cancellation and the volume
+# up, a reply can still cut itself off: use a headset, or PipeWire's
+# libpipewire-module-echo-cancel in monitor mode.
+barge_in = true
+# Speech needed before a reply is cut off (ms) — long enough that a cough or a
+# key click is not an interruption. Raise it if the assistant is too jumpy.
+barge_in_ms = 400
+# How much of what was heard is kept as the start of the next turn (seconds):
+# the words spoken over the reply must not be lost.
+barge_in_keep = 1.5
 
 # Screen context: a screenshot taken when the session starts, described once by
 # the vision model and handed to the conversation. Most of what you are about
@@ -197,3 +245,8 @@ screenshot_max_px = 1280
 # Recording overlay size in pixels.
 width = 220
 height = 60
+# Seconds an AI answer stays on screen before the chat overlay fades out. It
+# never fades while the overlay is pinned (F9), while you are typing in it, or
+# during a talk session — a generated text starts its countdown once it is
+# actually shown. Raise it if answers vanish before you have read them.
+chat_auto_hide = 3

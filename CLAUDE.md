@@ -65,13 +65,17 @@ platform/         Session detect + backend factory; X11 (xdotool/xclip/gnome-scr
                   vs Wayland (wtype/wl-clipboard/grim). base.py = ABCs.
 transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
                   groq, whispercpp (local), deepgram, openai_realtime; streaming.py
-services/         audio (record+transcribe), ai (chat+vision), tts (Orpheus),
+services/         audio (record+transcribe), ai (chat+vision), tts (engine per
+                  CFG.TTS_ENGINES: Groq Orpheus EN / OpenAI multilingual /
+                  Piper local via tts_piper.py), realtime_talk (speech-to-speech
+                  talk mode),
                   clipboard, image, postprocess (LLM refinement of dictation),
                   talk (conversation → one text), vad (energy trigger),
                   turn_detector (Smart Turn v3 semantic end-of-turn)
 managers/         history, chat (overlay state + auto-hide), overlay (recording indicator)
 ui/               recording_overlay, chat_overlay (WebKit2; voice + typed input via
-                  JS→Python `signal` IPC → ModeHandler.submit_text_chat), settings_dialog, tray,
+                  JS→Python `signal` IPC → ModeHandler.submit_text_chat; doubles
+                  as the talk bubble, see below), settings_dialog, tray,
                   hotkey_bar (top-edge tab that expands on hover into the hotkey list)
 handlers/         mode.py (routes a transcript per mode), keyboard.py (evdev listener)
 ```
@@ -88,7 +92,26 @@ applies stale-guard + hallucination-guard, then dispatches to
 
 A whole conversation, not a single utterance — so it does NOT use the
 `process_audio_async` → `process()` path. `KeyboardHandler._on_press("talk")`
-spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
+spawns `ModeHandler._talk_worker`, which owns everything until the session ends.
+
+**Two engines, one promise** (`CFG.TALK_ENGINE`, dispatched in
+`_talk_conversation`): a conversation you can interrupt.
+- `cascade` (default) — STT → LLM → TTS, described below. Four slots, each
+  local or cloud: transcription (`transcription/`), turn detection
+  (`services/turn_detector.py`), the LLM (`api.get_ai_client`), the voice
+  (`CFG.TTS_ENGINES`). ~1.8s before you hear a reply.
+- `realtime` — `services/realtime_talk.py`: one OpenAI Realtime session holds
+  the whole conversation, speech in and speech out. The server owns turn-taking
+  AND interruption; ~1.0s, and the reply keeps the prosody of speech. What is
+  lost is the choice of LLM. Anything that stops it opening falls back to the
+  cascade.
+
+Either way the turns land in the same `TalkSession`, because the writing pass
+is a text completion that never learns which engine ran. That is the whole
+reason the split works: Loquivox produces a *text*, so only the conversation
+half is interchangeable.
+
+The cascade, step by step:
 
 0. If `CFG.TALK_SCREENSHOT`, `_talk_capture_screen` spawns a worker that
    captures the screen (optionally cropped around the pointer via
@@ -104,15 +127,18 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends:
    across a network call: a hung request would freeze the user's keyboard.
 2. Each turn: `_talk_listen` records until the turn ends (see below),
    `_talk_transcribe` transcribes (streaming backends included) and applies the
-   hallucination guard, `TalkSession.reply` answers, and the reply is spoken
-   with `wait=True` — blocking is deliberate, the next turn must not record the
-   assistant's own voice.
+   hallucination guard, `TalkSession.reply` answers, and `_talk_speak` speaks
+   the reply — blocking on purpose, the next turn must not record the
+   assistant's own voice — while listening for the user cutting in.
 3. The briefing ends on Enter, on a short spoken "j'ai fini" (`user_said_done`,
    matched on the transcript before any API call), or on the model appending
    its `[[WRITE]]` marker. `CFG.TALK_FINISH_ON_PHRASE` and
    `CFG.TALK_FINISH_BY_MODEL` toggle those two independently (the key is never
    a toggle); `TalkSession.system_prompt()` appends the protocol clause for that
-   pair, so an overridden `system_prompt` still carries it. The marker is
+   pair — after `CFG.TALK_INSTRUCTIONS`, the user's own persona/language
+   instructions from Settings → Talk, which are *added* to the base prompt
+   rather than replacing it — so neither an overridden `system_prompt` nor a
+   set of instructions can drop the protocol. The marker is
    stripped before the reply is spoken, shown or stored.
 4. `_talk_generate` turns the conversation into one text and shows it in the
    review panel; `_deliver_talk_text` types it (accept only) and leaves it on
@@ -122,6 +148,80 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 — a long spoken briefing must not pollute the F4 chat context. `STATE.vad` is the
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
+
+### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
+
+The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`
+re-anchors the same window rather than opening a second one, so the WebView,
+its page and the conversation on it all survive the switch. In talk mode it
+sits centred just above the recording overlay (bottom-anchored: it grows
+upwards, so the newest line never moves), takes its height from its content
+via a `ResizeObserver` → `{action:'Resize'}` → `_apply_height`, drops the input
+bar (the keyboard is grabbed anyway) and shows the session's own keys.
+
+`ChatManager.set_talk(True)` opens it on the hotkey, before the first word.
+The turn in progress is written into a `#live` node by `set_live()` →
+`run_javascript`, NEVER by re-rendering: `update_content` reloads the whole
+page, which would restart every animation and lose the scroll position. A real
+message reloads the page and the live node disappears with it, which is how it
+is cleared. Updates are throttled in `ChatManager.stream` (each one carries the
+whole turn, so dropping one is free) and deferred until `load-changed` reports
+FINISHED, keeping only the last.
+
+Both halves are live: the transcript through `AudioService._on_partial` (so it
+needs a streaming backend — with a batch one the user's turn only appears when
+it is over), and the reply through `AIService.complete(..., on_delta=)` in the
+cascade or the server's `*_transcript.delta` events in Realtime. A half-typed
+`[[WRITE]]` must never flash on screen — `_strip_marker` handles the partial
+form, and there is a self-check for it.
+
+`set_talk(True)` also calls `ChatManager.clear()`: a session opens on an empty
+bubble, because reading the previous conversation's turns as this one's is the
+whole confusion. It clears what is on screen only — `answer_history` and the
+models' own histories belong to `HistoryManager`, which now routes its own
+reset through the same `clear()`.
+
+The end-of-session review lives in the bubble too, not in the Cairo AI panel:
+`ChatManager.set_result()` adds a message with `role="result"`, which `role`
+turns into a CSS class like any other, so the markdown rendering and the copy
+button come for free and only the styling is new. It replaces the previous
+candidate rather than stacking (R rewrites in place). The key line under it is
+`review_hint_line()` from `recording_overlay.py` — one definition, read by that
+panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
+recording overlay while reviewing: its hint strip names the conversation's
+keys, which are not the ones that apply then.
+
+The ✕ on it calls `ChatManager.hide_manual`, which is deliberately stronger
+than the auto-hide (that one refuses to fire while pinned, typed into or
+mid-conversation — exactly when someone reaches for the close button). It sets
+`STATE.chat_hidden`, which `_show_overlay` honours; the pin hotkey or the next
+talk session clears it.
+
+### Barge-in (`_talk_speak`)
+
+Talking over a reply cuts it off, the way one does with a person. While the
+reply plays, the microphone stays open with `start_recording(stream=False)` —
+captured, never transcribed: sending the reply's own echo to an API would be
+wrong and paid for. `TTSService.speak` takes two events: `stop` (set on an
+interruption, and the PCM stream calls `abort()`, not `stop()`, so what is
+still in the sound card is *not* drained) and `started`, set on the first
+sample that actually reaches the speakers.
+
+`started` is the whole anti-echo mechanism: the VAD is armed on it, so its
+calibration window measures the reply's own echo and the activation level lands
+above whatever the speakers leak back into the microphone. On a headset there is
+nothing to leak and it stays at the plain threshold — which is why there is no
+"do you wear headphones" setting. With the volume up and no echo cancellation a
+reply can still cut itself off; the fix is a headset or PipeWire's
+`libpipewire-module-echo-cancel` in monitor mode.
+
+What was heard when the user cut in is not thrown away: `snapshot_tail` keeps
+`TALK_BARGE_IN_KEEP` seconds and hands them to the next `_talk_listen` as its
+`prefix`, which seeds the recording buffer (the audio callback replays it into
+the live session, see `STATE.stream_fed`) and primes the VAD — a turn that
+begins mid-sentence has no quiet room to calibrate on, and no priming would
+mean waiting out the whole `TALK_IDLE_TIMEOUT`. `TalkSession.mark_interrupted`
+appends a marker so the model does not carry on as though all of it was heard.
 
 ### How a turn ends (three layers, in priority order)
 
@@ -136,6 +236,22 @@ guards against a second session. Knobs live under `[talk]` in config.toml.
    `TALK_TURN_MAX_SILENCE_MS`.
 3. **Silence** — no onnxruntime / no model / `semantic_turns = false`: the
    `TALK_VAD_SILENCE_MS` pause ends the turn, as it always did.
+
+Underneath all three sits the energy VAD's activation level, and two rules keep
+it honest — both fixing the same failure, where the level ends up calibrated on
+speech and the rest of the turn then reads as silence (the turn never ends, or
+`TALK_TURN_MAX_SILENCE_MS` cuts it mid-sentence):
+
+- **Armed before the session opens.** `AudioService.start_recording` takes a
+  `detector` factory and installs it itself, between starting the microphone
+  and opening the live transcription session — that open costs ~1s on a cloud
+  backend, and a detector armed after it begins calibrating a second into a
+  sentence the user started immediately.
+- **A ceiling on calibration.** `VoiceActivityDetector.max_level` caps what
+  400 ms of listening may conclude (`CALIBRATION_MAX_GAIN` × threshold): a room
+  is never as loud as the voice in it. The level may then only come back down,
+  so one real pause repairs a bad guess. `math.inf` opts out — the barge-in
+  detector in `_talk_speak` calibrates on the assistant's echo on purpose.
 
 Every layer degrades to the next one; a missing model is a printed warning, never
 an error. `services/_whisper_features.py` is vendored from Pipecat (BSD-2) — keep
@@ -161,6 +277,12 @@ it in sync with upstream instead of editing it.
   `~/.config/loquivox/settings.json` via `SettingsManager` in `state.py`.
 - Transcription settings apply live (dispatcher reconfigured); some startup-only
   settings (e.g. overlay size) need a restart — see `reload_config()` docstring.
+- Settings → **Models** is the one tab for *who does the work*, in the order the
+  sound travels: presets → conversation engine → transcription → chat/vision →
+  voice. A preset writes several of those at once (config.toml *and*
+  settings.json), so `_refresh_engine_widgets` puts every combo back in step —
+  and it must read `config_module.CFG`, since `reload_config()` rebinds the
+  singleton the module-level `CFG` import no longer points at.
 
 ## Transcription backends
 
