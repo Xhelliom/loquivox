@@ -116,13 +116,59 @@ half is interchangeable.
 
 The cascade, step by step:
 
-0. If `CFG.TALK_SCREENSHOT`, `_talk_capture_screen` spawns a worker that
-   captures the screen (optionally cropped around the pointer via
-   `ScreenshotBackend.pointer_position`, always downscaled by `ImageService`),
-   has the vision model describe it once, and hands the text to
-   `TalkSession.set_context`. It runs beside the first turn on purpose — waiting
-   for it would delay the microphone — so the recording overlay may be in the
-   shot and the prompt tells the model to ignore it.
+0. If `CFG.TALK_SCREENSHOT` (off by default — it uploads a window), `_talk_look`
+   spawns `_talk_screen_worker`: it captures, has the vision model describe it
+   once, and hands the text to `TalkSession.set_context`. It runs beside the
+   first turn on purpose — waiting for it would delay the microphone — so the
+   recording overlay may be in the shot and the prompt tells the model to
+   ignore it. **S** during a conversation calls `_talk_look` again (both
+   engines), replacing a description that has gone stale; the key exists only
+   while the capture is enabled, and `KeyboardHandler.talk_hints()` is built
+   from the same condition so the strip can never offer a dead key.
+
+   **Framing is the whole ballgame, and `max_px` is not the knob.** The
+   provider gives an image a fixed token budget whatever its size — measured on
+   Groq, 898 prompt tokens for the same capture at 640, 1280 and 2048 — so a 4K
+   desktop squeezed into it comes back as fluent, confident invention, while
+   one window of it reads correctly at the same budget and the same model.
+   Hence `TALK_SCREENSHOT_REGION = "window"` by default, served by
+   `ScreenshotBackend.take_window_screenshot` (niri's own IPC on Wayland,
+   `gnome-screenshot -w` on X11) and falling back to the whole screen, out
+   loud, wherever that is not available. `"cursor"` still exists for X11 and
+   Hyprland, where `pointer_position` can answer.
+
+   niri's action also always copies the shot to the clipboard with no flag to
+   skip it. `TALK_SCREENSHOT_RESTORE_CLIPBOARD` puts the old *text* back and is
+   off by default: the session ends by leaving its generated text there anyway,
+   so the only loss is something from a minute ago. Whether that matters is the
+   user's call, not a default's — like every knob on this feature, it is in
+   Settings → Talk.
+
+   Two traps live here. niri's screenshot action returns *before* the PNG is on
+   disk (rc=0 at 39 ms, the file at 100 ms), so `_wait_for_png` polls for the
+   IEND chunk — checking the size settles instead would hand over a half-written
+   capture whenever the writer pauses, and returning on the exit code alone
+   reads as "this session cannot frame a window" and silently falls back. And a
+   reasoning vision model can spend its entire completion budget thinking and
+   answer with an empty string, which is NOT "nothing relevant on screen" —
+   they print differently on purpose, because conflating them hides the one
+   clue that the model is the problem. `qwen3.6-27b` did exactly that (~2000
+   invisible-but-billed tokens, then hallucinated content); `MODEL_VISION`
+   defaults to `qwen3.8-27b`, which answers in ~0.4s and says it cannot read
+   something rather than inventing it.
+
+   The description reaches the two engines differently, from one wording:
+   `TalkSession.context_clause()` is appended per call as a system message in
+   the cascade, and pushed into the Realtime session's `instructions` by
+   `RealtimeTalk.push_context()` — a partial `session.update`, so the voice and
+   turn detection survive it. That predicate is polled from the conversation
+   loop (the capture lands after the session opened) and tracks the pushed
+   *text*, not a flag: a flag would swallow every re-capture after the first.
+
+   Debugging: every step prints (`👁️  Screen context …`, with how long it
+   took), and `LOQUIVOX_KEEP_SCREENSHOT=1` writes `<path>.sent.png` — the bytes
+   actually uploaded, cropped and downscaled, which is the only artefact a
+   legibility problem shows up in. The raw capture never does.
 1. `GrabbedKeys` (keyboard.py) keeps the input devices open for the *entire*
    session — a key pressed while the model is thinking is still queued when the
    next wait starts — but takes the exclusive grab only inside

@@ -113,6 +113,7 @@ class SettingsDialog:
     _talk_instructions: Optional[Gtk.TextView] = None
     _talk_autopaste_check: Optional[Gtk.CheckButton] = None
     _talk_shot_check: Optional[Gtk.CheckButton] = None
+    _talk_shot_clip: Optional[Gtk.CheckButton] = None
     _talk_shot_region: Optional[Gtk.ComboBoxText] = None
     _talk_shot_cursor: Optional[Gtk.SpinButton] = None
     _talk_shot_max: Optional[Gtk.SpinButton] = None
@@ -1452,14 +1453,17 @@ class SettingsDialog:
         shot_note.set_line_wrap(True)
         shot_note.set_markup(
             "<small><i>Most of what you are about to dictate is already on your "
-            "screen. Captured once when the session starts, in parallel with your "
-            "first sentence, and described by the vision model — so your screen "
-            "leaves the machine. Off by default.</i></small>"
+            "screen. What gets captured is the <b>focused window</b> — the one "
+            "you are working in — taken when the session starts, in parallel "
+            "with your first sentence, and described by the vision model. Press "
+            "<b>S</b> during a conversation to look again once something has "
+            "changed. Off by default: that window leaves the machine each "
+            "time.</i></small>"
         )
         vbox.pack_start(shot_note, False, False, 0)
 
         cls._talk_shot_check = Gtk.CheckButton(
-            label="Send a screenshot as context when the session starts")
+            label="Let the assistant see what you are working in")
         cls._talk_shot_check.set_active(bool(config_module.CFG.TALK_SCREENSHOT))
         cls._talk_shot_check.connect("toggled", cls._on_talk_shot_toggled)
         vbox.pack_start(cls._talk_shot_check, False, False, 0)
@@ -1467,13 +1471,17 @@ class SettingsDialog:
         region_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         region_row.pack_start(cls._row_label("Capture:"), False, False, 0)
         cls._talk_shot_region = Gtk.ComboBoxText()
-        cls._talk_shot_region.append("screen", "The whole screen")
+        cls._talk_shot_region.append("window", "The focused window (recommended)")
         cls._talk_shot_region.append("cursor", "A box around the cursor (X11 / Hyprland)")
+        cls._talk_shot_region.append("screen", "The whole screen")
+        region = config_module.CFG.TALK_SCREENSHOT_REGION
         cls._talk_shot_region.set_active_id(
-            "cursor" if config_module.CFG.TALK_SCREENSHOT_REGION == "cursor" else "screen")
+            region if region in ("window", "cursor", "screen") else "screen")
         cls._talk_shot_region.set_tooltip_text(
-            "Wayland gives no way to locate the pointer, except on Hyprland — "
-            "elsewhere this falls back to the whole screen."
+            "Cropping is what makes the text readable: an image gets a fixed "
+            "token budget whatever its size, so a whole 4K desktop comes back "
+            "as confident nonsense. A session that cannot do the framing you "
+            "pick falls back to the whole screen and says so."
         )
         region_row.pack_start(cls._talk_shot_region, True, True, 0)
         vbox.pack_start(region_row, False, False, 0)
@@ -1495,6 +1503,18 @@ class SettingsDialog:
         )
         max_row.pack_start(cls._talk_shot_max, False, False, 0)
         vbox.pack_start(max_row, False, False, 0)
+
+        cls._talk_shot_clip = Gtk.CheckButton(
+            label="Put back what was on the clipboard afterwards")
+        cls._talk_shot_clip.set_active(
+            bool(config_module.CFG.TALK_SCREENSHOT_RESTORE_CLIPBOARD))
+        cls._talk_shot_clip.set_tooltip_text(
+            "Capturing a window copies the image to the clipboard on niri, "
+            "which has no way to skip it. Off by default — the session ends by "
+            "leaving its generated text there anyway, so the only loss is "
+            "whatever you had copied a minute ago. Text only."
+        )
+        vbox.pack_start(cls._talk_shot_clip, False, False, 0)
         cls._on_talk_shot_toggled(cls._talk_shot_check)
 
         apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -1560,7 +1580,8 @@ class SettingsDialog:
     def _on_talk_shot_toggled(cls, check: Gtk.CheckButton) -> None:
         """Grey out the framing controls while the capture itself is off."""
         active = bool(check.get_active())
-        for widget in (cls._talk_shot_region, cls._talk_shot_cursor, cls._talk_shot_max):
+        for widget in (cls._talk_shot_region, cls._talk_shot_cursor,
+                       cls._talk_shot_max, cls._talk_shot_clip):
             if widget is not None:
                 widget.set_sensitive(active)
 
@@ -1589,7 +1610,8 @@ class SettingsDialog:
                 "screenshot": screenshot,
                 "instructions": instructions,
                 "auto_paste": auto_paste,
-                "screenshot_region": cls._talk_shot_region.get_active_id() or "screen",
+                "screenshot_region": cls._talk_shot_region.get_active_id() or "window",
+                "screenshot_restore_clipboard": bool(cls._talk_shot_clip.get_active()),
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
             })

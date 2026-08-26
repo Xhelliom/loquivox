@@ -449,7 +449,7 @@ class ModeHandler:
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
         STATE.current_mode = "talk"
-        OverlayManager.show("talk", hints=KeyboardHandler.TALK_HINTS)
+        OverlayManager.show("talk", hints=KeyboardHandler.talk_hints())
 
     @staticmethod
     def _talk_worker() -> None:
@@ -473,8 +473,7 @@ class ModeHandler:
                 print("🗣️  Talk mode — speak freely. Enter: write the text · "
                       "Space: end this turn · Esc: drop the conversation")
                 if config_module.CFG.TALK_SCREENSHOT:
-                    threading.Thread(target=ModeHandler._talk_screen_worker,
-                                     args=(session,), daemon=True).start()
+                    ModeHandler._talk_look(session)
                 while True:
                     if ModeHandler._talk_conversation(session, keys):  # cancelled
                         print("✖️  Talk mode cancelled — nothing written")
@@ -503,6 +502,20 @@ class ModeHandler:
         return False
 
     @staticmethod
+    def _talk_look(session) -> None:
+        """
+        Start a screen capture beside whatever else is happening.
+
+        Once when the session opens, and again on every S — the screen the
+        briefing started on is not the screen five minutes later, and re-reading
+        it is cheaper than describing the change out loud. The description
+        replaces the previous one rather than stacking: the point of looking
+        again is that the old one is stale.
+        """
+        threading.Thread(target=ModeHandler._talk_screen_worker,
+                         args=(session,), daemon=True).start()
+
+    @staticmethod
     def _talk_screen_worker(session) -> None:
         """
         Hand the session what is on screen right now, in the background.
@@ -522,6 +535,9 @@ class ModeHandler:
         The prompt tells the model to ignore Loquivox's own windows instead.
         """
         cfg = config_module.CFG
+        started = time.time()
+        print("👁️  Screen context: capturing "
+              f"({cfg.TALK_SCREENSHOT_REGION})…")
         image = ImageService.take_screenshot(
             path=f"{cfg.TEMP_SCREEN_PATH}.talk.png",
             region=cfg.TALK_SCREENSHOT_REGION,
@@ -531,13 +547,24 @@ class ModeHandler:
         if not image:
             return
         description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
-        if not description or config_module.TALK_SCREEN_EMPTY.lower() in description.lower():
-            print("👁️  Screen context: nothing relevant on screen")
+        elapsed = time.time() - started
+        if not description:
+            # Not the same thing as "nothing useful up there", and it used to
+            # print as though it were. A reasoning vision model that spends its
+            # whole completion budget thinking answers with an empty string —
+            # so a silent model reads as an empty screen, and the one clue that
+            # the model is the problem is lost.
+            print(f"⚠️  Screen context: the vision model returned nothing "
+                  f"({elapsed:.1f}s) — is {STATE.ai_vision_model} thinking "
+                  f"itself out of an answer?")
+            return
+        if config_module.TALK_SCREEN_EMPTY.lower() in description.lower():
+            print(f"👁️  Screen context: nothing relevant on screen ({elapsed:.1f}s)")
             return
         if not STATE.talk_active:
             return  # the conversation ended while we were looking
         session.set_context(description)
-        print(f"👁️  Screen context: {description[:120]}"
+        print(f"👁️  Screen context ({elapsed:.1f}s): {description[:120]}"
               f"{'…' if len(description) > 120 else ''}")
 
     @staticmethod
@@ -592,6 +619,11 @@ class ModeHandler:
             with keys.exclusive():
                 while True:
                     pressed = keys.poll(mapping, 0.05)
+                    if talk.push_context():
+                        print("👁️  Screen context handed to the Realtime session")
+                    if pressed == "screen":
+                        ModeHandler._talk_look(session)
+                        continue  # not a turn boundary — keep listening
                     if pressed == "cancel":
                         cancelled = True
                         break
@@ -635,7 +667,8 @@ class ModeHandler:
         prefix = None  # audio captured over a reply — the next turn's first words
         while session.user_turns < cfg.TALK_MAX_TURNS:
             idle_action = "finish" if session.user_turns else "cancel"
-            audio, action = ModeHandler._talk_listen(keys, idle_action, prefix=prefix)
+            audio, action = ModeHandler._talk_listen(keys, idle_action, session,
+                                                     prefix=prefix)
             prefix = None
             if action == "cancel":
                 return True
@@ -677,7 +710,7 @@ class ModeHandler:
         return False
 
     @staticmethod
-    def _talk_listen(keys, idle_action: str,
+    def _talk_listen(keys, idle_action: str, session,
                      prefix: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], str]:
         """
         Record one spoken turn and return ``(audio, action)``.
@@ -694,6 +727,8 @@ class ModeHandler:
 
         ``prefix`` is the audio of an interruption — this turn began while the
         assistant was still speaking, and starts with the words that cut it off.
+        ``session`` is only here for S, which re-reads the screen into it
+        without ending the turn.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
         from loquivox.services.turn_detector import WINDOW_SEC, ready_detector, turn_complete
@@ -751,7 +786,11 @@ class ModeHandler:
                 # A short poll: this is what stands between the detector saying
                 # "finished" and the recording actually stopping.
                 pressed = keys.poll(mapping, 0.03)
-                if pressed is not None:
+                if pressed == "screen":
+                    # Looking again does not end the turn: the user is very
+                    # likely mid-sentence about the thing they just changed.
+                    ModeHandler._talk_look(session)
+                elif pressed is not None:
                     action = pressed
                     break
                 if remote_turns and stream.turn_ended:

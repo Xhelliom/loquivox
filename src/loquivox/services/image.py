@@ -30,7 +30,10 @@ class ImageService:
         """
         Take a screenshot and return it base64-encoded (PNG), or None on failure.
 
-        ``region="cursor"`` crops a ``cursor_px``-wide box around the pointer
+        ``region="window"`` captures the focused window alone — the one that
+        actually buys legibility, since the image's token budget is fixed
+        whatever its size. ``region="cursor"`` crops a ``cursor_px``-wide box
+        around the pointer
         (its height follows the screen's aspect ratio) — when the session can
         say where the pointer is; it silently keeps the whole screen when it
         can't. ``max_px`` caps the long edge of the result. Both default to off,
@@ -39,23 +42,49 @@ class ImageService:
         """
         output = path or CFG.TEMP_SCREEN_PATH
         screenshot = get_screenshot()
-        if not screenshot.take_screenshot(output):
+        # "window" asks the session to frame the focused window; not every one
+        # can, and the whole screen is always a usable answer.
+        framed = region == "window" and screenshot.take_window_screenshot(output)
+        if not framed and not screenshot.take_screenshot(output):
             print("❌ Screenshot failed")
             return None
+        if region == "window" and not framed:
+            print("ℹ️  This session cannot frame a single window — "
+                  "keeping the whole screen")
 
-        data = (ImageService._reframe(output, region=region, cursor_px=cursor_px,
-                                      max_px=max_px)
+        # A framed window is already the crop; only the downscale is left.
+        data = (ImageService._reframe(output,
+                                      region="screen" if framed else region,
+                                      cursor_px=cursor_px, max_px=max_px)
                 if (region == "cursor" or max_px) else None)
         try:
             if data is None:
                 with open(output, "rb") as f:
                     data = f.read()
+            if os.environ.get("LOQUIVOX_KEEP_SCREENSHOT"):
+                ImageService._keep(output, data)
             return base64.b64encode(data).decode("utf-8")
         finally:
             try:
                 os.remove(output)
             except OSError:
                 pass
+
+    @staticmethod
+    def _keep(output: str, data: bytes) -> None:
+        """
+        Debug aid: leave the bytes that were *sent* on disk, cropped and
+        downscaled — not the raw capture, which is the one thing a legibility
+        problem never shows up in. Off unless ``LOQUIVOX_KEEP_SCREENSHOT`` is set.
+        """
+        path = output + ".sent.png"
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+            print(f"📷 Sent to the vision model: {path} "
+                  f"({len(data) // 1024} KB)")
+        except OSError as e:
+            print(f"⚠️  Could not keep the screenshot ({e})")
 
     @staticmethod
     def _reframe(path: str, *, region: str, cursor_px: int,

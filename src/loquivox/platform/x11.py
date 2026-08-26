@@ -85,6 +85,17 @@ class X11Screenshot(ScreenshotBackend):
         except Exception:
             return False
 
+    def take_window_screenshot(self, output_path: str) -> bool:
+        """The focused window — ``gnome-screenshot -w`` already frames it."""
+        try:
+            result = subprocess.run(
+                ["gnome-screenshot", "-w", "-f", output_path],
+                capture_output=True, timeout=10,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def pointer_position(self):
         """Pointer coordinates via ``xdotool getmouselocation`` (X11 globals)."""
         try:

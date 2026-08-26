@@ -595,17 +595,34 @@ class KeyboardHandler:
         the VAD to hear the pause; Enter ends the conversation and writes the
         text; Esc drops the whole thing.
         """
+        import loquivox.config as config_module
+
         mapping: Dict[int, str] = {ecodes.KEY_SPACE: "send", ecodes.KEY_ESC: "cancel"}
         mapping.update({code: "finish" for code in _CONFIRM_CODES})
         for code in cls.trigger_codes("talk"):
             mapping.setdefault(code, "send")
+        if config_module.CFG.TALK_SCREENSHOT:
+            # Only when the screen is already part of the deal: S sends what is
+            # on screen to the cloud, and a key that does that must not exist
+            # for someone who turned the capture off.
+            mapping[ecodes.KEY_S] = "screen"
         return mapping
 
-    #: what the overlay shows while a talk turn is recording — the same keys as
-    #: ``talk_listen_keys``, in the form the hint strip draws.
-    TALK_HINTS: Tuple[Tuple[List[str], str], ...] = (
-        (["Space"], "end turn"), (["Enter"], "write it"), (["Esc"], "cancel"),
-    )
+    @classmethod
+    def talk_hints(cls) -> Tuple[Tuple[List[str], str], ...]:
+        """
+        What the overlay shows while a talk turn is recording — built from the
+        same condition as ``talk_listen_keys`` so the strip cannot offer a key
+        that does nothing.
+        """
+        import loquivox.config as config_module
+
+        hints: List[Tuple[List[str], str]] = [
+            (["Space"], "end turn"), (["Enter"], "write it"), (["Esc"], "cancel"),
+        ]
+        if config_module.CFG.TALK_SCREENSHOT:
+            hints.append((["S"], "look again"))
+        return tuple(hints)
 
     @classmethod
     def talk_review_keys(cls) -> Dict[int, str]:
