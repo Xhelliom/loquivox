@@ -154,7 +154,7 @@ class Config:
     AI_PROVIDER: str = "groq"
     AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
     MODEL_CHAT: str = "openai/gpt-oss-120b"
-    MODEL_VISION: str = "qwen/qwen3.6-27b"
+    MODEL_VISION: str = "qwen/qwen3.8-27b"
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
@@ -362,22 +362,40 @@ class Config:
     # How long the generated text waits for a verdict before being left on the
     # clipboard (seconds) — it is never typed without an explicit accept.
     TALK_REVIEW_TIMEOUT: float = 120.0
-    # --- Talk mode: the screen as context (opt-in) ---
-    # A screenshot taken when the session starts, described once by the vision
-    # model, and handed to the conversation as context — most of what you are
-    # about to talk about is usually already on screen. OFF by default: it
-    # sends your screen to the cloud. The capture runs in parallel with your
-    # first turn, so it costs no startup delay.
+    # --- Talk mode: the screen as context ---
+    # The focused window, captured when the session starts, described once by
+    # the vision model and handed to the conversation — most of what you are
+    # about to talk about is usually already in front of you. S during a
+    # conversation looks again, for when it has changed. The capture runs in
+    # parallel with your first turn, so it costs no startup delay.
+    # OFF by default: it sends that window to the cloud, which is not a trade
+    # to make on someone's behalf. Settings → Talk turns it on.
     TALK_SCREENSHOT: bool = False
-    # "screen" = the whole screen; "cursor" = a box around the pointer, which
-    # focuses the model on what you are actually working on. The pointer can
-    # only be located under X11 and Hyprland — anywhere else "cursor" falls
-    # back to the whole screen.
-    TALK_SCREENSHOT_REGION: str = "screen"
+    # What to capture. Cropping is the ONE thing that makes the text legible:
+    # the provider gives an image a fixed token budget whatever its size, so a
+    # whole 4K desktop squeezed into it comes back as confident nonsense while
+    # one window of it reads correctly (measured, same budget, same model).
+    #   "window" = the focused window alone — niri and gnome-screenshot can
+    #              frame it; anywhere else this falls back to the screen.
+    #   "cursor" = a box around the pointer, locatable only under X11 and
+    #              Hyprland — anywhere else it falls back to the screen too.
+    #   "screen" = the whole thing, legible only on a small display.
+    TALK_SCREENSHOT_REGION: str = "window"
     # Width of that box, in pixels (its height follows the screen's aspect).
     TALK_SCREENSHOT_CURSOR_PX: int = 1200
+    # Put back what was on the clipboard after a "window" capture. Only niri
+    # needs this — its screenshot action always copies the image and has no
+    # flag to skip it — and only for text, which is all the clipboard backends
+    # speak. Off by default: the session ends by leaving the generated text on
+    # the clipboard anyway, so the loss is whatever was there a minute ago.
+    TALK_SCREENSHOT_RESTORE_CLIPBOARD: bool = False
     # The capture is downscaled to this many pixels on its long edge before
-    # upload — the fix for a 4K screen. 0 disables the downscale.
+    # upload. Raising it does NOT sharpen what the model sees: the provider
+    # normalises the image to a fixed token budget (measured on Groq: 898
+    # prompt tokens for the same capture at 640, 1280 and 2048), so anything
+    # above this only costs upload time. Crop with ``screenshot_region =
+    # "cursor"`` when the text matters — that is what changes the pixels-per-
+    # character the model gets. 0 disables the downscale.
     TALK_SCREENSHOT_MAX_PX: int = 1280
     # What the vision model is asked to report about that capture.
     TALK_SCREEN_PROMPT: str = (
@@ -714,6 +732,9 @@ def _build_config() -> Config:
         overrides["TALK_SCREENSHOT_REGION"] = str(talk["screenshot_region"]).strip().lower()
     if "screenshot_cursor_px" in talk:
         overrides["TALK_SCREENSHOT_CURSOR_PX"] = int(talk["screenshot_cursor_px"])
+    if "screenshot_restore_clipboard" in talk:
+        overrides["TALK_SCREENSHOT_RESTORE_CLIPBOARD"] = bool(
+            talk["screenshot_restore_clipboard"])
     if "screenshot_max_px" in talk:
         overrides["TALK_SCREENSHOT_MAX_PX"] = int(talk["screenshot_max_px"])
     if str(talk.get("screen_prompt", "")).strip():

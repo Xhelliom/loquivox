@@ -60,6 +60,19 @@ class ScreenshotBackend(ABC):
             True on success, False on failure.
         """
 
+    def take_window_screenshot(self, output_path: str) -> bool:
+        """
+        Capture the focused window alone, or return False when the session
+        cannot — the caller then falls back to the whole screen.
+
+        The point is pixels per character, not framing: a vision model gets a
+        fixed token budget for an image whatever its size, so a 4K desktop
+        downscaled into it is unreadable while one window of it is not. On a
+        tiling compositor this is also the better question — the focused window
+        IS what the user is looking at, and there is no pointer to ask about.
+        """
+        return False
+
     def pointer_position(self) -> Optional[Tuple[int, int]]:
         """
         Where the mouse pointer is, in the same coordinates as a full-screen

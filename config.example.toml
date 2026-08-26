@@ -223,22 +223,33 @@ barge_in_ms = 400
 # the words spoken over the reply must not be lost.
 barge_in_keep = 1.5
 
-# Screen context: a screenshot taken when the session starts, described once by
-# the vision model and handed to the conversation. Most of what you are about
-# to dictate is already in front of you — the error, the thread you're replying
-# to — and you won't spell it out. The capture runs in parallel with your first
-# sentence, so it costs no startup delay.
-# OFF by default: it sends your screen to the cloud.
+# Screen context: the focused window, captured when the session starts,
+# described once by the vision model and handed to the conversation. Most of
+# what you are about to dictate is already in front of you — the error, the
+# thread you're replying to — and you won't spell it out. The capture runs in
+# parallel with your first sentence, so it costs no startup delay, and S during
+# a conversation looks again once something has changed.
+# OFF by default: it sends that window to the cloud.
 screenshot = false
-# "screen" = the whole screen; "cursor" = a box around the pointer, which
-# focuses the model on what you're actually working on. The pointer can only be
-# located under X11 and Hyprland — anywhere else this falls back to the whole
-# screen (Wayland has no protocol for it).
-screenshot_region = "screen"
-# Width of that box in pixels; its height follows the screen's aspect ratio.
+# What to capture. Cropping is what makes the text legible — an image gets a
+# fixed token budget whatever its size, so a whole 4K desktop squeezed into it
+# comes back as confident nonsense while one window of it reads correctly.
+#   "window" = the focused window alone (niri, or gnome-screenshot under X11)
+#   "cursor" = a box around the pointer (X11 and Hyprland only)
+#   "screen" = the whole thing, legible only on a small display
+# A session that can't do the one you picked falls back to "screen" and says so.
+screenshot_region = "window"
+# Width of the "cursor" box in pixels; its height follows the screen's aspect.
 screenshot_cursor_px = 1200
-# Longest edge of the uploaded image — this is what keeps a 4K capture small
-# (3840 → 1280 is roughly ten times less to upload). 0 sends it as captured.
+# Put back what was on the clipboard after a "window" capture. Only niri needs
+# this — its screenshot action always copies the image, with no flag to skip it
+# — and only text is restored. Off because the session ends by leaving its
+# generated text on the clipboard anyway.
+screenshot_restore_clipboard = false
+# Longest edge of the uploaded image. Raising it does not sharpen what the
+# model sees — the provider normalises the image to a fixed token budget — so
+# it only costs upload time. To make text legible, crop instead:
+# screenshot_region = "cursor". 0 sends it as captured.
 screenshot_max_px = 1280
 # What the vision model is asked to report about it. Empty = the built-in prompt.
 # screen_prompt = ""

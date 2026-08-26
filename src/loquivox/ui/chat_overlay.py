@@ -849,7 +849,7 @@ class ChatOverlay(Gtk.Window):
         if self.talk:
             from loquivox.handlers.keyboard import KeyboardHandler  # lazy: cycle
             labels = ["🗣️ Talk"] + [f"{'+'.join(keys)}: {what}"
-                                    for keys, what in KeyboardHandler.TALK_HINTS]
+                                    for keys, what in KeyboardHandler.talk_hints()]
         else:
             pin_label = CFG.HOTKEY_DEFS["pin"][0]
             tts_label = CFG.HOTKEY_DEFS["tts"][0]

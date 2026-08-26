@@ -67,6 +67,10 @@ class RealtimeTalk:
         self._conn = None
         self._ready = threading.Event()
         self._stop = False
+        #: the screen description already handed to the model, if any. Kept as
+        #: the text rather than a flag: S starts a fresh capture mid-session,
+        #: and a flag would silently swallow the new one.
+        self._context_pushed = ""
         #: set once the briefing is over — a finish phrase or the model's marker
         self.done = False
         #: the exception that ended the session, if any
@@ -125,6 +129,41 @@ class RealtimeTalk:
         if self._speech_deadline is None:
             self._speech_deadline = now + SPEECH_TAIL_TIMEOUT
         return now >= self._speech_deadline
+
+    def push_context(self) -> bool:
+        """
+        Hand the model the screen description, whenever a capture comes back.
+
+        The session opens with ``instructions`` that cannot contain it: the
+        screenshot is taken and described beside the first turn precisely so
+        the microphone is not kept waiting (see ``_talk_screen_worker``). A
+        ``session.update`` is a partial update — only the fields sent are
+        touched — so the voice, the format and the turn detection all survive
+        it, and the clause applies from the next reply on.
+
+        Written as a predicate polled by the conversation loop rather than a
+        callback: the loop already ticks every 50 ms with nothing to do, and
+        this costs a string compare until there is something new to say. True
+        means it was just sent — which happens again for every fresh capture,
+        since S exists to replace a description that has gone stale.
+        """
+        if self._conn is None or self._stop:
+            return False
+        clause = self._session.context_clause()
+        if not clause or clause == self._context_pushed:
+            return False
+        self._context_pushed = clause
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._conn.session.update(session={
+                    "type": "realtime",
+                    "instructions": self._instructions + "\n\n" + clause,
+                }),
+                self._loop)
+        except Exception as e:
+            print(f"⚠️  Screen context not sent to the Realtime session: {e}")
+            return False
+        return True
 
     # --- microphone → session ---------------------------------------------
 
@@ -351,4 +390,39 @@ if __name__ == "__main__":
     spoken._handle(_Event(type="conversation.item.input_audio_transcription.completed",
                           transcript="vas-y"))
     assert spoken.done, "a spoken finish phrase must end the briefing"
+
+    # The screen context reaches the session once, and only once it exists.
+    sent: list = []
+
+    class _Conn:
+        class session:
+            @staticmethod
+            async def update(session):
+                sent.append(session)
+
+    ctx_session = TalkSession()
+    ctx = RealtimeTalk(ctx_session)
+    ctx._conn = _Conn()
+    ctx._loop = asyncio.new_event_loop()
+    threading.Thread(target=ctx._loop.run_forever, daemon=True).start()
+    try:
+        assert not ctx.push_context(), "nothing to send before the capture returns"
+        ctx_session.set_context("un terminal montrant une stack trace")
+        assert ctx.push_context(), "the description never reached the model"
+        assert not ctx.push_context(), "sent twice — the loop polls 20×/s"
+        # S captures again mid-session: the new description must get through.
+        ctx_session.set_context("le meme terminal, la stack trace corrigee")
+        assert ctx.push_context(), "a fresh capture never reached the model"
+        assert not ctx.push_context(), "the fresh one resent on every tick"
+        time.sleep(0.2)
+        assert len(sent) == 2, sent
+        assert "stack trace" in sent[0]["instructions"], sent[0]
+        assert "corrigee" in sent[1]["instructions"], sent[1]
+        # A partial update: touching the voice or the turn detection here would
+        # reconfigure the session mid-conversation.
+        assert set(sent[0]) == {"type", "instructions"}, sent[0]
+        assert ctx_session.system_prompt()[:40] in sent[0]["instructions"], \
+            "the base prompt was replaced instead of extended"
+    finally:
+        ctx._loop.call_soon_threadsafe(ctx._loop.stop)
     print("✓ RealtimeTalk event routing OK")
