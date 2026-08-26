@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk  # noqa: E402
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, Gtk  # noqa: E402
 
 from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 
@@ -196,6 +197,59 @@ def _label_before(widget: Gtk.Widget):
     return next((w for w in reversed(before) if isinstance(w, Gtk.Label)), None)
 
 
+def test_wheel_over_a_control_scrolls_the_page():
+    """
+    The wheel scrolls the page, never the control under the pointer.
+
+    Combos, sliders and spin buttons eat scroll events by default, so crossing
+    one mid-scroll used to change a setting silently — the reason the window
+    could only be scrolled along its edge.
+    """
+    win = SettingsDialog._instance
+    nb = _notebook(win)
+    checked = 0
+    for i in range(nb.get_n_pages()):
+        page = nb.get_nth_page(i)          # the ScrolledWindow itself
+        reached = []
+        page.connect("scroll-event", lambda *a: reached.append(True))
+        controls = _scroll_hungry(page)
+        for w in controls:
+            before = _value_of(w)
+            assert w.emit("scroll-event", _wheel(win)), (
+                f"{type(w).__name__} on tab {TABS[i]} still handles the wheel")
+            assert _value_of(w) == before, (
+                f"{type(w).__name__} on tab {TABS[i]} changed value on scroll")
+            checked += 1
+        assert reached or not controls, (
+            f"tab {TABS[i]}: the wheel never reached the page")
+    print(f"\u2713 {checked} controls pass the wheel through to the page")
+
+
+def _wheel(win: Gtk.Window) -> Gdk.Event:
+    event = Gdk.Event.new(Gdk.EventType.SCROLL)
+    event.direction = Gdk.ScrollDirection.DOWN
+    event.window = win.get_window()
+    event.set_device(Gdk.Display.get_default().get_default_seat().get_pointer())
+    return event
+
+
+def _value_of(widget: Gtk.Widget):
+    if isinstance(widget, Gtk.ComboBox):
+        return widget.get_active()
+    return widget.get_value()
+
+
+def _scroll_hungry(widget, found=None):
+    """Every control that would otherwise consume a scroll event."""
+    found = [] if found is None else found
+    if isinstance(widget, (Gtk.ComboBox, Gtk.Range, Gtk.SpinButton)):
+        found.append(widget)
+    if isinstance(widget, Gtk.Container):
+        for child in widget.get_children():
+            _scroll_hungry(child, found)
+    return found
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -204,5 +258,6 @@ if __name__ == "__main__":
     test_apply_runs_every_tab()
     test_handlers_find_their_widgets()
     test_greying_a_control_greys_its_label()
+    test_wheel_over_a_control_scrolls_the_page()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")
