@@ -206,13 +206,38 @@ class SettingsDialog:
             getattr(vbox, f"set_margin_{m}")(16)
         return vbox
 
-    @staticmethod
-    def _scroll(child: Gtk.Widget) -> Gtk.ScrolledWindow:
+    @classmethod
+    def _scroll(cls, child: Gtk.Widget) -> Gtk.ScrolledWindow:
         """Wrap a tab body so it scrolls if it ever exceeds the window height."""
         sw = Gtk.ScrolledWindow()
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        cls._tame_scroll(child)
         sw.add(child)
         return sw
+
+    @classmethod
+    def _tame_scroll(cls, widget: Gtk.Widget) -> None:
+        """
+        The wheel scrolls the page, never whatever the pointer happens to be over.
+
+        A combo, a slider and a spin button all eat scroll events by default, so
+        crossing one while scrolling silently changes a setting — the reason the
+        window could only be scrolled along its edge. Done here, on the built
+        page, rather than at each of the ~30 call sites that create one.
+        """
+        if isinstance(widget, (Gtk.ComboBox, Gtk.Range, Gtk.SpinButton)):
+            widget.connect("scroll-event", cls._scroll_the_page)
+        if isinstance(widget, Gtk.Container):
+            for kid in widget.get_children():
+                cls._tame_scroll(kid)
+
+    @staticmethod
+    def _scroll_the_page(widget: Gtk.Widget, event) -> bool:
+        """Hand the event to the parent chain, skipping the control itself."""
+        # ponytail: never scrollable even when focused — clicking a combo then
+        # scrolling the page with the pointer still on it is the same annoyance.
+        Gtk.propagate_event(widget.get_parent(), event)
+        return True
 
     # -----------------------------------------------------------------
     # Layout vocabulary
