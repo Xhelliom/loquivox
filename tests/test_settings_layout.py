@@ -89,6 +89,75 @@ def _field_label_widths(widget, found=None):
     return found
 
 
+def test_one_apply_button_outside_the_scroll():
+    """
+    One Apply, in the action bar — not one per card, hidden below a scroll.
+
+    The button lives outside the notebook, so no page's ScrolledWindow can
+    take it off screen, and it runs every tab's writer rather than the one the
+    user happens to be looking at.
+    """
+    win = SettingsDialog._instance
+    root = win.get_child()
+    applies = [w for w in _buttons(root) if w.get_label() == "Apply"]
+    assert len(applies) == 1, f"{len(applies)} Apply buttons, expected 1"
+    assert not _under(applies[0], _notebook(win)), (
+        "the Apply button is inside a scrollable page — it will scroll away")
+    assert len(SettingsDialog._appliers) >= 6, (
+        f"only {len(SettingsDialog._appliers)} writers registered — a group "
+        "that lost its button must still register what it writes")
+    print(f"✓ one Apply in the action bar, driving "
+          f"{len(SettingsDialog._appliers)} writers")
+
+
+def test_apply_runs_every_tab():
+    """
+    One click writes every section, and a section that throws doesn't stop it.
+
+    The writers are stubbed: what is under test is the wiring, and the real
+    ones would rewrite the config.toml of whoever ran the check.
+    """
+    win = SettingsDialog._instance
+    apply_btn = next(w for w in _buttons(win.get_child()) if w.get_label() == "Apply")
+    real, ran = SettingsDialog._appliers, []
+    try:
+        SettingsDialog._appliers = [(lambda _b, i=i: ran.append(i), status)
+                                    for i, (_h, status) in enumerate(real)]
+        apply_btn.clicked()
+        assert ran == list(range(len(real))), f"only {ran} of {len(real)} ran"
+
+        def boom(_b):
+            raise RuntimeError("this section is broken")
+
+        SettingsDialog._appliers = [(boom, real[0][1]),
+                                    (lambda _b: ran.append("after"), real[1][1])]
+        apply_btn.clicked()
+        assert "after" in ran, "a throwing writer stopped the ones after it"
+        assert "1" in SettingsDialog._apply_status.get_text(), (
+            "the action bar didn't count the section that failed")
+    finally:
+        SettingsDialog._appliers = real
+    print(f"✓ one click runs all {len(real)} writers, failures counted not fatal")
+
+
+def _buttons(widget, found=None):
+    found = [] if found is None else found
+    if isinstance(widget, Gtk.Button):
+        found.append(widget)
+    if isinstance(widget, Gtk.Container):
+        for child in widget.get_children():
+            _buttons(child, found)
+    return found
+
+
+def _under(widget, ancestor) -> bool:
+    while widget is not None:
+        if widget is ancestor:
+            return True
+        widget = widget.get_parent()
+    return False
+
+
 def test_handlers_find_their_widgets():
     """
     Every deferred handler still resolves the widgets it stashed at build time.
@@ -131,6 +200,8 @@ if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
     test_label_columns_align()
+    test_one_apply_button_outside_the_scroll()
+    test_apply_runs_every_tab()
     test_handlers_find_their_widgets()
     test_greying_a_control_greys_its_label()
     SettingsDialog._instance.destroy()

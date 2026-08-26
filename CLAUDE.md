@@ -371,15 +371,24 @@ it in sync with upstream instead of editing it.
 - Every page in `settings_dialog.py` is built from three helpers, never by
   hand: `_group()` (a title, one dim line of prose, a framed body), `_field()`
   (one label → control row, joined to the page's `Gtk.SizeGroup` so the label
-  column lines up across separate cards) and `_actions()` (the group's status
-  line plus its Apply, always last and right-aligned). Hand-packing a row is
-  what let each tab drift into its own spacing and its own idea of where Apply
-  goes. `_field()` also ellipsizes combos — a `Gtk.Window` can never be
-  narrower than its widest child, so one long microphone name used to set the
-  window's width. `tests/test_settings_layout.py` pins all of that.
-- An Apply button belongs to whatever it *writes*: a per-group writer puts it
-  inside that group's card, a tab-wide writer (Talk, Hotkeys) at the foot of
-  the page, outside the cards.
+  column lines up across separate cards) and `_actions()` (registers the
+  group's writer and packs its status line, always last). Hand-packing a row is
+  what let each tab drift into its own spacing. `_field()` also ellipsizes
+  combos — a `Gtk.Window` can never be narrower than its widest child, so one
+  long microphone name used to set the window's width.
+  `tests/test_settings_layout.py` pins all of that.
+- **There is exactly one Apply**, in the action bar `_create_dialog()` packs
+  below the notebook — outside every page's `ScrolledWindow`, so no amount of
+  scrolling or tab-switching can take it off screen. It runs *every* registered
+  writer, not the visible tab's: a group never owns a button, it calls
+  `_actions()` with the classmethod that writes its settings. Seven Apply
+  buttons scattered over six tabs is what this replaced, and the question they
+  raised — "which one do I click?" — has no good answer when a single change
+  can touch two cards. Each writer still reports into its own status line;
+  `_apply_all` only counts the unhappy ones (a status opening `❌`/`⚠️`) into
+  the one line beside the button, because those lines are a tab and a scroll
+  away from the click. A writer that raises is caught so it cannot stop the
+  ones after it.
 
 ## Transcription backends
 

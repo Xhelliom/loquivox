@@ -120,6 +120,11 @@ class SettingsDialog:
     _talk_shot_max: Optional[Gtk.SpinButton] = None
     _talk_status: Optional[Gtk.Label] = None
 
+    # (writer, its status label) for every group that writes something, in the
+    # order the pages are built. The one Apply button runs all of them.
+    _appliers: list = []
+    _apply_status: Optional[Gtk.Label] = None
+
     @classmethod
     def show(cls) -> None:
         """Show settings dialog (singleton)."""
@@ -148,6 +153,7 @@ class SettingsDialog:
         for m in ("top", "start", "end"):
             getattr(notebook, f"set_margin_{m}")(12)
 
+        cls._appliers = []   # the pages fill it back in as they are built
         for label, build in (
             ("Models", cls._build_models_section),
             ("Talk", cls._build_talk_section),
@@ -162,20 +168,63 @@ class SettingsDialog:
 
         root.pack_start(notebook, True, True, 0)
 
-        # Action bar: one window-level button, visually separated from the pages.
+        # Action bar: the window's only Apply, outside the notebook and outside
+        # every page's scroll, so it is on screen wherever the user has
+        # scrolled to and whichever tab is showing.
         root.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
                         False, False, 0)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         for m in ("top", "bottom", "start", "end"):
             getattr(actions, f"set_margin_{m}")(10)
+
+        cls._apply_status = Gtk.Label()
+        cls._apply_status.set_halign(Gtk.Align.START)
+        cls._apply_status.set_xalign(0)
+        cls._apply_status.set_ellipsize(Pango.EllipsizeMode.END)
+        cls._apply_status.set_max_width_chars(40)
+        actions.pack_start(cls._apply_status, True, True, 0)
+
         close_btn = Gtk.Button(label="Close")
         close_btn.connect("clicked", lambda w: dialog.destroy())
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.get_style_context().add_class("suggested-action")
+        apply_btn.set_tooltip_text("Save and apply every tab, not just this one")
+        apply_btn.connect("clicked", cls._apply_all)
+        actions.pack_end(apply_btn, False, False, 0)
         actions.pack_end(close_btn, False, False, 0)
         root.pack_start(actions, False, False, 0)
 
         dialog.add(root)
         dialog.connect("destroy", cls._on_destroy)
         return dialog
+
+    @classmethod
+    def _apply_all(cls, _btn: Gtk.Button) -> None:
+        """
+        Run every group's writer, whichever tab it lives on, then say how it went.
+
+        Each writer already reports into its own status line; this only counts
+        the ones that came back unhappy, because those lines are two tabs and a
+        scroll away from the button that was just clicked.
+        """
+        unhappy = 0
+        for handler, status in cls._appliers:
+            try:
+                handler(None)
+            except Exception as e:   # one broken section must not stop the rest
+                status.set_markup(
+                    f"<small>❌ {GLib.markup_escape_text(str(e))}</small>")
+            if status.get_text().lstrip().startswith(("❌", "⚠️")):
+                unhappy += 1
+
+        if cls._apply_status is None:
+            return
+        if unhappy:
+            cls._apply_status.set_markup(
+                f"<small>⚠️ Applied — {unhappy} setting(s) need a look; "
+                "their tab says which.</small>")
+        else:
+            cls._apply_status.set_markup("<small>✓ All settings applied.</small>")
 
     @classmethod
     def _on_destroy(cls, _w: Gtk.Widget) -> None:
@@ -301,14 +350,16 @@ class SettingsDialog:
                 cell.set_property("ellipsize", Pango.EllipsizeMode.END)
                 cell.set_property("max-width-chars", 34)
 
-    @staticmethod
-    def _actions(body: Gtk.Box, button: Gtk.Button, status: Gtk.Label) -> None:
+    @classmethod
+    def _actions(cls, body: Gtk.Box, handler, status: Gtk.Label) -> None:
         """
-        The footer of a group: its own status line, then its own Apply.
+        The footer of a group: the writer it registers, and its status line.
 
-        Always the last row, always right-aligned, always the accent button —
-        so "what did this write, and did it work" is answered in one place per
-        group instead of wherever the button happened to be packed.
+        There is one Apply in the window, pinned below the scroll, so a group
+        no longer carries a button of its own — it hands over what it writes
+        and keeps the line saying whether that worked. Seven buttons scattered
+        across six tabs meant "which one do I click", and the answer was
+        "whichever card the setting you touched happened to be in".
         """
         status.set_halign(Gtk.Align.START)
         status.set_xalign(0)
@@ -317,13 +368,9 @@ class SettingsDialog:
         # unbreakable URL in one would otherwise set the window's width.
         status.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
         status.set_max_width_chars(48)
-        button.get_style_context().add_class("suggested-action")
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        row.set_margin_top(2)
-        row.pack_start(status, True, True, 0)
-        row.pack_end(button, False, False, 0)
-        body.pack_start(row, False, False, 0)
+        status.set_margin_top(2)
+        body.pack_start(status, False, False, 0)
+        cls._appliers.append((handler, status))
 
     @staticmethod
     def _note(body: Gtk.Box, markup: str) -> None:
@@ -385,9 +432,7 @@ class SettingsDialog:
             cls._field(body, label, combo, labels)
 
         cls._models_status = Gtk.Label()
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_models)
-        cls._actions(body, apply_btn, cls._models_status)
+        cls._actions(body, cls._on_apply_models, cls._models_status)
 
         cls._load_models_async()
         provider.connect("changed", cls._on_provider_changed)
@@ -512,12 +557,10 @@ class SettingsDialog:
         cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
         cls._on_talk_engine_changed(cls._engine_combo)
 
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_engine)
         engine_status = Gtk.Label()
-        cls._actions(body, apply_btn, engine_status)
+        cls._actions(body, cls._on_apply_engine, engine_status)
         # The engine's own feedback used to land in the preset card's status
-        # line, two groups above the button that caused it.
+        # line, two groups above the setting that caused it.
         cls._engine_status = engine_status
 
     @classmethod
@@ -932,9 +975,7 @@ class SettingsDialog:
         body.pack_start(whisper_row, False, False, 0)
 
         cls._trans_status = Gtk.Label()
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_transcription)
-        cls._actions(body, apply_btn, cls._trans_status)
+        cls._actions(body, cls._on_apply_transcription, cls._trans_status)
 
         cls._sync_model_entry()  # prefill model + capability hint
 
@@ -1113,7 +1154,7 @@ class SettingsDialog:
             if not os.environ.get(env_key):
                 cls._set_trans_status(
                     f"⚠️ {human} needs its API key — set <b>{env_key}</b> in "
-                    "“API Keys” below, then Apply. (Offline fallback used meanwhile.)"
+                    "“API Keys”, then Apply. (Offline fallback used meanwhile.)"
                 )
                 return
         if bid in ("whispercpp", "auto"):
@@ -1314,9 +1355,7 @@ class SettingsDialog:
         cls._update_pp_sensitivity()
 
         cls._pp_status = Gtk.Label()
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_postprocess)
-        cls._actions(body, apply_btn, cls._pp_status)
+        cls._actions(body, cls._on_apply_postprocess, cls._pp_status)
 
     @classmethod
     def _update_pp_sensitivity(cls) -> None:
@@ -1564,12 +1603,9 @@ class SettingsDialog:
                   "Timings, prompts and the turn-detection thresholds live "
                   "under <tt>[talk]</tt> in config.toml.")
 
-        # One writer for the whole tab, so the button belongs to the page and
-        # not to whichever card it happened to be packed after.
+        # One writer for the whole tab: everything above lands in [talk].
         cls._talk_status = Gtk.Label()
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_talk)
-        cls._actions(vbox, apply_btn, cls._talk_status)
+        cls._actions(vbox, cls._on_apply_talk, cls._talk_status)
 
     @classmethod
     def _on_talk_semantic_toggled(cls, check: Gtk.CheckButton) -> None:
@@ -1701,9 +1737,7 @@ class SettingsDialog:
         body.pack_start(show_chk, False, False, 0)
 
         cls._key_status = Gtk.Label()
-        save_btn = Gtk.Button(label="Save keys")
-        save_btn.connect("clicked", cls._on_save_keys)
-        cls._actions(body, save_btn, cls._key_status)
+        cls._actions(body, cls._on_save_keys, cls._key_status)
 
     @classmethod
     def _on_toggle_key_visibility(cls, chk: Gtk.CheckButton) -> None:
@@ -1784,9 +1818,7 @@ class SettingsDialog:
                   "(first = primary, rest = aliases; combos join with <tt>+</tt>).")
 
         cls._hotkey_status = Gtk.Label()
-        apply_btn = Gtk.Button(label="Apply")
-        apply_btn.connect("clicked", cls._on_apply_hotkeys)
-        cls._actions(vbox, apply_btn, cls._hotkey_status)
+        cls._actions(vbox, cls._on_apply_hotkeys, cls._hotkey_status)
 
     @classmethod
     def _on_apply_hotkeys(cls, _btn: Gtk.Button) -> None:
@@ -1848,7 +1880,7 @@ class SettingsDialog:
                 if name:
                     entry.set_text(name)
                     cls._set_hotkey_status(
-                        f"✓ Captured <b>{name}</b> for {label} — click <b>Apply hotkeys</b> to save."
+                        f"✓ Captured <b>{name}</b> for {label} — click <b>Apply</b> to save."
                     )
                 else:
                     cls._set_hotkey_status("⚠️ No key captured (timed out or no input device).")
