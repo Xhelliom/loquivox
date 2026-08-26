@@ -15,7 +15,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Pango', '1.0')
 gi.require_version('PangoCairo', '1.0')
-from gi.repository import GLib, Gtk, Pango, PangoCairo
+from gi.repository import GLib, GObject, Gtk, Pango, PangoCairo
 
 
 class SettingsDialog:
@@ -81,7 +81,7 @@ class SettingsDialog:
     _pp_status: Optional[Gtk.Label] = None
     _pp_prompt_view: Optional[Gtk.TextView] = None
     _pp_prompt_scroll: Optional[Gtk.ScrolledWindow] = None
-    _pp_prompt_label: Optional[Gtk.Label] = None
+    _pp_prompt_label: Optional[Gtk.Expander] = None
 
     # Live widget handles (set while the dialog is open).
     _backend_combo: Optional[Gtk.ComboBoxText] = None
@@ -99,6 +99,7 @@ class SettingsDialog:
     _models_status: Optional[Gtk.Label] = None
     _preset_status: Optional[Gtk.Label] = None
     _engine_combo: Optional[Gtk.ComboBoxText] = None
+    _engine_status: Optional[Gtk.Label] = None
     _realtime_model: Optional[Gtk.Entry] = None
     _realtime_voice: Optional[Gtk.ComboBoxText] = None
     _tts_engine_combo: Optional[Gtk.ComboBoxText] = None
@@ -133,48 +134,44 @@ class SettingsDialog:
     def _create_dialog(cls) -> Gtk.Window:
         """Create the settings dialog window (tabbed)."""
         dialog = Gtk.Window(title="Loquivox Settings")
-        dialog.set_default_size(470, 690)
-        dialog.set_resizable(False)
+        dialog.set_default_size(640, 780)
         dialog.set_position(Gtk.WindowPosition.CENTER)
         dialog.set_keep_above(True)
 
-        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        for m in ("top", "bottom", "start", "end"):
-            getattr(root, f"set_margin_{m}")(12)
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         # Group the (now numerous) settings into tabs instead of one long scroll.
+        # Order: what the app does (Models → Talk → Refinement), then how you
+        # drive it (Hotkeys, Appearance), then one-time setup (API Keys).
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
+        for m in ("top", "start", "end"):
+            getattr(notebook, f"set_margin_{m}")(12)
 
-        models = cls._page()
-        cls._build_models_section(models)
-        notebook.append_page(cls._scroll(models), Gtk.Label(label="Models"))
-
-        refine = cls._page()
-        cls._build_postprocess_section(refine)
-        notebook.append_page(cls._scroll(refine), Gtk.Label(label="Refinement"))
-
-        keys = cls._page()
-        cls._build_api_keys_section(keys)
-        notebook.append_page(cls._scroll(keys), Gtk.Label(label="API Keys"))
-
-        talk = cls._page()
-        cls._build_talk_section(talk)
-        notebook.append_page(cls._scroll(talk), Gtk.Label(label="Talk"))
-
-        hotkeys = cls._page()
-        cls._build_hotkeys_section(hotkeys)
-        notebook.append_page(cls._scroll(hotkeys), Gtk.Label(label="Hotkeys"))
-
-        appearance = cls._page()
-        cls._build_appearance_page(appearance)
-        notebook.append_page(cls._scroll(appearance), Gtk.Label(label="Appearance"))
+        for label, build in (
+            ("Models", cls._build_models_section),
+            ("Talk", cls._build_talk_section),
+            ("Refinement", cls._build_postprocess_section),
+            ("Hotkeys", cls._build_hotkeys_section),
+            ("Appearance", cls._build_appearance_page),
+            ("API Keys", cls._build_api_keys_section),
+        ):
+            page = cls._page()
+            build(page)
+            notebook.append_page(cls._scroll(page), Gtk.Label(label=label))
 
         root.pack_start(notebook, True, True, 0)
 
+        # Action bar: one window-level button, visually separated from the pages.
+        root.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+                        False, False, 0)
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(actions, f"set_margin_{m}")(10)
         close_btn = Gtk.Button(label="Close")
         close_btn.connect("clicked", lambda w: dialog.destroy())
-        root.pack_end(close_btn, False, False, 0)
+        actions.pack_end(close_btn, False, False, 0)
+        root.pack_start(actions, False, False, 0)
 
         dialog.add(root)
         dialog.connect("destroy", cls._on_destroy)
@@ -204,9 +201,9 @@ class SettingsDialog:
     @staticmethod
     def _page() -> Gtk.Box:
         """A padded vertical box used as a notebook tab body."""
-        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         for m in ("top", "bottom", "start", "end"):
-            getattr(vbox, f"set_margin_{m}")(14)
+            getattr(vbox, f"set_margin_{m}")(16)
         return vbox
 
     @staticmethod
@@ -216,6 +213,130 @@ class SettingsDialog:
         sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         sw.add(child)
         return sw
+
+    # -----------------------------------------------------------------
+    # Layout vocabulary
+    #
+    # Three helpers, used by every tab, are what keeps the window readable:
+    # a page is a stack of *groups*, a group is a title + one dim line of
+    # prose + a framed body, and a body is a stack of *fields* whose labels
+    # all align. Building rows by hand is what made every tab drift into its
+    # own spacing, its own alignment and its own idea of where Apply goes.
+    # -----------------------------------------------------------------
+    @staticmethod
+    def _group(parent: Gtk.Box, title: str, subtitle: str = "") -> Gtk.Box:
+        """
+        A titled card. Returns the body box to pack the controls into.
+
+        Title outside the frame, prose under it, controls enclosed: the
+        enclosure is what tells the eye where one setting ends and the next
+        begins, and the size/weight jump is what makes the titles scannable
+        without reading a word of the body.
+        """
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+
+        heading = Gtk.Label()
+        heading.set_halign(Gtk.Align.START)
+        heading.set_markup(f'<span size="large" weight="bold">{title}</span>')
+        section.pack_start(heading, False, False, 0)
+
+        if subtitle:
+            note = Gtk.Label()
+            note.set_halign(Gtk.Align.START)
+            note.set_xalign(0)
+            note.set_line_wrap(True)
+            note.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            note.set_max_width_chars(62)   # a measure, so prose never runs edge to edge
+            note.set_markup(f"<small>{subtitle}</small>")
+            note.get_style_context().add_class("dim-label")
+            section.pack_start(note, False, False, 0)
+
+        frame = Gtk.Frame()               # themed border, light and dark alike
+        frame.set_shadow_type(Gtk.ShadowType.IN)
+        frame.set_margin_top(6)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(body, f"set_margin_{m}")(12)
+        frame.add(body)
+        section.pack_start(frame, False, False, 0)
+
+        parent.pack_start(section, False, False, 0)
+        return body
+
+    @classmethod
+    def _field(cls, body: Gtk.Box, label: str, widget: Gtk.Widget,
+               labels: Optional[Gtk.SizeGroup] = None,
+               extra: Optional[Gtk.Widget] = None) -> None:
+        """One label → control row. The size group aligns every label on a page."""
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        lbl = cls._row_label(label)
+        lbl.set_name("field-label")   # the aligned column, as a CSS selector
+        # A live label beside a dead control is the tell that a section is
+        # hand-assembled; bind it once here and every field greys out whole.
+        widget.bind_property("sensitive", lbl, "sensitive",
+                             GObject.BindingFlags.SYNC_CREATE)
+        if labels is not None:
+            labels.add_widget(lbl)
+        row.pack_start(lbl, False, False, 0)
+        cls._elide(widget)
+        row.pack_start(widget, True, True, 0)
+        if extra is not None:
+            row.pack_start(extra, False, False, 0)
+        body.pack_start(row, False, False, 0)
+
+    @staticmethod
+    def _elide(widget: Gtk.Widget) -> None:
+        """
+        Stop one long row deciding how wide the window is.
+
+        A ComboBoxText asks for the width of its longest item — a microphone's
+        full ALSA name, a provider's longest model id — and a Gtk.Window can
+        never be narrower than what its children ask for. Ellipsizing the cell
+        caps that at a sane measure; the full string stays in the popup.
+        """
+        if not isinstance(widget, Gtk.ComboBox):
+            return
+        for cell in widget.get_cells():
+            if isinstance(cell, Gtk.CellRendererText):
+                cell.set_property("ellipsize", Pango.EllipsizeMode.END)
+                cell.set_property("max-width-chars", 34)
+
+    @staticmethod
+    def _actions(body: Gtk.Box, button: Gtk.Button, status: Gtk.Label) -> None:
+        """
+        The footer of a group: its own status line, then its own Apply.
+
+        Always the last row, always right-aligned, always the accent button —
+        so "what did this write, and did it work" is answered in one place per
+        group instead of wherever the button happened to be packed.
+        """
+        status.set_halign(Gtk.Align.START)
+        status.set_xalign(0)
+        status.set_line_wrap(True)
+        # WORD_CHAR, not WORD: a status line carries API errors, and one
+        # unbreakable URL in one would otherwise set the window's width.
+        status.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        status.set_max_width_chars(48)
+        button.get_style_context().add_class("suggested-action")
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(2)
+        row.pack_start(status, True, True, 0)
+        row.pack_end(button, False, False, 0)
+        body.pack_start(row, False, False, 0)
+
+    @staticmethod
+    def _note(body: Gtk.Box, markup: str) -> None:
+        """A dim footnote inside a group, for the caveat a subtitle can't hold."""
+        lbl = Gtk.Label()
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_xalign(0)
+        lbl.set_line_wrap(True)
+        lbl.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        lbl.set_max_width_chars(58)
+        lbl.set_markup(f"<small>{markup}</small>")
+        lbl.get_style_context().add_class("dim-label")
+        body.pack_start(lbl, False, False, 0)
 
     # -----------------------------------------------------------------
     # Models tab: which provider answers, and with which models
@@ -230,57 +351,43 @@ class SettingsDialog:
         can run here or in the cloud. Spelling that out as four menus reads
         like a kernel config, so the presets fill them in one click and the
         sections below stay for whoever wants to disagree.
+
+        One size group for the whole page: the label column lines up across
+        five separate cards, which is most of what stops it reading as a heap.
         """
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         cls._build_presets(vbox)
-        cls._build_engine_section(vbox)
-        cls._build_transcription_section(vbox)   # slot 1 — the ears
-        cls._build_chat_section(vbox)            # slot 2 — the brain
-        cls._build_voice_section(vbox)           # slot 3 — the mouth
+        cls._build_engine_section(vbox, labels)
+        cls._build_transcription_section(vbox, labels)   # slot 1 — the ears
+        cls._build_chat_section(vbox, labels)            # slot 2 — the brain
+        cls._build_voice_section(vbox, labels)           # slot 3 — the mouth
 
     @classmethod
-    def _build_chat_section(cls, vbox: Gtk.Box) -> None:
+    def _build_chat_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         """Provider + chat/vision models, listed live from the provider's API."""
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Chat &amp; vision</b>")
-        vbox.pack_start(header, False, False, 0)
+        body = cls._group(
+            vbox, "Chat &amp; vision",
+            "Who answers F4, the rewrite, vision and talk mode — and who writes "
+            "the final text, whichever conversation engine is in use. The lists "
+            "come from the provider itself, so a model your account no longer "
+            "has stops being offered.")
 
-        note = Gtk.Label()
-        note.set_halign(Gtk.Align.START)
-        note.set_line_wrap(True)
-        note.set_markup(
-            "<small><i>Who answers F4, the rewrite, vision and talk mode — and "
-            "who writes the final text, whichever conversation engine is in "
-            "use. The model lists come from the provider itself, so a model "
-            "your account no longer has simply stops being offered.</i></small>")
-        vbox.pack_start(note, False, False, 0)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Provider:"), False, False, 0)
         provider = Gtk.ComboBoxText()
         for pid in config_module.CFG.AI_PROVIDERS:
             provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid.title()))
         provider.set_active_id(STATE.ai_provider if STATE.ai_provider in config_module.CFG.AI_PROVIDERS
                                else config_module.CFG.AI_PROVIDERS[0])
-        row.pack_start(provider, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Provider", provider, labels)
 
-        for label, attr in (("Chat model:", "_chat_model"), ("Vision model:", "_vision_model")):
-            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.pack_start(cls._row_label(label), False, False, 0)
+        for label, attr in (("Chat model", "_chat_model"), ("Vision model", "_vision_model")):
             combo = Gtk.ComboBoxText.new_with_entry()   # editable: a new model id still works
             setattr(cls, attr, combo)
-            row.pack_start(combo, True, True, 0)
-            vbox.pack_start(row, False, False, 0)
+            cls._field(body, label, combo, labels)
 
         cls._models_status = Gtk.Label()
-        cls._models_status.set_halign(Gtk.Align.START)
-        cls._models_status.set_line_wrap(True)
-        vbox.pack_start(cls._models_status, False, False, 6)
-
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_models)
-        vbox.pack_start(apply_btn, False, False, 0)
+        cls._actions(body, apply_btn, cls._models_status)
 
         cls._load_models_async()
         provider.connect("changed", cls._on_provider_changed)
@@ -308,26 +415,29 @@ class SettingsDialog:
     @classmethod
     def _build_presets(cls, vbox: Gtk.Box) -> None:
         """One row of buttons that fill every slot at once."""
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Presets</b>")
-        vbox.pack_start(header, False, False, 0)
+        body = cls._group(
+            vbox, "Presets",
+            "Fill every slot below in one click. Hover a preset to see what it "
+            "picks; everything stays editable afterwards.")
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.set_homogeneous(True)
         for name, tooltip, sections, state in cls.PRESETS:
             button = Gtk.Button(label=name)
             button.set_tooltip_text(tooltip)
             button.connect("clicked", cls._on_preset, name, sections, state)
             row.pack_start(button, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        body.pack_start(row, False, False, 0)
 
         cls._preset_status = Gtk.Label()
         cls._preset_status.set_halign(Gtk.Align.START)
+        cls._preset_status.set_xalign(0)
         cls._preset_status.set_line_wrap(True)
-        cls._preset_status.set_markup(
-            "<small><i>Hover a preset to see what it picks. Everything below "
-            "stays editable afterwards.</i></small>")
-        vbox.pack_start(cls._preset_status, False, False, 6)
+        cls._preset_status.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        cls._preset_status.set_max_width_chars(58)
+        cls._preset_status.get_style_context().add_class("dim-label")
+        cls._preset_status.set_no_show_all(True)   # no blank line before a click
+        body.pack_start(cls._preset_status, False, False, 0)
 
     @classmethod
     def _on_preset(cls, _btn: Gtk.Button, name: str, sections: dict, state: dict) -> None:
@@ -339,6 +449,7 @@ class SettingsDialog:
                 update_section(section, values)
         except ConfigWriteError as e:
             cls._preset_status.set_markup(f"<small>❌ {e}</small>")
+            cls._preset_status.show()
             return
         for attr, value in state.items():
             setattr(STATE, attr, value)
@@ -352,31 +463,22 @@ class SettingsDialog:
         cls._preset_status.set_markup(
             f"<small>✓ {GLib.markup_escape_text(name)} applied — takes effect on "
             "the next talk session.</small>")
+        cls._preset_status.show()
 
     # -----------------------------------------------------------------
     # Conversation engine (talk mode): cascade or native speech-to-speech
     # -----------------------------------------------------------------
     @classmethod
-    def _build_engine_section(cls, vbox: Gtk.Box) -> None:
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Conversation engine</b>")
-        vbox.pack_start(header, False, False, 10)
+    def _build_engine_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        body = cls._group(
+            vbox, "Conversation engine",
+            "How talk mode holds the conversation. The cascade chains the "
+            "transcription, chat model and voice below — each swappable, local "
+            "or cloud. Realtime hands the whole conversation to one model that "
+            "hears and answers directly: faster and more natural, but the chat "
+            "model no longer answers. The final text is a plain completion "
+            "either way.")
 
-        note = Gtk.Label()
-        note.set_halign(Gtk.Align.START)
-        note.set_line_wrap(True)
-        note.set_markup(
-            "<small><i>How talk mode holds the conversation. The cascade chains "
-            "transcription, the chat model and the voice below — each swappable, "
-            "local or cloud. Realtime hands the whole conversation to one model "
-            "that hears and answers directly: faster and more natural, but the "
-            "chat model no longer answers. The text it writes at the end is a "
-            "plain completion either way.</i></small>")
-        vbox.pack_start(note, False, False, 0)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Engine:"), False, False, 0)
         cls._engine_combo = Gtk.ComboBoxText()
         for eid in config_module.CFG.TALK_ENGINES:
             cls._engine_combo.append(eid, {
@@ -385,18 +487,12 @@ class SettingsDialog:
             }.get(eid, eid.title()))
         cls._engine_combo.set_active_id(
             config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
-        row.pack_start(cls._engine_combo, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Engine", cls._engine_combo, labels)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Realtime model:"), False, False, 0)
         cls._realtime_model = Gtk.Entry()   # ids change often — free text
         cls._realtime_model.set_text(config_module.CFG.TALK_REALTIME_MODEL)
-        row.pack_start(cls._realtime_model, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Realtime model", cls._realtime_model, labels)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Its voice:"), False, False, 0)
         # A closed list, not free text: the API rejects an unknown voice, and
         # it does so only once the session is already opening.
         cls._realtime_voice = Gtk.ComboBoxText()
@@ -405,22 +501,24 @@ class SettingsDialog:
         cls._realtime_voice.set_active_id(
             config_module.CFG.TALK_REALTIME_VOICE if config_module.CFG.TALK_REALTIME_VOICE
             in config_module.CFG.TALK_REALTIME_VOICES else config_module.CFG.TALK_REALTIME_VOICES[0])
-        row.pack_start(cls._realtime_voice, True, True, 0)
         cls._realtime_test = Gtk.Button(label="▶ Test")
         cls._realtime_test.set_tooltip_text(
             "Preview this voice (same voice, spoken by the TTS model)")
         cls._realtime_test.connect("clicked", cls._on_test_realtime_voice)
-        row.pack_start(cls._realtime_test, False, False, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Its voice", cls._realtime_voice, labels, extra=cls._realtime_test)
 
         # The two fields above only mean anything in realtime mode — greying
         # them out is the shortest answer to "why are there two voices here".
         cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
         cls._on_talk_engine_changed(cls._engine_combo)
 
-        apply_btn = Gtk.Button(label="Apply engine")
+        apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_engine)
-        vbox.pack_start(apply_btn, False, False, 0)
+        engine_status = Gtk.Label()
+        cls._actions(body, apply_btn, engine_status)
+        # The engine's own feedback used to land in the preset card's status
+        # line, two groups above the button that caused it.
+        cls._engine_status = engine_status
 
     @classmethod
     def _on_talk_engine_changed(cls, combo: Gtk.ComboBoxText) -> None:
@@ -481,13 +579,12 @@ class SettingsDialog:
                 "realtime_voice": cls._realtime_voice.get_active_id() or "marin",
             })
         except ConfigWriteError as e:
-            cls._preset_status.set_markup(f"<small>❌ {e}</small>")
+            cls._engine_status.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
         print(f"🗣️  Talk engine: {engine}")
-        cls._preset_status.set_markup(
-            f"<small>✓ Engine set to {engine} — takes effect on the next talk "
-            "session.</small>")
+        cls._engine_status.set_markup(
+            f"<small>✓ {engine} — takes effect on the next talk session.</small>")
 
     @classmethod
     def _refresh_engine_widgets(cls) -> None:
@@ -523,48 +620,34 @@ class SettingsDialog:
     # Voice (TTS): which engine speaks, and with which voice
     # -----------------------------------------------------------------
     @classmethod
-    def _build_voice_section(cls, vbox: Gtk.Box) -> None:
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Voice</b> <small>(text-to-speech)</small>")
-        vbox.pack_start(header, False, False, 10)
+    def _build_voice_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        body = cls._group(
+            vbox, "Voice",
+            "Reads every AI answer aloud — F4, the rewrite, vision, and talk "
+            "mode on the Cascade engine. Not the Realtime voice above: that one "
+            "is the model speaking for itself, this one is a separate engine "
+            "that speaks written text, so it works everywhere and can be local. "
+            "Applies immediately.")
 
-        note = Gtk.Label()
-        note.set_halign(Gtk.Align.START)
-        note.set_line_wrap(True)
-        note.set_markup(
-            "<small><i>Reads every AI answer aloud — F4, the rewrite, vision, "
-            "and talk mode when the engine is Cascade. Not the same voice as "
-            "the Realtime one above: that one is the model speaking for itself "
-            "and only exists in Realtime mode, this one is a separate engine "
-            "that speaks written text, so it works everywhere and can be "
-            "local. Piper needs no key and no network, its voice is downloaded "
-            "once (~60 MB) and is flatter than the cloud's. Applies "
-            "immediately.</i></small>")
-        vbox.pack_start(note, False, False, 0)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Engine:"), False, False, 0)
         cls._tts_engine_combo = Gtk.ComboBoxText()
         for model in config_module.CFG.TTS_ENGINES:
             cls._tts_engine_combo.append(model, cls._ENGINE_LABELS.get(model, model))
         cls._tts_engine_combo.set_active_id(
             STATE.tts_model if STATE.tts_model in config_module.CFG.TTS_ENGINES
             else next(iter(config_module.CFG.TTS_ENGINES)))
-        row.pack_start(cls._tts_engine_combo, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Engine", cls._tts_engine_combo, labels)
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("Voice:"), False, False, 0)
         cls._voice_combo = Gtk.ComboBoxText()
         cls._fill_voices()
         cls._voice_combo.connect("changed", cls._on_voice_changed)
-        row.pack_start(cls._voice_combo, True, True, 0)
         test = Gtk.Button(label="▶ Test")
         test.set_tooltip_text("Speak a line with the selected engine and voice")
         test.connect("clicked", cls._on_test_voice)
-        row.pack_start(test, False, False, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "Voice", cls._voice_combo, labels, extra=test)
+
+        cls._note(body,
+                  "Piper needs no key and no network: its voice downloads once "
+                  "(~60 MB) and is flatter than the cloud's.")
         # Connected last: filling the voices above must not fire the handler.
         cls._tts_engine_combo.connect("changed", cls._on_engine_changed)
 
@@ -640,12 +723,25 @@ class SettingsDialog:
     @classmethod
     def _build_appearance_page(cls, vbox: Gtk.Box) -> None:
         # The voice lives in the Models tab, with the rest of "who does what".
-        # Overlay style (pill vs classic) — shown live in the preview below.
-        style_label = Gtk.Label()
-        style_label.set_halign(Gtk.Align.START)
-        style_label.set_markup("<b>Overlay style</b>")
-        vbox.pack_start(style_label, False, False, 0)
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
+        # The preview leads the page: the two groups below only make sense as
+        # changes to the thing being previewed, so it goes first, once.
+        body = cls._group(
+            vbox, "Recording overlay",
+            "The bubble that appears while you hold a hotkey. Everything here "
+            "is previewed live below; the style and the two columns apply to "
+            "the next recording.")
+
+        cls._preview_area = Gtk.DrawingArea()
+        cls._preview_area.set_size_request(-1, 74)
+        cls._preview_area.connect("draw", cls._draw_overlay_preview)
+        body.pack_start(cls._preview_area, False, False, 0)
+        # Loop a gentle animation so the preview shows the live effects.
+        if cls._preview_timer is None:
+            cls._preview_timer = GLib.timeout_add(40, cls._tick_preview)
+
+        # Overlay style (pill vs classic) — shown live in the preview above.
         style_combo = Gtk.ComboBoxText()
         _STYLE_LABELS = {
             "pill": "Pill — waveform capsule",
@@ -656,7 +752,7 @@ class SettingsDialog:
         active_style = STATE.overlay_style if STATE.overlay_style in config_module.CFG.OVERLAY_STYLES else config_module.CFG.DEFAULT_OVERLAY_STYLE
         style_combo.set_active_id(active_style)
         style_combo.connect("changed", cls._on_overlay_style_changed)
-        vbox.pack_start(style_combo, False, False, 0)
+        cls._field(body, "Style", style_combo, labels)
 
         # Hotkey hints column (widens the overlay). Applies to the next recording.
         hints_check = Gtk.CheckButton(
@@ -664,7 +760,7 @@ class SettingsDialog:
         )
         hints_check.set_active(STATE.show_hints)
         hints_check.connect("toggled", cls._on_hints_toggled)
-        vbox.pack_start(hints_check, False, False, 0)
+        body.pack_start(hints_check, False, False, 0)
 
         # Refinement chip (dictation only). Applies to the next recording.
         badge_check = Gtk.CheckButton(
@@ -672,36 +768,16 @@ class SettingsDialog:
         )
         badge_check.set_active(STATE.show_refine_badge)
         badge_check.connect("toggled", cls._on_refine_badge_toggled)
-        vbox.pack_start(badge_check, False, False, 0)
+        body.pack_start(badge_check, False, False, 0)
 
-        # Screen-edge hotkey cheat sheet (applies immediately).
-        bar_check = Gtk.CheckButton(
-            label="Hotkey tab at the top of the screen (hover to expand)"
-        )
-        bar_check.set_active(STATE.show_hotkey_bar)
-        bar_check.connect("toggled", cls._on_hotkey_bar_toggled)
-        vbox.pack_start(bar_check, False, False, 0)
-
-        # Colour scheme gallery
-        scheme_label = Gtk.Label()
-        scheme_label.set_halign(Gtk.Align.START)
-        scheme_label.set_markup("<b>Color Scheme</b>")
-        vbox.pack_start(scheme_label, False, False, 0)
-
-        # Live overlay preview so the theme can be judged on the actual bubble.
-        cls._preview_area = Gtk.DrawingArea()
-        cls._preview_area.set_size_request(-1, 74)
-        cls._preview_area.connect("draw", cls._draw_overlay_preview)
-        vbox.pack_start(cls._preview_area, False, False, 0)
-        # Loop a gentle animation so the preview shows the live effects.
-        if cls._preview_timer is None:
-            cls._preview_timer = GLib.timeout_add(40, cls._tick_preview)
+        # Colour scheme gallery — judged on the preview above.
+        body = cls._group(
+            vbox, "Color scheme",
+            "Applies immediately, to the overlay above and to the chat bubble.")
 
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scrolled.set_size_request(-1, 210)
-        scrolled.set_shadow_type(Gtk.ShadowType.IN)
-
+        scrolled.set_size_request(-1, 230)
         cls._listbox = Gtk.ListBox()
         cls._listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         cls._listbox.connect("row-activated", cls._on_scheme_selected)
@@ -711,7 +787,20 @@ class SettingsDialog:
             if name == STATE.color_scheme:
                 cls._listbox.select_row(row)
         scrolled.add(cls._listbox)
-        vbox.pack_start(scrolled, True, True, 0)
+        body.pack_start(scrolled, True, True, 0)
+
+        # Screen-edge hotkey cheat sheet (applies immediately) — a different
+        # window entirely, so it gets its own group rather than trailing the
+        # overlay's toggles.
+        body = cls._group(
+            vbox, "Desktop",
+            "Chrome that lives outside a recording.")
+        bar_check = Gtk.CheckButton(
+            label="Hotkey tab at the top of the screen (hover to expand)"
+        )
+        bar_check.set_active(STATE.show_hotkey_bar)
+        bar_check.connect("toggled", cls._on_hotkey_bar_toggled)
+        body.pack_start(bar_check, False, False, 0)
 
     @classmethod
     def _draw_overlay_preview(cls, widget: Gtk.DrawingArea, cr) -> bool:
@@ -736,7 +825,11 @@ class SettingsDialog:
         fontname = (settings.get_property("gtk-font-name") if settings else None) or "Sans 10"
         family = Pango.FontDescription(fontname).get_family() or "Sans"
 
-        cr.translate((aw - bw) / 2, max(0, (ah - bh) / 2))  # center the bubble
+        # Fit, then centre: with the hint column on, the real bubble is wider
+        # than the card, and centring alone drew half of it off the edge.
+        scale = min(1.0, aw / bw) if bw else 1.0
+        cr.translate((aw - bw * scale) / 2, max(0, (ah - bh * scale) / 2))
+        cr.scale(scale, scale)
         GtkOverlay.render_content(
             cr, bw, bh, scheme=scheme, mode="dictation", text="Listening…",
             bars=bars, tick=t, font_family=family, transcribing=False, a=1.0,
@@ -749,19 +842,14 @@ class SettingsDialog:
     # Transcription section (#15)
     # -----------------------------------------------------------------
     @classmethod
-    def _build_transcription_section(cls, vbox: Gtk.Box) -> None:
+    def _build_transcription_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         """Backend / model / language / fallback controls, applied live."""
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Transcription</b>")
-        vbox.pack_start(header, False, False, 0)
-
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(6)
+        body = cls._group(
+            vbox, "Transcription",
+            "The ears: what turns your voice into text, for every mode. "
+            "Applied live.")
 
         # Backend selector
-        grid.attach(cls._row_label("Backend:"), 0, 0, 1, 1)
         cls._backend_combo = Gtk.ComboBoxText()
         current = config_module.CFG.BACKEND.strip().lower()
         active_idx = 0
@@ -771,26 +859,23 @@ class SettingsDialog:
                 active_idx = i
         cls._backend_combo.set_active(active_idx)
         cls._backend_combo.connect("changed", cls._on_backend_changed)
-        grid.attach(cls._backend_combo, 1, 0, 1, 1)
+        cls._field(body, "Backend", cls._backend_combo, labels)
 
         # Model: editable combo — pick a known id or type a custom one.
-        grid.attach(cls._row_label("Model:"), 0, 1, 1, 1)
         cls._model_entry = Gtk.ComboBoxText.new_with_entry()
         cls._model_entry.get_child().set_hexpand(True)
-        grid.attach(cls._model_entry, 1, 1, 1, 1)
+        cls._field(body, "Model", cls._model_entry, labels)
 
         # Language: editable combo — common languages + "Autodetect".
-        grid.attach(cls._row_label("Language:"), 0, 2, 1, 1)
         cls._lang_entry = Gtk.ComboBoxText.new_with_entry()
         for label, code in cls._LANGUAGES:
             cls._lang_entry.append(code, f"{label}" + (f" ({code})" if code else ""))
         # Select the row matching the current code, else put the raw code in.
         if not cls._lang_entry.set_active_id(config_module.CFG.WHISPER_LANGUAGE):
             cls._lang_entry.get_child().set_text(config_module.CFG.WHISPER_LANGUAGE)
-        grid.attach(cls._lang_entry, 1, 2, 1, 1)
+        cls._field(body, "Language", cls._lang_entry, labels)
 
         # Microphone: "System default" + every detected capture device.
-        grid.attach(cls._row_label("Microphone:"), 0, 3, 1, 1)
         cls._mic_combo = Gtk.ComboBoxText()
         cls._mic_combo.append("", "System default")
         from loquivox.services.audio import list_input_devices
@@ -804,11 +889,10 @@ class SettingsDialog:
                 cls._mic_combo.set_active_id(config_module.CFG.INPUT_DEVICE)
             else:
                 cls._mic_combo.set_active(0)
-        grid.attach(cls._mic_combo, 1, 3, 1, 1)
+        cls._field(body, "Microphone", cls._mic_combo, labels)
 
         # Vocabulary: each engine's own way to stop dropping/mangling words it
         # doesn't expect (Whisper `prompt`, Deepgram `keyterm`).
-        grid.attach(cls._row_label("Vocabulary:"), 0, 4, 1, 1)
         cls._vocab_entry = Gtk.Entry()
         cls._vocab_entry.set_hexpand(True)
         cls._vocab_entry.set_text(config_module.CFG.VOCABULARY)
@@ -821,37 +905,36 @@ class SettingsDialog:
             "Deepgram: sent as keyterms (nova-3 only). "
             "OpenAI Realtime: not supported."
         )
-        grid.attach(cls._vocab_entry, 1, 4, 1, 1)
+        cls._field(body, "Vocabulary", cls._vocab_entry, labels)
 
-        vbox.pack_start(grid, False, False, 0)
+        body.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+                        False, False, 2)
+
+        # Offline fallback toggle
+        cls._fallback_check = Gtk.CheckButton(label="Fall back to whisper.cpp when a backend is unavailable")
+        cls._fallback_check.set_active(bool(config_module.CFG.FALLBACK_BACKEND))
+        body.pack_start(cls._fallback_check, False, False, 0)
 
         # whisper.cpp availability indicator (the "is it downloaded?" check) +
         # a download button.
         whisper_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         cls._whisper_status = Gtk.Label()
         cls._whisper_status.set_halign(Gtk.Align.START)
+        cls._whisper_status.set_xalign(0)
         cls._whisper_status.set_line_wrap(True)
+        cls._whisper_status.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        cls._whisper_status.set_max_width_chars(44)
+        cls._whisper_status.get_style_context().add_class("dim-label")
         dl_btn = Gtk.Button(label="Install / download")
         dl_btn.connect("clicked", cls._on_download_whispercpp)
         whisper_row.pack_start(cls._whisper_status, True, True, 0)
-        whisper_row.pack_start(dl_btn, False, False, 0)
-        vbox.pack_start(whisper_row, False, False, 0)
+        whisper_row.pack_end(dl_btn, False, False, 0)
+        body.pack_start(whisper_row, False, False, 0)
 
-        # Offline fallback toggle
-        cls._fallback_check = Gtk.CheckButton(label="Offline fallback (whisper.cpp) when a backend is unavailable")
-        cls._fallback_check.set_active(bool(config_module.CFG.FALLBACK_BACKEND))
-        vbox.pack_start(cls._fallback_check, False, False, 0)
-
-        # Apply button + status line
-        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cls._trans_status = Gtk.Label()
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_transcription)
-        apply_row.pack_start(apply_btn, False, False, 0)
-        cls._trans_status = Gtk.Label()
-        cls._trans_status.set_halign(Gtk.Align.START)
-        cls._trans_status.set_line_wrap(True)
-        apply_row.pack_start(cls._trans_status, True, True, 0)
-        vbox.pack_start(apply_row, False, False, 0)
+        cls._actions(body, apply_btn, cls._trans_status)
 
         cls._sync_model_entry()  # prefill model + capability hint
 
@@ -1142,15 +1225,17 @@ class SettingsDialog:
     def _build_postprocess_section(cls, vbox: Gtk.Box) -> None:
         from loquivox.config import POSTPROCESS_LEVELS, POSTPROCESS_MAX_LEVEL
 
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Post-processing</b> <small>(dictation → LLM)</small>")
-        vbox.pack_start(header, False, False, 6)
+        body = cls._group(
+            vbox, "Refinement",
+            "What an LLM does to a dictation before it is typed. Uses the chat "
+            "model from the Models tab (needs its API key); Off adds no "
+            "latency.")
 
         # Refinement intensity: Off → Correct → Light → Medium → Strong.
         cls._pp_scale_label = Gtk.Label()
         cls._pp_scale_label.set_halign(Gtk.Align.START)
-        vbox.pack_start(cls._pp_scale_label, False, False, 2)
+        cls._pp_scale_label.set_xalign(0)
+        body.pack_start(cls._pp_scale_label, False, False, 0)
 
         cls._pp_scale = Gtk.Scale.new_with_range(
             Gtk.Orientation.HORIZONTAL, 0, POSTPROCESS_MAX_LEVEL, 1)
@@ -1165,7 +1250,10 @@ class SettingsDialog:
         cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
         cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
         cls._refresh_pp_scale_label()
-        vbox.pack_start(cls._pp_scale, False, False, 0)
+        body.pack_start(cls._pp_scale, False, False, 0)
+
+        body.pack_start(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL),
+                        False, False, 6)
 
         # Translate — a separate axis; when on it overrides the level.
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -1180,7 +1268,7 @@ class SettingsDialog:
         if not cls._pp_lang.set_active_id(config_module.CFG.POSTPROCESS_TARGET_LANG):
             cls._pp_lang.get_child().set_text(config_module.CFG.POSTPROCESS_TARGET_LANG)
         trow.pack_start(cls._pp_lang, True, True, 0)
-        vbox.pack_start(trow, False, False, 0)
+        body.pack_start(trow, False, False, 0)
 
         # Format — a separate axis that COMBINES with the level / translate.
         cls._pp_format_check = Gtk.CheckButton(
@@ -1189,50 +1277,46 @@ class SettingsDialog:
         cls._pp_format_check.set_tooltip_text(
             "Lays the result out in plain-text paragraphs and lists. Combines "
             "with the refinement level (or works alone when level is Off).")
-        vbox.pack_start(cls._pp_format_check, False, False, 0)
+        body.pack_start(cls._pp_format_check, False, False, 0)
 
         # Advanced: a custom prompt that overrides the level's built-in prompt.
-        cls._pp_prompt_label = Gtk.Label()
-        cls._pp_prompt_label.set_halign(Gtk.Align.START)
-        cls._pp_prompt_label.set_markup(
-            "<small><b>Custom level prompt</b> — used when the level is set to "
-            "<i>Custom</i></small>"
-        )
-        vbox.pack_start(cls._pp_prompt_label, False, False, 2)
+        # Folded away — it is a 120px text box that only the Custom level reads,
+        # and unfolded it dominated a tab whose real control is one slider.
+        cls._pp_prompt_label = Gtk.Expander(label="Custom level prompt")
+        cls._pp_prompt_label.set_tooltip_text(
+            "Used when the refinement level is set to Custom.")
+        prompt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        prompt_box.set_margin_top(8)
 
         cls._pp_prompt_view = Gtk.TextView()
         cls._pp_prompt_view.set_wrap_mode(Gtk.WrapMode.WORD)
+        cls._pp_prompt_view.set_left_margin(6)
+        cls._pp_prompt_view.set_right_margin(6)
         cls._pp_prompt_view.get_buffer().set_text(config_module.CFG.POSTPROCESS_CUSTOM_PROMPT)
         cls._pp_prompt_scroll = Gtk.ScrolledWindow()
         cls._pp_prompt_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        cls._pp_prompt_scroll.set_min_content_height(80)
+        cls._pp_prompt_scroll.set_min_content_height(90)
+        cls._pp_prompt_scroll.set_shadow_type(Gtk.ShadowType.IN)
         cls._pp_prompt_scroll.add(cls._pp_prompt_view)
-        vbox.pack_start(cls._pp_prompt_scroll, False, False, 0)
+        prompt_box.pack_start(cls._pp_prompt_scroll, False, False, 0)
 
         clear_btn = Gtk.Button(label="Clear custom prompt")
         clear_btn.set_halign(Gtk.Align.START)
         clear_btn.connect("clicked", cls._on_reset_pp_prompt)
-        vbox.pack_start(clear_btn, False, False, 0)
+        prompt_box.pack_start(clear_btn, False, False, 0)
+        cls._pp_prompt_label.add(prompt_box)
+        # Open it when it is the level actually in use, or when there is
+        # already something in it to see.
+        cls._pp_prompt_label.set_expanded(
+            bool(config_module.CFG.POSTPROCESS_CUSTOM_PROMPT.strip()))
+        body.pack_start(cls._pp_prompt_label, False, False, 0)
 
         cls._update_pp_sensitivity()
 
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cls._pp_status = Gtk.Label()
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_postprocess)
-        row.pack_start(apply_btn, False, False, 0)
-        cls._pp_status = Gtk.Label()
-        cls._pp_status.set_halign(Gtk.Align.START)
-        cls._pp_status.set_line_wrap(True)
-        row.pack_start(cls._pp_status, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
-
-        hint = Gtk.Label()
-        hint.set_halign(Gtk.Align.START)
-        hint.set_markup(
-            "<small><i>Applied to dictation before it's typed. Uses the Groq chat "
-            "model (needs GROQ_API_KEY). Off adds no latency.</i></small>"
-        )
-        vbox.pack_start(hint, False, False, 0)
+        cls._actions(body, apply_btn, cls._pp_status)
 
     @classmethod
     def _update_pp_sensitivity(cls) -> None:
@@ -1342,59 +1426,46 @@ class SettingsDialog:
     @classmethod
     def _build_talk_section(cls, vbox: Gtk.Box) -> None:
         """Talk-mode knobs: who may end the briefing, and how it converses."""
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup(
-            f"<b>Ending the conversation</b> "
-            f"<small>({config_module.CFG.HOTKEY_DEFS['talk'][0]} starts it)</small>"
-        )
-        vbox.pack_start(header, False, False, 6)
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
-        note = Gtk.Label()
-        note.set_halign(Gtk.Align.START)
-        note.set_line_wrap(True)
-        note.set_markup(
-            "<small><i>Enter always writes the text — that one can't be turned "
-            "off, so there is always a way out. These two are extras.</i></small>"
-        )
-        vbox.pack_start(note, False, False, 0)
+        body = cls._group(
+            vbox, "Conversation",
+            f"How talk mode behaves once {config_module.CFG.HOTKEY_DEFS['talk'][0]} "
+            "opens a session. Which engine holds it is on the Models tab.")
 
-        cls._talk_phrase_check = Gtk.CheckButton(
-            label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
-        cls._talk_phrase_check.set_active(bool(config_module.CFG.TALK_FINISH_ON_PHRASE))
-        vbox.pack_start(cls._talk_phrase_check, False, False, 0)
-
-        cls._talk_model_check = Gtk.CheckButton(
-            label="When the assistant judges it has enough context")
-        cls._talk_model_check.set_active(bool(config_module.CFG.TALK_FINISH_BY_MODEL))
-        vbox.pack_start(cls._talk_model_check, False, False, 0)
-
-        header2 = Gtk.Label()
-        header2.set_halign(Gtk.Align.START)
-        header2.set_markup("<b>Conversation</b>")
-        vbox.pack_start(header2, False, False, 10)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.pack_start(cls._row_label("How far it digs:"), False, False, 0)
         cls._talk_depth = Gtk.ComboBoxText()
         for depth_id, label in cls._TALK_DEPTHS:
             cls._talk_depth.append(depth_id, label)
         cls._talk_depth.set_active_id(
             config_module.CFG.TALK_DEPTH if config_module.CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
-        row.pack_start(cls._talk_depth, True, True, 0)
-        vbox.pack_start(row, False, False, 0)
+        cls._field(body, "How far it digs", cls._talk_depth, labels)
 
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
                 " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
-        vbox.pack_start(cls._talk_semantic_check, False, False, 0)
+        body.pack_start(cls._talk_semantic_check, False, False, 0)
 
         cls._talk_speak_check = Gtk.CheckButton(
             label="Read the assistant's replies aloud, even with TTS off")
         cls._talk_speak_check.set_active(bool(config_module.CFG.TALK_SPEAK_REPLIES))
-        vbox.pack_start(cls._talk_speak_check, False, False, 0)
+        body.pack_start(cls._talk_speak_check, False, False, 0)
+
+        body = cls._group(
+            vbox, "Ending the conversation",
+            "Enter always writes the text — that one can't be turned off, so "
+            "there is always a way out. These are extras.")
+
+        cls._talk_phrase_check = Gtk.CheckButton(
+            label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
+        cls._talk_phrase_check.set_active(bool(config_module.CFG.TALK_FINISH_ON_PHRASE))
+        body.pack_start(cls._talk_phrase_check, False, False, 0)
+
+        cls._talk_model_check = Gtk.CheckButton(
+            label="When the assistant judges it has enough context")
+        cls._talk_model_check.set_active(bool(config_module.CFG.TALK_FINISH_BY_MODEL))
+        body.pack_start(cls._talk_model_check, False, False, 0)
 
         cls._talk_autopaste_check = Gtk.CheckButton(
             label="Paste the finished text straight away, without reviewing it")
@@ -1405,24 +1476,14 @@ class SettingsDialog:
             "back to the conversation. Off by default: talk mode otherwise "
             "never types anything you have not accepted."
         )
-        vbox.pack_start(cls._talk_autopaste_check, False, False, 0)
+        body.pack_start(cls._talk_autopaste_check, False, False, 0)
 
-        header_instr = Gtk.Label()
-        header_instr.set_halign(Gtk.Align.START)
-        header_instr.set_markup("<b>Instructions</b>")
-        vbox.pack_start(header_instr, False, False, 10)
-
-        instr_note = Gtk.Label()
-        instr_note.set_halign(Gtk.Align.START)
-        instr_note.set_line_wrap(True)
-        instr_note.set_markup(
-            "<small><i>Standing instructions for the conversation: what language "
-            "to speak, the persona, the tone, the kind of work you usually "
-            "discuss. Added to the built-in prompt, not replacing it — talk mode "
-            "keeps asking questions and keeps knowing when to stop. Both engines "
-            "read it. Leave empty for the default.</i></small>"
-        )
-        vbox.pack_start(instr_note, False, False, 0)
+        body = cls._group(
+            vbox, "Instructions",
+            "Standing instructions for the conversation: language, persona, "
+            "tone, the kind of work you usually discuss. Added to the built-in "
+            "prompt rather than replacing it, and read by both engines. Leave "
+            "empty for the default.")
 
         instr_scroll = Gtk.ScrolledWindow()
         instr_scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -1441,35 +1502,22 @@ class SettingsDialog:
             "termes techniques."
         )
         instr_scroll.add(cls._talk_instructions)
-        vbox.pack_start(instr_scroll, False, False, 0)
+        body.pack_start(instr_scroll, False, False, 0)
 
-        header3 = Gtk.Label()
-        header3.set_halign(Gtk.Align.START)
-        header3.set_markup("<b>Screen context</b>")
-        vbox.pack_start(header3, False, False, 10)
-
-        shot_note = Gtk.Label()
-        shot_note.set_halign(Gtk.Align.START)
-        shot_note.set_line_wrap(True)
-        shot_note.set_markup(
-            "<small><i>Most of what you are about to dictate is already on your "
-            "screen. What gets captured is the <b>focused window</b> — the one "
-            "you are working in — taken when the session starts, in parallel "
-            "with your first sentence, and described by the vision model. Press "
-            "<b>S</b> during a conversation to look again once something has "
-            "changed. Off by default: that window leaves the machine each "
-            "time.</i></small>"
-        )
-        vbox.pack_start(shot_note, False, False, 0)
+        body = cls._group(
+            vbox, "Screen context",
+            "Most of what you are about to dictate is already on your screen. "
+            "The focused window is captured when the session starts, in "
+            "parallel with your first sentence, and described by the vision "
+            "model; <b>S</b> looks again once something has changed. Off by "
+            "default — that window leaves the machine each time.")
 
         cls._talk_shot_check = Gtk.CheckButton(
             label="Let the assistant see what you are working in")
         cls._talk_shot_check.set_active(bool(config_module.CFG.TALK_SCREENSHOT))
         cls._talk_shot_check.connect("toggled", cls._on_talk_shot_toggled)
-        vbox.pack_start(cls._talk_shot_check, False, False, 0)
+        body.pack_start(cls._talk_shot_check, False, False, 0)
 
-        region_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        region_row.pack_start(cls._row_label("Capture:"), False, False, 0)
         cls._talk_shot_region = Gtk.ComboBoxText()
         cls._talk_shot_region.append("window", "The focused window (recommended)")
         cls._talk_shot_region.append("cursor", "A box around the cursor (X11 / Hyprland)")
@@ -1483,26 +1531,21 @@ class SettingsDialog:
             "as confident nonsense. A session that cannot do the framing you "
             "pick falls back to the whole screen and says so."
         )
-        region_row.pack_start(cls._talk_shot_region, True, True, 0)
-        vbox.pack_start(region_row, False, False, 0)
+        cls._field(body, "Capture", cls._talk_shot_region, labels)
 
-        cursor_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        cursor_row.pack_start(cls._row_label("Box width (px):"), False, False, 0)
         cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
         cls._talk_shot_cursor.set_value(int(config_module.CFG.TALK_SCREENSHOT_CURSOR_PX))
-        cursor_row.pack_start(cls._talk_shot_cursor, False, False, 0)
-        vbox.pack_start(cursor_row, False, False, 0)
+        cls._talk_shot_cursor.set_halign(Gtk.Align.START)
+        cls._field(body, "Box width (px)", cls._talk_shot_cursor, labels)
 
-        max_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        max_row.pack_start(cls._row_label("Downscale to (px):"), False, False, 0)
         cls._talk_shot_max = Gtk.SpinButton.new_with_range(0, 7680, 128)
         cls._talk_shot_max.set_value(int(config_module.CFG.TALK_SCREENSHOT_MAX_PX))
+        cls._talk_shot_max.set_halign(Gtk.Align.START)
         cls._talk_shot_max.set_tooltip_text(
             "Longest edge of the uploaded image — what keeps a 4K capture small. "
             "0 uploads it as captured."
         )
-        max_row.pack_start(cls._talk_shot_max, False, False, 0)
-        vbox.pack_start(max_row, False, False, 0)
+        cls._field(body, "Downscale to (px)", cls._talk_shot_max, labels)
 
         cls._talk_shot_clip = Gtk.CheckButton(
             label="Put back what was on the clipboard afterwards")
@@ -1514,27 +1557,19 @@ class SettingsDialog:
             "leaving its generated text there anyway, so the only loss is "
             "whatever you had copied a minute ago. Text only."
         )
-        vbox.pack_start(cls._talk_shot_clip, False, False, 0)
+        body.pack_start(cls._talk_shot_clip, False, False, 0)
         cls._on_talk_shot_toggled(cls._talk_shot_check)
 
-        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cls._note(vbox,
+                  "Timings, prompts and the turn-detection thresholds live "
+                  "under <tt>[talk]</tt> in config.toml.")
+
+        # One writer for the whole tab, so the button belongs to the page and
+        # not to whichever card it happened to be packed after.
+        cls._talk_status = Gtk.Label()
         apply_btn = Gtk.Button(label="Apply")
         apply_btn.connect("clicked", cls._on_apply_talk)
-        apply_row.pack_start(apply_btn, False, False, 0)
-        cls._talk_status = Gtk.Label()
-        cls._talk_status.set_halign(Gtk.Align.START)
-        cls._talk_status.set_line_wrap(True)
-        apply_row.pack_start(cls._talk_status, True, True, 0)
-        vbox.pack_start(apply_row, False, False, 10)
-
-        hint = Gtk.Label()
-        hint.set_halign(Gtk.Align.START)
-        hint.set_line_wrap(True)
-        hint.set_markup(
-            "<small><i>Timings, prompts and the turn-detection thresholds live "
-            "under [talk] in config.toml.</i></small>"
-        )
-        vbox.pack_start(hint, False, False, 0)
+        cls._actions(vbox, apply_btn, cls._talk_status)
 
     @classmethod
     def _on_talk_semantic_toggled(cls, check: Gtk.CheckButton) -> None:
@@ -1639,20 +1674,17 @@ class SettingsDialog:
         import os
         from loquivox.secrets import MANAGED_KEYS, SECRETS_FILE, read_secrets
 
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>API Keys</b>")
-        vbox.pack_start(header, False, False, 6)
+        body = cls._group(
+            vbox, "Provider keys",
+            f"Stored in <tt>{GLib.markup_escape_text(str(SECRETS_FILE))}</tt> "
+            "(chmod 600) and loaded at startup, so they survive a reboot. "
+            "Applied live on save.")
 
         stored = read_secrets()
-        grid = Gtk.Grid()
-        grid.set_column_spacing(10)
-        grid.set_row_spacing(6)
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         cls._key_entries = {}
 
-        for i, (key, label) in enumerate(MANAGED_KEYS.items()):
-            lbl = Gtk.Label(label=label + ":")
-            lbl.set_halign(Gtk.Align.START)
+        for key, label in MANAGED_KEYS.items():
             entry = Gtk.Entry()
             entry.set_hexpand(True)
             entry.set_visibility(False)  # masked
@@ -1661,32 +1693,17 @@ class SettingsDialog:
             # not stored here, hint that without exposing it.
             if not stored.get(key) and os.environ.get(key):
                 entry.set_placeholder_text("(set via environment — type to override)")
-            grid.attach(lbl, 0, i, 1, 1)
-            grid.attach(entry, 1, i, 1, 1)
+            cls._field(body, label, entry, labels)
             cls._key_entries[key] = entry
 
-        vbox.pack_start(grid, False, False, 0)
+        show_chk = Gtk.CheckButton(label="Show the keys")
+        show_chk.connect("toggled", cls._on_toggle_key_visibility)
+        body.pack_start(show_chk, False, False, 0)
 
-        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cls._key_status = Gtk.Label()
         save_btn = Gtk.Button(label="Save keys")
         save_btn.connect("clicked", cls._on_save_keys)
-        controls.pack_start(save_btn, False, False, 0)
-        show_chk = Gtk.CheckButton(label="Show")
-        show_chk.connect("toggled", cls._on_toggle_key_visibility)
-        controls.pack_start(show_chk, False, False, 0)
-        cls._key_status = Gtk.Label()
-        cls._key_status.set_halign(Gtk.Align.START)
-        cls._key_status.set_line_wrap(True)
-        controls.pack_start(cls._key_status, True, True, 0)
-        vbox.pack_start(controls, False, False, 0)
-
-        hint = Gtk.Label()
-        hint.set_halign(Gtk.Align.START)
-        hint.set_markup(
-            f"<small><i>Stored in <tt>{SECRETS_FILE}</tt> (chmod 600), loaded at "
-            "startup — persists across reboot. Applied live on save.</i></small>"
-        )
-        vbox.pack_start(hint, False, False, 0)
+        cls._actions(body, save_btn, cls._key_status)
 
     @classmethod
     def _on_toggle_key_visibility(cls, chk: Gtk.CheckButton) -> None:
@@ -1727,55 +1744,49 @@ class SettingsDialog:
     @classmethod
     def _build_hotkeys_section(cls, vbox: Gtk.Box) -> None:
         """Editable per-mode key bindings (evdev key names), applied on restart."""
-        header = Gtk.Label()
-        header.set_halign(Gtk.Align.START)
-        header.set_markup("<b>Hotkeys</b>")
-        vbox.pack_start(header, False, False, 8)
+        # Two groups, split the way the app splits them: keys you hold to
+        # record, and keys that act on the session in progress. That is the
+        # distinction `KeyboardHandler._is_recording_mode` makes, and reading
+        # ten bindings as one flat list is what hid it.
+        recording = set(config_module.CFG.RECORDING_MODES)
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        bodies = {
+            True: cls._group(
+                vbox, "Recording",
+                "Held down to record — release to transcribe."),
+            False: cls._group(
+                vbox, "Session actions",
+                "Pressed once, acting on whatever is already running."),
+        }
 
-        grid = Gtk.Grid()
-        grid.set_column_spacing(12)
-        grid.set_row_spacing(6)
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
-        for i, (mode_id, (_label, specs)) in enumerate(config_module.CFG.HOTKEY_DEFS.items()):
+        for mode_id, (_label, specs) in config_module.CFG.HOTKEY_DEFS.items():
             name = cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title())
-            lbl = Gtk.Label(label=name + ":")
-            lbl.set_halign(Gtk.Align.START)
             entry = Gtk.Entry()
             entry.set_hexpand(True)
             entry.set_text(" ".join(specs))
+            entry.set_placeholder_text("unbound")
 
             capture_btn = Gtk.Button(label="⌨ Set")
             capture_btn.set_tooltip_text("Press a key to bind it (no need to know its name)")
             capture_btn.connect("clicked", cls._on_capture_hotkey, mode_id, entry)
 
-            grid.attach(lbl, 0, i, 1, 1)
-            grid.attach(entry, 1, i, 1, 1)
-            grid.attach(capture_btn, 2, i, 1, 1)
+            cls._field(bodies[mode_id in recording], name, entry, labels,
+                       extra=capture_btn)
             cls._hotkey_entries[mode_id] = entry
             cls._hotkey_capture_btns.append(capture_btn)
 
-        vbox.pack_start(grid, False, False, 0)
+        cls._note(vbox,
+                  "Click <b>⌨ Set</b> then press a key or combo (e.g. Alt+Space) — "
+                  "or type space-separated specs like <tt>ALT+SPACE F3</tt> "
+                  "(first = primary, rest = aliases; combos join with <tt>+</tt>).")
 
-        hint = Gtk.Label()
-        hint.set_halign(Gtk.Align.START)
-        hint.set_markup(
-            "<small><i>Click <b>⌨ Set</b> then press a key or combo (e.g. Alt+Space) — "
-            "or type space-separated specs like <tt>ALT+SPACE F3</tt> (first = primary, "
-            "rest = aliases; combos join with <tt>+</tt>). Applied instantly on save.</i></small>"
-        )
-        vbox.pack_start(hint, False, False, 0)
-
-        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        apply_btn = Gtk.Button(label="Apply hotkeys")
-        apply_btn.connect("clicked", cls._on_apply_hotkeys)
-        apply_row.pack_start(apply_btn, False, False, 0)
         cls._hotkey_status = Gtk.Label()
-        cls._hotkey_status.set_halign(Gtk.Align.START)
-        cls._hotkey_status.set_line_wrap(True)
-        apply_row.pack_start(cls._hotkey_status, True, True, 0)
-        vbox.pack_start(apply_row, False, False, 0)
+        apply_btn = Gtk.Button(label="Apply")
+        apply_btn.connect("clicked", cls._on_apply_hotkeys)
+        cls._actions(vbox, apply_btn, cls._hotkey_status)
 
     @classmethod
     def _on_apply_hotkeys(cls, _btn: Gtk.Button) -> None:

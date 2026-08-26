@@ -368,6 +368,18 @@ it in sync with upstream instead of editing it.
   settings.json), so `_refresh_engine_widgets` puts every combo back in step —
   and it must read `config_module.CFG`, since `reload_config()` rebinds the
   singleton the module-level `CFG` import no longer points at.
+- Every page in `settings_dialog.py` is built from three helpers, never by
+  hand: `_group()` (a title, one dim line of prose, a framed body), `_field()`
+  (one label → control row, joined to the page's `Gtk.SizeGroup` so the label
+  column lines up across separate cards) and `_actions()` (the group's status
+  line plus its Apply, always last and right-aligned). Hand-packing a row is
+  what let each tab drift into its own spacing and its own idea of where Apply
+  goes. `_field()` also ellipsizes combos — a `Gtk.Window` can never be
+  narrower than its widest child, so one long microphone name used to set the
+  window's width. `tests/test_settings_layout.py` pins all of that.
+- An Apply button belongs to whatever it *writes*: a per-group writer puts it
+  inside that group's card, a tab-wide writer (Talk, Hotkeys) at the foot of
+  the page, outside the cards.
 
 ## Transcription backends
 
