@@ -21,10 +21,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import math
 import queue
 import threading
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -32,6 +33,7 @@ import sounddevice as sd
 import loquivox.config as config_module
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.talk import FINISH_MARKER, _strip_marker, user_said_done
+from loquivox.services.vad import EchoGate
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
 
@@ -42,6 +44,9 @@ BLOCK: int = 1024
 #: longest a closing session waits for the last reply to finish playing, in case
 #: the end-of-audio event never comes
 SPEECH_TAIL_TIMEOUT: float = 15.0
+#: how long the microphone stays gated after the last block was written — the
+#: sound card is still draining it, and that tail is echo like the rest
+ECHO_HANGOVER: float = 0.25
 
 
 class RealtimeTalk:
@@ -62,6 +67,10 @@ class RealtimeTalk:
         self._audio_done = threading.Event()
         self._audio_done.set()
         self._writing = False          # a chunk is on its way to the sound card
+        #: echo gate, live while a reply is playing (see ``_mic_chunks``)
+        self._gate: Optional[EchoGate] = None
+        self._held: List[np.ndarray] = []
+        self._echo_until: float = 0.0
         self._speech_deadline: Optional[float] = None
         self._loop = asyncio.new_event_loop()
         self._conn = None
@@ -104,6 +113,7 @@ class RealtimeTalk:
     def close(self) -> None:
         """Stop everything. Safe to call twice."""
         self._stop = True
+        self._echo_report()
         if self._mic is not None:
             self._mic.stop()
             self._mic.close()
@@ -167,25 +177,81 @@ class RealtimeTalk:
 
     # --- microphone → session ---------------------------------------------
 
+    def _echo_report(self) -> None:
+        """
+        Print what the last reply measured, and start the next one clean.
+
+        Called when the gate reopens — and from ``close()``, because a session
+        someone gave up on and killed mid-reply is exactly the one whose
+        numbers are worth seeing.
+        """
+        if self._gate is None:
+            return
+        print(self._gate.report)
+        self._gate = None
+        self._held.clear()
+
+    def _mic_chunks(self, mono: np.ndarray) -> List[np.ndarray]:
+        """
+        What of this captured chunk may reach the model.
+
+        The server hears the microphone continuously and cannot know that what
+        it hears is the assistant's own voice coming back off the speakers —
+        it reads it as the user interrupting and stops the reply dead, every
+        time. So the microphone is gated here while a reply plays, by the
+        ``EchoGate`` that also arbitrates the cascade's barge-in, and opens
+        only after ``TALK_BARGE_IN_MS`` of speech above the echo. What was held
+        back leaves with it, so the words that cut the assistant off are not
+        lost — ``TALK_BARGE_IN_KEEP`` of them, the window the cascade replays
+        into its next turn. ``TALK_BARGE_IN = false`` never opens it.
+        """
+        cfg = config_module.CFG
+        now = time.monotonic()
+        if not (self._audio_done.is_set() and self._audio.empty()
+                and not self._writing):
+            self._echo_until = now + ECHO_HANGOVER
+        if now >= self._echo_until:
+            self._echo_report()
+            return [mono]
+        if not cfg.TALK_BARGE_IN:
+            return []
+        if self._gate is None:
+            self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
+                                  margin=cfg.TALK_BARGE_IN_MARGIN)
+        self._gate.feed(mono)
+        if self._gate.speech_seconds < cfg.TALK_BARGE_IN_MS / 1000.0:
+            self._held.append(mono)
+            kept = sum(len(c) for c in self._held) / RATE
+            while len(self._held) > 1 and kept > cfg.TALK_BARGE_IN_KEEP:
+                kept -= len(self._held.pop(0)) / RATE
+            return []
+        chunks = self._held + [mono]
+        if self._held:
+            print(f"✋ Cut off — {self._gate.loudest:.3f} over an echo peaking "
+                  f"at {self._gate.echo_peak:.3f}")
+            self._held = []
+        return chunks
+
     def _on_audio(self, indata: np.ndarray, frames: int, time_info, status) -> None:
         """PortAudio callback: push captured audio to the model."""
         if self._conn is None or self._stop:
             return
-        mono = indata[:, 0]
+        mono = indata[:, 0].copy()  # PortAudio reuses the buffer; the gate keeps it
         # The recording overlay draws whatever lands here; without it a whole
         # realtime conversation shows a flat waveform.
         try:
             if STATE.viz_queue.qsize() < 5:
-                STATE.viz_queue.put_nowait(mono.copy())
+                STATE.viz_queue.put_nowait(mono)
         except Exception:
             pass
-        pcm = base64.b64encode(float32_to_pcm16(mono)).decode("ascii")
-        try:
-            asyncio.run_coroutine_threadsafe(
-                self._conn.input_audio_buffer.append(audio=pcm),
-                self._loop)
-        except Exception:
-            pass  # the loop is closing — the session is on its way out
+        for chunk in self._mic_chunks(mono):
+            pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._conn.input_audio_buffer.append(audio=pcm),
+                    self._loop)
+            except Exception:
+                pass  # the loop is closing — the session is on its way out
 
     # --- session → speakers ------------------------------------------------
 
@@ -385,6 +451,67 @@ if __name__ == "__main__":
     assert talk.finished_speaking(), "the session never closes"
     assert talk.done, "the model's marker must end the briefing"
     assert FINISH_MARKER not in talk._session.turns[-1]["content"]
+
+    # The echo gate: on speakers the microphone hears the reply, and anything
+    # forwarded from it makes the server's VAD interrupt the assistant.
+    import dataclasses
+
+    def _noise(rng, amp, samples=2400):        # 2400 = 100 ms
+        return (rng.standard_normal(samples) * amp).astype(np.float32)
+
+    rng = np.random.default_rng(2)
+    gate = RealtimeTalk(TalkSession())
+    echo, voice = _noise(rng, 0.03), _noise(rng, 0.2)
+    assert len(gate._mic_chunks(echo)) == 1, "nothing playing — the mic goes through"
+    gate._handle(_Event(type="response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00" * 64).decode()))
+    for _ in range(30):                 # 3 s of the reply leaking back in
+        assert not gate._mic_chunks(echo), "the assistant would cut itself off"
+    held = sum(len(c) for c in gate._held) / RATE
+    assert held <= config_module.CFG.TALK_BARGE_IN_KEEP + 0.1, f"unbounded buffer ({held:.1f}s)"
+    opened = []
+    for _ in range(8):                  # the user talks over it, louder
+        opened += gate._mic_chunks(voice)
+    assert len(opened) > 4, "a real interruption never reached the model"
+    assert not gate._held, "the words that cut in were dropped"
+    # Barge-in off: the reply is heard to the end, whatever the room does.
+    saved = config_module.CFG
+    config_module.CFG = dataclasses.replace(saved, TALK_BARGE_IN=False)
+    try:
+        assert not [c for _ in range(10) for c in gate._mic_chunks(voice)], \
+            "half duplex still forwarded the room"
+    finally:
+        config_module.CFG = saved
+    # Reply over: the gate reopens, and the next one starts from scratch.
+    gate._audio.get_nowait()
+    gate._audio_done.set()
+    gate._echo_until = 0.0
+    assert len(gate._mic_chunks(echo)) == 1, "the microphone stayed shut"
+    assert gate._gate is None, "the next reply inherits this one's echo"
+
+    # A loud reply with pauses between its sentences — the case that made a
+    # falling activation level cut the assistant off: the room measured during
+    # a pause is quieter than the syllable that follows it.
+    loud = RealtimeTalk(TalkSession())
+    loud._handle(_Event(type="response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00" * 64).decode()))
+    silence = np.zeros(2400, dtype=np.float32)
+    for _ in range(6):
+        for chunk in [_noise(rng, 0.12)] * 8 + [silence] * 6:
+            assert not loud._mic_chunks(chunk), \
+                f"the reply interrupted itself (bar {loud._gate.bar:.3f})"
+
+    # A headset: no echo to measure, and a voice that comes up over several
+    # blocks the way a real one does. A bar that keeps tracking climbs ahead of
+    # it and barge-in dies — which is exactly what shipped once.
+    head = RealtimeTalk(TalkSession())
+    head._handle(_Event(type="response.output_audio.delta",
+                        delta=base64.b64encode(b"\x00" * 64).decode()))
+    for _ in range(50):                 # 1 s of reply, nothing leaking back
+        assert not head._mic_chunks(_noise(rng, 0.002, 480)), "a headset leaks?"
+    ramp = [_noise(rng, 0.004 * 1.15 ** i, 480) for i in range(40)]  # 20 ms blocks
+    assert [c for block in ramp for c in head._mic_chunks(block)], \
+        f"the bar followed the voice up — barge-in is dead (bar {head._gate.bar:.3f})"
 
     spoken = RealtimeTalk(TalkSession())
     spoken._handle(_Event(type="conversation.item.input_audio_transcription.completed",

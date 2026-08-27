@@ -1516,6 +1516,25 @@ class SettingsDialog:
         cls._talk_speak_check.set_active(bool(config_module.CFG.TALK_SPEAK_REPLIES))
         body.pack_start(cls._talk_speak_check, False, False, 0)
 
+        cls._talk_barge_margin = Gtk.SpinButton.new_with_range(1.0, 6.0, 0.1)
+        cls._talk_barge_margin.set_digits(1)
+        cls._talk_barge_margin.set_value(float(config_module.CFG.TALK_BARGE_IN_MARGIN))
+        cls._talk_barge_margin.set_halign(Gtk.Align.START)
+        cls._talk_barge_margin.set_tooltip_text(
+            "How much louder than the assistant's own echo you have to be for "
+            "it to stop and listen.\n\n"
+            "On a headset this does nothing — nothing leaks back, so speaking "
+            "interrupts as it always did. On speakers it is your room and your "
+            "volume that decide: too low and the reply cuts itself off every "
+            "time, too high and you cannot interrupt it at all. Every reply "
+            "prints the two numbers to set it from (🔉 echo peak · loudest) in "
+            "the terminal.\n\n"
+            "When no value works — on a laptop's speakers a voice can beat the "
+            "echo by as little as ×1.2 — the fix is a headset, or echo "
+            "cancellation (PipeWire's libpipewire-module-echo-cancel)."
+        )
+        cls._field(body, "Cutting in (× the echo)", cls._talk_barge_margin, labels)
+
         body = cls._group(
             vbox, "Ending the conversation",
             "Enter always writes the text — that one can't be turned off, so "
@@ -1708,6 +1727,7 @@ class SettingsDialog:
                 "auto_paste": auto_paste,
                 "screenshot_region": cls._talk_shot_region.get_active_id() or "window",
                 "screenshot_restore_clipboard": bool(cls._talk_shot_clip.get_active()),
+                "barge_in_margin": round(float(cls._talk_barge_margin.get_value()), 2),
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
             })
