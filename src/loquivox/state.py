@@ -112,6 +112,9 @@ class AppState:
     # True for the whole duration of a talk session (many turns), so a second
     # press of the talk key can't start a competing conversation.
     talk_active: bool = False
+    # True once this talk session has said that the room drowns the microphone
+    # (services/talk.py echo_note); saying it once a reply would be nagging.
+    echo_advised: bool = False
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance

@@ -32,7 +32,8 @@ import sounddevice as sd
 
 import loquivox.config as config_module
 from loquivox.services.audio import resolve_input_device
-from loquivox.services.talk import FINISH_MARKER, _strip_marker, user_said_done
+from loquivox.services.talk import (FINISH_MARKER, _strip_marker, echo_note,
+                                    user_said_done)
 from loquivox.services.vad import EchoGate
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
@@ -188,6 +189,7 @@ class RealtimeTalk:
         if self._gate is None:
             return
         print(self._gate.report)
+        echo_note(self._gate)
         self._gate = None
         self._held.clear()
 

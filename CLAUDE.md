@@ -322,6 +322,14 @@ and acoustic echo cancellation (PipeWire's `libpipewire-module-echo-cancel`,
 selected as the microphone) is the only real fix. `TALK_BARGE_IN = false` makes
 the gate unconditional.
 
+When the echo alone comes back above `EchoGate.ADVICE_GAIN` × the speech
+threshold, that fix is the *only* outcome available, so `services/talk.py`
+`echo_note()` says it — once a session (`STATE.echo_advised`), from whichever
+engine ran, and into the bubble as a `note` message rather than to stdout
+alone: Loquivox usually runs as a service, where nothing printed is ever read.
+Without it the user sees an assistant that talks over them and cannot be
+stopped, with no reason given.
+
 `started` is what arms the gate in the cascade, and it matters that it is that
 event and not the call to `speak()`: the calibration window has to measure the
 reply's own echo, so it must not open on the silence before the first sample

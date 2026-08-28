@@ -127,6 +127,29 @@ def ends_briefing(answer: str) -> bool:
     return "?" not in _MARKER_RE.sub("", answer)
 
 
+def echo_note(gate) -> None:
+    """
+    Tell the user, once per session, that the room makes interrupting hopeless.
+
+    Both engines end up here: whichever one held the conversation, the symptom
+    is the same — an assistant that talks over you and cannot be stopped — and
+    so is the fix. It goes into the bubble rather than only to stdout because
+    that is where the user is looking, and because Loquivox usually runs as a
+    service, where nothing printed is ever read.
+    """
+    from loquivox.state import STATE
+
+    if gate is None or STATE.echo_advised:
+        return
+    advice = gate.advice
+    if not advice:
+        return
+    STATE.echo_advised = True
+    print(advice)
+    from loquivox.managers.chat import ChatManager
+    ChatManager.add_message("note", advice)
+
+
 def _normalize(text: str) -> str:
     """Lowercase, strip accents and punctuation — for phrase matching."""
     decomposed = unicodedata.normalize("NFKD", text.lower())
@@ -353,4 +376,29 @@ if __name__ == "__main__":
                 assert (FINISH_MARKER in prompt) is (phrase or model), (phrase, model)
     finally:
         config_module.CFG = base
+    # The room note: said once a session, and only when it is measurably true.
+    import numpy as np
+
+    import loquivox.managers.chat as chat_module
+    from loquivox.services.vad import EchoGate
+    from loquivox.state import STATE
+
+    said: list = []
+    chat_module.ChatManager.add_message = staticmethod(
+        lambda role, text, **kw: said.append(role))
+    rng = np.random.default_rng(0)
+
+    drowned = EchoGate(16000, threshold=0.02, margin=2.0, calibration_ms=100)
+    drowned.feed((rng.standard_normal(1600) * 0.15).astype(np.float32))
+    STATE.echo_advised = False
+    echo_note(drowned)
+    echo_note(drowned)
+    assert said == ["note"], f"nagging once a reply: {said}"
+
+    headset = EchoGate(16000, threshold=0.02, margin=2.0, calibration_ms=100)
+    headset.feed((rng.standard_normal(1600) * 0.002).astype(np.float32))
+    STATE.echo_advised = False
+    echo_note(headset)
+    echo_note(None)
+    assert said == ["note"], "a headset was told it cannot interrupt"
     print("✓ talk end-of-briefing logic OK")

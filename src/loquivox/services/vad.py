@@ -203,6 +203,11 @@ class EchoGate:
     ``VoiceActivityDetector``.
     """
 
+    #: an echo this far above the speech threshold means the microphone hears
+    #: the reply as loudly as it hears a person — no margin separates them, and
+    #: saying so beats leaving the user to wonder why nothing interrupts
+    ADVICE_GAIN: float = 2.0
+
     def __init__(self, sample_rate: int, *, threshold: float = 0.02,
                  margin: float = 2.0, calibration_ms: int = 600) -> None:
         self.sample_rate = max(1, int(sample_rate))
@@ -236,6 +241,26 @@ class EchoGate:
     def bar(self) -> float:
         """Level a block must reach to count as speech over the reply."""
         return max(self.threshold, self.echo_peak * self.margin)
+
+    @property
+    def advice(self) -> str:
+        """
+        What to do about a room the gate cannot work in, or "".
+
+        The gate can only ever report half duplex when the speakers come back
+        louder than speech itself; the user then sees an assistant that cannot
+        be interrupted and no reason for it. This is the reason, and it is only
+        worth saying when it is measurably true — at a headset's echo level it
+        stays empty.
+        """
+        if self.echo_peak < self.threshold * self.ADVICE_GAIN:
+            return ""
+        return ("🔇 The speakers come back into the microphone louder than "
+                f"speech itself ({self.echo_peak:.3f} against a "
+                f"{self.threshold:.3f} threshold): interrupting a reply cannot "
+                "work reliably here. Use a headset, or echo cancellation "
+                "(PipeWire's libpipewire-module-echo-cancel), selected as the "
+                "microphone.")
 
     @property
     def report(self) -> str:
@@ -329,4 +354,8 @@ if __name__ == "__main__":
         head.feed((rng.standard_normal(CHUNK) * 0.004 * 1.15 ** i).astype(np.float32))
     assert head.speech_seconds >= 0.4, (
         f"the bar followed the voice up — barge-in is dead (bar {head.bar:.3f})")
+    # The advice fires on a room the gate cannot work in, and stays quiet on a
+    # headset — where an assistant that cannot be interrupted is not the case.
+    assert loud.advice and "headset" in loud.advice, loud.advice
+    assert not head.advice, head.advice
     print("✓ EchoGate OK")

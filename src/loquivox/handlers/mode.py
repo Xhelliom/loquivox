@@ -463,6 +463,7 @@ class ModeHandler:
         from loquivox.services.talk import TalkSession
 
         session = TalkSession()
+        STATE.echo_advised = False
         try:
             with GrabbedKeys() as keys:
                 if not keys.alive:
@@ -836,6 +837,7 @@ class ModeHandler:
         Nothing is transcribed here — the live session stays shut. The only
         question being asked of the audio is "did they start speaking".
         """
+        from loquivox.services.talk import echo_note
         from loquivox.services.vad import EchoGate
 
         cfg = config_module.CFG
@@ -876,6 +878,7 @@ class ModeHandler:
         AudioService.stop_recording()
         if gate is not None:
             print(gate.report)      # the two numbers TALK_BARGE_IN_MARGIN is set from
+            echo_note(gate)
         if tail is not None:
             print("✋ Cut off — listening")
         return tail

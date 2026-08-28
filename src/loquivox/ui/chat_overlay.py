@@ -249,6 +249,17 @@ html, body {{
   text-transform: uppercase; color: {accent}; opacity: 0.9;
 }}
 
+/* A note the session makes about its own conditions — why interrupting cannot
+   work in this room, and what to do about it. An aside, deliberately not an
+   answer: no accent, no copy button, smaller than what was said. */
+.note .message {{
+  max-width: 100%;
+  background: {white_alpha05}; color: {dim_text};
+  border: 1px solid {white_alpha05};
+  border-radius: 10px; font-size: 12px; line-height: 1.5;
+}}
+.note .copy-btn {{ display: none; }}
+
 .status {{
   align-self: center; background: {white_alpha05}; color: {dim_text};
   font-size: 11px; padding: 3px 10px; border-radius: 10px;
