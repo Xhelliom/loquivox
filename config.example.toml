@@ -222,6 +222,11 @@ barge_in_ms = 400
 # How much of what was heard is kept as the start of the next turn (seconds):
 # the words spoken over the reply must not be lost.
 barge_in_keep = 1.5
+# Speakers: how many times louder than the reply's own echo you have to be for
+# it to count as interrupting (both engines). Too low and the assistant
+# cuts itself off; too high and you cannot interrupt it. Every reply prints
+# `🔉 echo peak … · loudest …` — set this just under loudest / peak.
+barge_in_margin = 2.0
 
 # Screen context: the focused window, captured when the session starts,
 # described once by the vision model and handed to the conversation. Most of

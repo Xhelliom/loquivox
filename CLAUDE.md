@@ -292,13 +292,50 @@ interruption, and the PCM stream calls `abort()`, not `stop()`, so what is
 still in the sound card is *not* drained) and `started`, set on the first
 sample that actually reaches the speakers.
 
-`started` is the whole anti-echo mechanism: the VAD is armed on it, so its
-calibration window measures the reply's own echo and the activation level lands
-above whatever the speakers leak back into the microphone. On a headset there is
-nothing to leak and it stays at the plain threshold — which is why there is no
-"do you wear headphones" setting. With the volume up and no echo cancellation a
-reply can still cut itself off; the fix is a headset or PipeWire's
-`libpipewire-module-echo-cancel` in monitor mode.
+Both engines ask that question through one object, `EchoGate` in
+`services/vad.py`: a block counts as speech if it is `TALK_BARGE_IN_MARGIN`
+times louder than the echo, measured over the reply's opening 600 ms and then
+**frozen**. `VoiceActivityDetector` cannot be reused for it, and the reason is
+worth keeping: it keeps tracking, and tracking fails both ways here. Downwards
+— its level falls back to the quietest block since — the pauses between the
+assistant's own sentences drag it to the room and the next syllable of echo
+reads as speech. Upwards, a voice comes up over several blocks, each still
+under the bar, so a bar that follows them climbs ahead of the speaker and is
+never crossed; that killed barge-in on headsets, where there is no echo to
+measure at all.
+
+The Realtime engine needs the gate in front of the microphone itself, and there
+it is not optional: the server hears the microphone continuously and cannot be
+told what is echo, so it reads the assistant's own voice as an interruption and
+stops the reply dead. `RealtimeTalk._mic_chunks` therefore holds the captured
+audio back while a reply plays and forwards it only once the gate has heard
+`TALK_BARGE_IN_MS`, with `TALK_BARGE_IN_KEEP` seconds of held audio going out
+ahead of it — the window `snapshot_tail` replays in the cascade.
+
+The margin is the room and the volume, not the software, so it is a setting
+(Settings → Talk) and every reply prints the two numbers it is set from
+(`🔉 echo peak … · loudest …`). Sometimes no value works: measured on a
+laptop's speakers, a voice beat the echo by ×1.2. The gate then stays shut and
+loud speakers are half duplex, which is the failure to prefer — not being able
+to interrupt is a nuisance, being cut off mid-sentence every time is unusable —
+and acoustic echo cancellation (PipeWire's `libpipewire-module-echo-cancel`,
+selected as the microphone) is the only real fix. `TALK_BARGE_IN = false` makes
+the gate unconditional.
+
+When the echo alone comes back above `EchoGate.ADVICE_GAIN` × the speech
+threshold, that fix is the *only* outcome available, so `services/talk.py`
+`echo_note()` says it — once a session (`STATE.echo_advised`), from whichever
+engine ran, and into the bubble as a `note` message rather than to stdout
+alone: Loquivox usually runs as a service, where nothing printed is ever read.
+Without it the user sees an assistant that talks over them and cannot be
+stopped, with no reason given.
+
+`started` is what arms the gate in the cascade, and it matters that it is that
+event and not the call to `speak()`: the calibration window has to measure the
+reply's own echo, so it must not open on the silence before the first sample
+reaches the speakers. On a headset it measures a quiet room, the bar stays at
+`TALK_VAD_THRESHOLD`, and that is why there is no "do you wear headphones"
+setting.
 
 What was heard when the user cut in is not thrown away: `snapshot_tail` keeps
 `TALK_BARGE_IN_KEEP` seconds and hands them to the next `_talk_listen` as its

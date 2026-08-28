@@ -3,7 +3,6 @@ Unified handler for all recording modes.
 """
 from __future__ import annotations
 
-import math
 import threading
 import time
 from typing import Optional, Tuple
@@ -464,6 +463,7 @@ class ModeHandler:
         from loquivox.services.talk import TalkSession
 
         session = TalkSession()
+        STATE.echo_advised = False
         try:
             with GrabbedKeys() as keys:
                 if not keys.alive:
@@ -824,17 +824,21 @@ class ModeHandler:
         next turn, which must survive the interruption — or None if the reply
         was spoken to the end.
 
-        The detector is armed on the first sample that actually leaves for the
+        The gate is armed on the first sample that actually leaves for the
         speakers, never before: its calibration window then measures the
-        reply's own echo, so the activation level lands above whatever the
-        speakers leak back into the microphone. On a headset there is nothing
-        to leak and it stays at the plain threshold, which is why this needs no
-        setting of its own for "do you wear headphones".
+        reply's own echo, and only something ``TALK_BARGE_IN_MARGIN`` times
+        louder counts as someone talking over it. On a headset there is nothing
+        to leak, the bar stays at the plain threshold, and this needs no
+        setting of its own for "do you wear headphones". It is the same
+        ``EchoGate`` the Realtime engine puts in front of its microphone — the
+        server there cannot even be told what is echo, so both engines end up
+        asking this one question of the audio.
 
         Nothing is transcribed here — the live session stays shut. The only
         question being asked of the audio is "did they start speaking".
         """
-        from loquivox.services.vad import VoiceActivityDetector
+        from loquivox.services.talk import echo_note
+        from loquivox.services.vad import EchoGate
 
         cfg = config_module.CFG
         if not cfg.TALK_BARGE_IN:
@@ -854,23 +858,11 @@ class ModeHandler:
         speaker.start()
         while speaker.is_alive() and not started.wait(0.05):
             pass
+        gate = None
         if started.is_set():
-            STATE.vad = VoiceActivityDetector(
-                STATE.capture_rate,
-                threshold=cfg.TALK_VAD_THRESHOLD,
-                # Never ends a turn on its own: `ended` would make the detector
-                # inert, and the only thing read here is how much speech it has
-                # heard. The pause that ends a turn is _talk_listen's business.
-                silence_ms=10 ** 6,
-                # min_speech_ms is left at its default: it only gates the branch
-                # that sets `ended`, which silence_ms above makes unreachable.
-                # The barge-in threshold is the explicit speech_seconds check
-                # below — one place to tune, not two that look alike.
-                # The one detector that calibrates on speech on purpose: it is
-                # listening through the assistant's own echo and has to sit
-                # above it, so the usual ceiling would defeat it.
-                max_level=math.inf,
-            )
+            gate = STATE.vad = EchoGate(STATE.capture_rate,
+                                        threshold=cfg.TALK_VAD_THRESHOLD,
+                                        margin=cfg.TALK_BARGE_IN_MARGIN)
         needed = cfg.TALK_BARGE_IN_MS / 1000.0
         while speaker.is_alive():
             vad = STATE.vad
@@ -884,6 +876,9 @@ class ModeHandler:
                 if stop.is_set() else None)
         STATE.vad = None
         AudioService.stop_recording()
+        if gate is not None:
+            print(gate.report)      # the two numbers TALK_BARGE_IN_MARGIN is set from
+            echo_note(gate)
         if tail is not None:
             print("✋ Cut off — listening")
         return tail

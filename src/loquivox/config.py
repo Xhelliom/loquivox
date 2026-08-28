@@ -310,6 +310,14 @@ class Config:
     # How much of what the microphone heard is kept as the start of the next
     # turn (seconds) — the words spoken over the reply must not be lost.
     TALK_BARGE_IN_KEEP: float = 1.5
+    # How many times louder than the reply's own echo a block must be to count
+    # as someone speaking over it (services/vad.py EchoGate, used by both
+    # engines). The physical knob of this feature — how much the speakers leak
+    # back into the microphone is a property of the room and of the volume, and
+    # no default can know it. Too low and the reply cuts itself off; too high
+    # and nothing can interrupt it. Each reply prints the two numbers to set it
+    # from: the echo peak and the loudest block heard.
+    TALK_BARGE_IN_MARGIN: float = 2.0
     # How the conversation is held:
     #   "cascade"  — STT → LLM → TTS, every slot swappable (local or cloud)
     #   "realtime" — one OpenAI Realtime session, speech in and speech out:
@@ -770,6 +778,8 @@ def _build_config() -> Config:
         overrides["TALK_BARGE_IN_MS"] = int(talk["barge_in_ms"])
     if "barge_in_keep" in talk:
         overrides["TALK_BARGE_IN_KEEP"] = float(talk["barge_in_keep"])
+    if "barge_in_margin" in talk:
+        overrides["TALK_BARGE_IN_MARGIN"] = float(talk["barge_in_margin"])
     if str(talk.get("system_prompt", "")).strip():
         overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
     if "instructions" in talk:

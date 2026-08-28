@@ -105,12 +105,16 @@ class AppState:
     # True while a recording is paused: audio is neither buffered nor streamed,
     # but the input stream stays open so capture can resume instantly.
     paused: bool = False
-    # End-of-turn detector fed by the audio callback while talk mode listens
-    # (services/vad.py VoiceActivityDetector); None outside talk mode.
+    # Whatever talk mode wants the audio callback to feed while it listens:
+    # a VoiceActivityDetector between turns, an EchoGate while a reply plays
+    # (both in services/vad.py). None outside talk mode.
     vad: Optional[Any] = None
     # True for the whole duration of a talk session (many turns), so a second
     # press of the talk key can't start a competing conversation.
     talk_active: bool = False
+    # True once this talk session has said that the room drowns the microphone
+    # (services/talk.py echo_note); saying it once a reply would be nagging.
+    echo_advised: bool = False
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance
