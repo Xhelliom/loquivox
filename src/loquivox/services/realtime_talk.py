@@ -33,7 +33,7 @@ import sounddevice as sd
 import loquivox.config as config_module
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.talk import (FINISH_MARKER, _strip_marker, echo_note,
-                                    user_said_done)
+                                    user_asked_write, user_said_done)
 from loquivox.services.vad import EchoGate
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
@@ -388,7 +388,10 @@ class RealtimeTalk:
 
         ChatManager.add_message("user", f"🗣️ {text}")
         self._session.add_user(text)
-        if user_said_done(text):
+        if not self._session.write and user_asked_write(text):
+            self._session.write = True  # "écris ça": the chat becomes a briefing
+            self.done = True
+        elif user_said_done(text):
             self.done = True
 
     def _on_assistant_said(self, text: str) -> None:

@@ -38,9 +38,7 @@ class GrabbedKeys:
     """
     Keyboard access for a modal flow that spans several waits (talk mode).
 
-    ``capture_review`` & co open the keyboards, grab them, wait for ONE decision
-    and close everything. A talk session instead runs for minutes across many
-    waits — every spoken turn, then the review of the generated text — so it
+    A talk session runs for minutes across many waits — every spoken turn, then the review of the generated text — so it
     keeps the devices OPEN for its whole life: a key pressed while the model is
     thinking stays queued on our fd and is still there when the next wait
     starts, nothing is lost between turns.
@@ -408,8 +406,10 @@ class KeyboardHandler:
 
         # Talk mode: a whole spoken conversation, driven by its own worker,
         # which owns the precondition (it owns the flag).
-        if mode == "talk":
-            ModeHandler.start_talk_session()
+        # F4 is the same session with nothing written at the end: a conversation
+        # about what is on screen and the text the user had selected.
+        if mode in ("talk", "ai"):
+            ModeHandler.start_talk_session(write=(mode == "talk"))
             return
 
         # Pin toggle (non-recording action)
@@ -441,11 +441,6 @@ class KeyboardHandler:
         # Start recording for this mode
         if cls._is_recording_mode(mode):
             STATE.current_mode = mode
-
-            # For rewrite mode, copy selected text first
-            if mode == "ai_rewrite":
-                ClipboardService.copy_selected()
-
             OverlayManager.show(mode)
             AudioService.start_recording()
 
@@ -601,12 +596,19 @@ class KeyboardHandler:
         mapping.update({code: "finish" for code in _CONFIRM_CODES})
         for code in cls.trigger_codes("talk"):
             mapping.setdefault(code, "send")
-        if config_module.CFG.TALK_SCREENSHOT:
+        if cls._talk_looks():
             # Only when the screen is already part of the deal: S sends what is
             # on screen to the cloud, and a key that does that must not exist
             # for someone who turned the capture off.
             mapping[ecodes.KEY_S] = "screen"
         return mapping
+
+    @staticmethod
+    def _talk_looks() -> bool:
+        """Whether this session captures the screen — always in chat mode (F4),
+        where the screen is the subject, and by opt-in for the briefing (F6)."""
+        import loquivox.config as config_module
+        return STATE.current_mode == "ai" or bool(config_module.CFG.TALK_SCREENSHOT)
 
     @classmethod
     def talk_hints(cls) -> Tuple[Tuple[List[str], str], ...]:
@@ -615,12 +617,11 @@ class KeyboardHandler:
         same condition as ``talk_listen_keys`` so the strip cannot offer a key
         that does nothing.
         """
-        import loquivox.config as config_module
-
+        finish = "write it" if STATE.current_mode == "talk" else "end"
         hints: List[Tuple[List[str], str]] = [
-            (["Space"], "end turn"), (["Enter"], "write it"), (["Esc"], "cancel"),
+            (["Space"], "end turn"), (["Enter"], finish), (["Esc"], "cancel"),
         ]
-        if config_module.CFG.TALK_SCREENSHOT:
+        if cls._talk_looks():
             hints.append((["S"], "look again"))
         return tuple(hints)
 
@@ -629,10 +630,8 @@ class KeyboardHandler:
         """The review verdicts, with V dropping back into the conversation."""
         return {**cls._REVIEW_KEYS, ecodes.KEY_V: "talk"}
 
-    # --- AI action panel review (rewrite/vision) -----------------------------
-
-    #: keycode → verdict in the AI review panel. One table, so the panel, its
-    #: talk variant and the hint line can never drift apart.
+    #: keycode → verdict in the review of a generated text. One table, so the
+    #: bubble's review and its hint line can never drift apart.
     _REVIEW_KEYS: Dict[int, str] = {
         ecodes.KEY_ESC: "reject",
         ecodes.KEY_R: "redo",
@@ -645,56 +644,6 @@ class KeyboardHandler:
     def _review_action(cls, code: int) -> Optional[str]:
         """Map an evdev keycode to a review action (pure → testable without a device)."""
         return cls._REVIEW_KEYS.get(code)
-
-    @classmethod
-    def capture_review(cls, mode: str, timeout: float = 90.0) -> str:
-        """
-        Grab the keyboard and wait for the user's decision on the AI result shown
-        in the review panel. Returns "accept" / "reject" / "redo" / "redict" /
-        "copy".
-
-        Times out to "reject" — a review must NEVER auto-insert unreviewed text.
-        MUST run on a worker thread: it blocks.
-        """
-        with GrabbedKeys() as keys:
-            if not keys.alive:
-                return "reject"
-            with keys.exclusive():
-                return keys.poll(cls._REVIEW_KEYS, timeout) or "reject"
-
-    @classmethod
-    def record_instruction(cls, mode: str, timeout: float = 12.0) -> Optional[str]:
-        """
-        Re-record an instruction for the panel's 're-dictate' (V) action and
-        return its transcription, or None if cancelled / empty.
-
-        Reuses thread-safe primitives (``AudioService`` start/stop/transcribe are
-        not GTK calls). The mode's own trigger (or Enter) stops the recording,
-        Esc cancels, and running out of time stops it too — whatever was captured
-        is transcribed. Runs on the worker thread. NOTE: ``start_recording`` bumps
-        ``recording_generation`` — the caller must re-read it afterwards.
-        """
-        mapping: Dict[int, str] = {ecodes.KEY_ESC: "cancel"}
-        mapping.update({code: "stop" for code in _CONFIRM_CODES})
-        for code in cls.trigger_codes(mode):
-            mapping.setdefault(code, "stop")
-
-        with GrabbedKeys() as keys:
-            if not keys.alive:
-                return None
-            OverlayManager.show(mode)
-            AudioService.start_recording()
-            with keys.exclusive():
-                action = keys.poll(mapping, timeout)  # None on timeout → auto-stop
-            audio = AudioService.stop_recording()
-
-        if action == "cancel" or audio is None:
-            return None
-        OverlayManager.set_transcribing()
-        try:
-            return (AudioService.transcribe(audio) or "").strip() or None
-        except Exception:
-            return None
 
     # Re-scan interval (seconds) to pick up keyboards that (re)appear, e.g.
     # after resume from suspend or USB hotplug.

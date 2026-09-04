@@ -1814,8 +1814,8 @@ class SettingsDialog:
     # Hotkeys section (editable)
     # -----------------------------------------------------------------
     _HOTKEY_LABELS = {
-        "dictation": "Dictation", "ai": "AI Chat", "ai_rewrite": "Rewrite",
-        "vision": "Vision", "talk": "Talk", "pin": "Pin Chat", "tts": "TTS Toggle",
+        "dictation": "Dictation", "ai": "AI Chat",
+        "talk": "Talk", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
         "refine": "Stop + choose level",
     }

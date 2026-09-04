@@ -50,11 +50,20 @@ class ClipboardService:
 
     @staticmethod
     def copy_selected() -> str:
-        """Copy currently selected text and return it."""
+        """
+        Copy the current selection and return it — "" when nothing was selected.
+
+        Ctrl+C with no selection leaves the clipboard untouched, so what comes
+        back would be whatever was copied a minute ago; the model would then be
+        handed an old text as "the selection". The clipboard is emptied first
+        so that case reads as nothing, and a non-empty result is really the
+        selection. ponytail: the previous clipboard content is not restored —
+        a talk session ends by leaving its own text there anyway.
+        """
         clipboard = get_clipboard()
         inp = get_input()
-        is_term = inp.is_terminal_focused()
-        inp.simulate_copy(is_terminal=is_term)
+        clipboard.copy("")
+        inp.simulate_copy(is_terminal=inp.is_terminal_focused())
         time.sleep(CFG.CLIPBOARD_PASTE_DELAY)
         return clipboard.paste().strip()
 
