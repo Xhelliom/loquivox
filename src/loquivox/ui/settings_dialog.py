@@ -119,6 +119,10 @@ class SettingsDialog:
     _talk_shot_cursor: Optional[Gtk.SpinButton] = None
     _talk_shot_max: Optional[Gtk.SpinButton] = None
     _talk_status: Optional[Gtk.Label] = None
+    _research_check: Optional[Gtk.CheckButton] = None
+    _research_provider: Optional[Gtk.ComboBoxText] = None
+    _research_model: Optional[Gtk.ComboBoxText] = None
+    _research_status: Optional[Gtk.Label] = None
 
     # (writer, its status label) for every group that writes something, in the
     # order the pages are built. The one Apply button runs all of them.
@@ -432,7 +436,67 @@ class SettingsDialog:
         cls._build_engine_section(vbox, labels)
         cls._build_transcription_section(vbox, labels)   # slot 1 — the ears
         cls._build_chat_section(vbox, labels)            # slot 2 — the brain
+        cls._build_search_section(vbox, labels)          # slot 2b — the library
         cls._build_voice_section(vbox, labels)           # slot 3 — the mouth
+
+    @classmethod
+    def _build_search_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        """The research tool: who answers when the conversation needs a fact."""
+        cfg = config_module.CFG
+        body = cls._group(
+            vbox, "Search",
+            "The conversational models are quick and lightly read. When one of "
+            "them needs a fact, it hands the question to this model, which can "
+            "search the web, and keeps talking; the answer is given when it "
+            "comes back. OpenAI's Responses API with web search, or a Groq "
+            "compound model.")
+
+        cls._research_check = Gtk.CheckButton(label="Let the conversation look things up")
+        cls._research_check.set_active(bool(cfg.TALK_RESEARCH))
+        cls._field(body, "Research", cls._research_check, labels)
+
+        cls._research_provider = Gtk.ComboBoxText()
+        for pid in cfg.RESEARCH_PROVIDERS:
+            cls._research_provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid))
+        cls._research_provider.set_active_id(cfg.RESEARCH_PROVIDER)
+        cls._field(body, "Provider", cls._research_provider, labels)
+
+        cls._research_model = Gtk.ComboBoxText.new_with_entry()
+        for pid, mid in cfg.RESEARCH_DEFAULT_MODELS.items():
+            cls._research_model.append(mid, mid)
+        cls._research_model.get_child().set_text(cfg.MODEL_RESEARCH)
+        cls._field(body, "Model", cls._research_model, labels)
+
+        def _default_model(_combo) -> None:
+            pid = cls._research_provider.get_active_id() or "openai"
+            cls._research_model.get_child().set_text(cfg.RESEARCH_DEFAULT_MODELS.get(pid, ""))
+        cls._research_provider.connect("changed", _default_model)
+
+        cls._research_status = Gtk.Label()
+        cls._actions(body, cls._on_apply_research, cls._research_status)
+
+    @classmethod
+    def _on_apply_research(cls, _btn: Gtk.Button) -> None:
+        """Write [models] research_provider/research and [talk] research."""
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        provider = cls._research_provider.get_active_id() or "openai"
+        model = cls._research_model.get_child().get_text().strip()
+        enabled = cls._research_check.get_active()
+        if enabled and not model:
+            cls._research_status.set_markup("<small>⚠️ A model id is needed.</small>")
+            return
+        try:
+            update_section("models", {"research_provider": provider, "research": model})
+            update_section("talk", {"research": enabled})
+        except ConfigWriteError as e:
+            cls._research_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        config_module.reload_config()
+        print(f"🔎 Research: {'on' if enabled else 'off'} — {provider} / {model}")
+        cls._research_status.set_markup(
+            f"<small>✓ {'Research on' if enabled else 'Research off'} — takes effect "
+            "on the next talk session.</small>")
 
     @classmethod
     def _build_chat_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:

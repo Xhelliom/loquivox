@@ -601,6 +601,7 @@ class KeyboardHandler:
             # on screen to the cloud, and a key that does that must not exist
             # for someone who turned the capture off.
             mapping[ecodes.KEY_S] = "screen"
+        mapping[ecodes.KEY_T] = "select"  # send the highlighted text
         return mapping
 
     @staticmethod
@@ -623,6 +624,7 @@ class KeyboardHandler:
         ]
         if cls._talk_looks():
             hints.append((["S"], "look again"))
+        hints.append((["T"], "send selection"))
         return tuple(hints)
 
     @classmethod

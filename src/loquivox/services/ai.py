@@ -52,7 +52,9 @@ class AIService:
 
     @staticmethod
     def _stream(messages: List[Dict[str, Any]], model: str,
-                on_delta: Callable[[str], None]) -> str:
+                on_delta: Callable[[str], None],
+                tool_calls_out: Optional[List[Dict[str, str]]] = None,
+                **extra) -> str:
         """
         The same completion, handed over sentence by sentence as it is written.
 
@@ -61,20 +63,35 @@ class AIService:
         can drop a callback (it throttles) without losing text.
         """
         text = ""
-        for chunk in AIService._create(messages, model, stream=True):
+        calls: Dict[int, Dict[str, str]] = {}
+        for chunk in AIService._create(messages, model, stream=True, **extra):
             choices = getattr(chunk, "choices", None)
-            delta = choices[0].delta.content if choices else None
-            if not delta:
+            if not choices:
                 continue
-            text += delta
-            on_delta(text)
+            delta = choices[0].delta
+            for call in getattr(delta, "tool_calls", None) or []:
+                # A tool call streams like text: the name in one chunk, the
+                # JSON arguments spread over the next ones. Reassembled here
+                # so the caller gets whole calls, never fragments.
+                slot = calls.setdefault(call.index, {"id": "", "name": "", "arguments": ""})
+                slot["id"] = slot["id"] or (call.id or "")
+                if call.function is not None:
+                    slot["name"] = slot["name"] or (call.function.name or "")
+                    slot["arguments"] += call.function.arguments or ""
+            if delta.content:
+                text += delta.content
+                on_delta(text)
+        if tool_calls_out is not None:
+            tool_calls_out.extend(calls[i] for i in sorted(calls))
         return text
 
     @staticmethod
     @safe_execute("AI Completion")
     def complete(messages: List[Dict[str, Any]],
                  model: Optional[str] = None,
-                 on_delta: Optional[Callable[[str], None]] = None) -> Optional[str]:
+                 on_delta: Optional[Callable[[str], None]] = None,
+                 tools: Optional[List[Dict[str, Any]]] = None,
+                 tool_calls_out: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
         """
         Raw chat completion for callers that build their own message list.
 
@@ -88,9 +105,11 @@ class AIService:
         error path of ``safe_execute`` exactly like a failed one-shot call.
         """
         model = model or STATE.ai_chat_model
-        if on_delta is None:
+        extra = {"tools": tools} if tools else {}
+        if on_delta is None and not tools:
             return AIService._complete(messages, model)
-        return AIService._stream(messages, model, on_delta)
+        return AIService._stream(messages, model, on_delta or (lambda _t: None),
+                                 tool_calls_out, **extra)
 
     @staticmethod
     @safe_execute("AI Vision")

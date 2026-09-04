@@ -402,6 +402,28 @@ class ModeHandler:
                          args=(session,), daemon=True).start()
 
     @staticmethod
+    def _talk_take_selection(session) -> None:
+        """
+        T during a conversation: hand the model whatever is highlighted now.
+
+        The selection copied at the key press is the one the session opened
+        on; this replaces it with the current one, mid-conversation, the way S
+        replaces the screen description. It rides in ``context_clause()``, so
+        the cascade sees it on its next call and the Realtime session on its
+        next ``push_context``. The synthetic Ctrl+C goes through the
+        compositor, not evdev, so the exclusive grab does not stop it.
+        """
+        text = ClipboardService.copy_selected()
+        if not text:
+            print("📋 Nothing selected")
+            return
+        session.selection = text
+        preview = " ".join(text.split())
+        preview = preview if len(preview) <= 60 else preview[:59] + "…"
+        print(f"📋 Selection handed to the conversation: {preview}")
+        ChatManager.add_message("note", f"📋 Texte sélectionné envoyé : {preview}")
+
+    @staticmethod
     def _talk_screen_worker(session) -> None:
         """
         Hand the session what is on screen right now, in the background.
@@ -507,9 +529,13 @@ class ModeHandler:
                     pressed = keys.poll(mapping, 0.05)
                     if talk.push_context():
                         print("👁️  Screen context handed to the Realtime session")
+                    talk.push_research()
                     if pressed == "screen":
                         ModeHandler._talk_look(session)
                         continue  # not a turn boundary — keep listening
+                    if pressed == "select":
+                        ModeHandler._talk_take_selection(session)
+                        continue
                     if pressed == "cancel":
                         cancelled = True
                         break
@@ -558,6 +584,29 @@ class ModeHandler:
             prefix = None
             if action == "cancel":
                 return True
+            if action == "research":
+                # Nothing was said: drop the (silent) capture without paying
+                # for its transcription. The turn is the assistant's.
+                stream, STATE.stream_session = STATE.stream_session, None
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+                STATE.audio_buffer = []
+                found = session.research.take()
+                if found is None:
+                    continue
+                OverlayManager.set_status("Thinking…")
+                reply = session.reply_with_research(
+                    *found, on_delta=lambda t: ChatManager.stream("assistant", t))
+                if reply is not None and reply.text:
+                    ChatManager.add_message("assistant", reply.text)
+                    OverlayManager.set_status("Speaking…")
+                    prefix = ModeHandler._talk_speak(reply.text)
+                    if prefix is not None:
+                        session.mark_interrupted()
+                continue
 
             text = ModeHandler._talk_transcribe(audio)
             if action == "finish":
@@ -683,6 +732,8 @@ class ModeHandler:
                     # Looking again does not end the turn: the user is very
                     # likely mid-sentence about the thing they just changed.
                     ModeHandler._talk_look(session)
+                elif pressed == "select":
+                    ModeHandler._talk_take_selection(session)
                 elif pressed is not None:
                     action = pressed
                     break
@@ -696,6 +747,11 @@ class ModeHandler:
                             break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
                         action = idle_action
+                        break
+                    if not vad.speech_started and session.research.ready():
+                        # An answer is back and the user has not started
+                        # talking: the one moment it can be given.
+                        action = "research"
                         break
                 if time.monotonic() >= deadline:
                     break

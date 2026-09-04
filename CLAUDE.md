@@ -46,7 +46,10 @@ shown in a GTK overlay, with optional TTS read-back.
   the same writing phase as F6 on everything said so far.
 - F6 copies the selection too, as the text to rework: "select, F6, say how,
   done" replaces the old one-shot rewrite (F7) and vision (F8) modes, whose
-  shared `_ai_action_worker` and Cairo review panel are gone with them.
+  shared `_ai_action_worker` and Cairo review panel are gone with them. **T**
+  during either session (`_talk_take_selection`) replaces that selection with
+  whatever is highlighted now, the way S replaces the screen description — it
+  travels in `context_clause()`, so both engines pick it up the same way.
 - `CFG.MODES` is a *different* table: the overlay's appearance. `talk` has an
   entry there for its look while owning the microphone through its own session
   rather than through the hold-key, which is why it is not in `RECORDING_MODES`
@@ -208,6 +211,24 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 — a long spoken briefing must not pollute the F4 chat context. `STATE.vad` is the
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
+
+### The research tool (`services/research.py`)
+
+Both engines get one function, `research(question)`, when `CFG.TALK_RESEARCH`
+is on. The model calls it, is answered *immediately* with `STARTED` (so it says
+"I'm looking it up" and carries on), and `ResearchDesk.ask` runs the real
+query on a thread: OpenAI Responses + `web_search`, or a Groq compound model
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search).
+The answer is handed back *between turns only*, never mid-sentence: the
+cascade's `_talk_listen` breaks with `action="research"` when the desk is
+ready and the VAD has not heard speech, and `_talk_converse` speaks
+`TalkSession.reply_with_research`; the Realtime loop polls
+`RealtimeTalk.push_research`, which waits for the audio queue to drain and
+the server to report speech stopped, then injects a system item and asks for
+a response. The result lives in `session.turns` as a system message so the
+writing pass has the facts; the tool call and its stub never do — a "tool"
+role would leak into the F4 history and the generation prompt.
+`AIService.complete` reassembles streamed `tool_calls` for the cascade.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

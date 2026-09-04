@@ -88,6 +88,13 @@ provider = "groq"
 # (pip install -e '.[tts]'; the voice is fetched once, ~60 MB).
 chat = "openai/gpt-oss-120b"
 vision = "qwen/qwen3.6-27b"
+# The research tool of talk mode (F4/F6): the conversational model hands a
+# question to this one, which can search the web, and keeps talking until the
+# answer is back. "openai" uses the Responses API with web_search (needs
+# OPENAI_API_KEY); "groq" (default) uses a compound model that searches on its own — measured
+# at 2 s against 16 s for gpt-5-mini, same answer.
+research_provider = "groq"
+research = "groq/compound-mini"
 tts = "canopylabs/orpheus-v1-english"
 
 [clipboard]
@@ -170,6 +177,9 @@ finish_by_model = false    # the assistant ends it once it has enough context
 # utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
 # stays part of the brief. Ignored when finish_on_phrase = false.
 # finish_phrases = ["j'ai fini", "vas-y", "that's it"]
+# Let the conversation call the research tool ([models] research). Off = the
+# model answers from what it knows.
+research = true
 # Chat mode (F4) writes nothing — until one of these is said: the conversation
 # then becomes a briefing and the text is generated and reviewed like F6's.
 # write_phrases = ["écris ça", "rédige", "write it"]

@@ -153,6 +153,13 @@ class Config:
     AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
     MODEL_CHAT: str = "openai/gpt-oss-120b"
     MODEL_VISION: str = "qwen/qwen3.8-27b"
+    #: who answers the talk engines' ``research`` tool — a model that can search
+    #: the web: OpenAI's Responses API + web_search, or a Groq compound model.
+    RESEARCH_PROVIDER: str = "groq"
+    RESEARCH_PROVIDERS: Tuple[str, ...] = ("openai", "groq")
+    MODEL_RESEARCH: str = "groq/compound-mini"
+    RESEARCH_DEFAULT_MODELS: Dict[str, str] = field(default_factory=lambda: {
+        "openai": "gpt-5-mini", "groq": "groq/compound-mini"})
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
@@ -430,6 +437,8 @@ class Config:
     #: moment the conversation ended.
     TALK_AUTO_PASTE: bool = False
     TALK_SPEAK_REPLIES: bool = True
+    #: let the conversation call ``research`` (services/research.py)
+    TALK_RESEARCH: bool = True
 
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
@@ -826,6 +835,12 @@ def _build_config() -> Config:
         overrides["MODEL_CHAT"] = str(models["chat"])
     if "vision" in models:
         overrides["MODEL_VISION"] = str(models["vision"])
+    if models.get("research_provider") in base.RESEARCH_PROVIDERS:
+        overrides["RESEARCH_PROVIDER"] = str(models["research_provider"])
+    if str(models.get("research", "")).strip():
+        overrides["MODEL_RESEARCH"] = str(models["research"]).strip()
+    if "research" in talk:
+        overrides["TALK_RESEARCH"] = bool(talk["research"])
     if "tts" in models:
         overrides["MODEL_TTS"] = str(models["tts"])
 
