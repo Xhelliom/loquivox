@@ -13,6 +13,7 @@ from loquivox import config as config_module
 from loquivox.config import CFG
 from loquivox.decorators import safe_execute
 from loquivox.state import STATE
+from loquivox.services import media
 from loquivox.transcription import get_dispatcher
 
 
@@ -139,6 +140,7 @@ class AudioService:
         rate = streaming_backend.stream_sample_rate if streaming_backend else CFG.SAMPLE_RATE
         STATE.capture_rate = rate
 
+        media.mic_opened()
         STATE.stream = sd.InputStream(
             samplerate=rate,
             channels=1,
@@ -176,6 +178,7 @@ class AudioService:
             STATE.stream.stop()
             STATE.stream.close()
             STATE.stream = None
+            media.mic_closed()
 
         if STATE.audio_buffer:
             return np.concatenate(STATE.audio_buffer, axis=0)

@@ -151,7 +151,7 @@ class SettingsDialog:
 
         # Group the (now numerous) settings into tabs instead of one long scroll.
         # Order: what the app does (Models → Talk → Refinement), then how you
-        # drive it (Hotkeys, Appearance), then one-time setup (API Keys).
+        # drive it (Hotkeys, Appearance & comfort), then one-time setup (API Keys).
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
         for m in ("top", "start", "end"):
@@ -163,7 +163,7 @@ class SettingsDialog:
             ("Talk", cls._build_talk_section),
             ("Refinement", cls._build_postprocess_section),
             ("Hotkeys", cls._build_hotkeys_section),
-            ("Appearance", cls._build_appearance_page),
+            ("Appearance & comfort", cls._build_appearance_page),
             ("API Keys", cls._build_api_keys_section),
         ):
             page = cls._page()
@@ -933,6 +933,42 @@ class SettingsDialog:
         bar_check.set_active(STATE.show_hotkey_bar)
         bar_check.connect("toggled", cls._on_hotkey_bar_toggled)
         body.pack_start(bar_check, False, False, 0)
+
+        # Music while the microphone is open — see services/media.py. Written
+        # to config.toml on change, like everything else on this tab.
+        body = cls._group(
+            vbox, "Music",
+            "A classic Bluetooth headset pauses every player when its "
+            "microphone opens, and nothing resumes them. Lowering the volume "
+            "instead only shows on speakers, a wired headset or a Bluetooth "
+            "LE Audio headset — on a classic one it behaves like resume.")
+        media_combo = Gtk.ComboBoxText()
+        for mid, label in (("off", "Leave it alone"),
+                           ("resume", "Resume playback afterwards"),
+                           ("duck", "Lower the volume, then restore and resume")):
+            media_combo.append(mid, label)
+        media_combo.set_active_id(config_module.CFG.MEDIA)
+        cls._field(body, "While recording", media_combo, labels)
+        duck = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        duck.set_value(round(config_module.CFG.MEDIA_DUCK_VOLUME * 100))
+        duck.set_draw_value(True)
+        duck.set_value_pos(Gtk.PositionType.RIGHT)
+        cls._field(body, "Lowered volume (%)", duck, labels)
+        media_combo.connect("changed", lambda w: cls._on_media_changed(w, duck))
+        duck.connect("value-changed", lambda w: cls._on_media_changed(media_combo, w))
+
+    @classmethod
+    def _on_media_changed(cls, combo: Gtk.ComboBoxText, duck: Gtk.Scale) -> None:
+        from loquivox.config_io import ConfigWriteError, update_section
+        try:
+            update_section("transcription", {
+                "media": combo.get_active_id() or "resume",
+                "media_duck_volume": round(duck.get_value() / 100, 2),
+            })
+        except ConfigWriteError as e:
+            print(f"⚠️  Could not save the music setting: {e}")
+            return
+        config_module.reload_config()  # services/media.py reads CFG live
 
     @classmethod
     def _draw_overlay_preview(cls, widget: Gtk.DrawingArea, cr) -> bool:

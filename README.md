@@ -120,7 +120,7 @@ assign a key to use it.
 
 > [!TIP]
 > Forgot a key? A thin tab sits at the top-center of your screen — hover it and the full list
-> drops down. Turn it off in **Settings → Appearance**.
+> drops down. Turn it off in **Settings → Appearance & comfort**.
 
 ---
 
@@ -329,7 +329,7 @@ layer-rule {
 ## ⚙️ Configuration
 
 Most things are adjustable from the tray icon (**Settings**: Transcription, API Keys, Hotkeys,
-Appearance). Everything else lives in an optional TOML file:
+Appearance & comfort). Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml

@@ -29,7 +29,7 @@ from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 #: what _create_dialog asks for; nothing may make the window wider than this
 DEFAULT_WIDTH = 640
 
-TABS = ["Models", "Talk", "Refinement", "Hotkeys", "Appearance", "API Keys"]
+TABS = ["Models", "Talk", "Refinement", "Hotkeys", "Appearance & comfort", "API Keys"]
 
 
 def _notebook(win: Gtk.Window) -> Gtk.Notebook:

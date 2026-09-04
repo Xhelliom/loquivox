@@ -49,6 +49,23 @@ language = ""
 # Leave "" to use the system default input. An unknown/disconnected name falls
 # back to the default.
 input_device = ""
+# Music while the microphone is open (drives the players via `playerctl`):
+#   "off"    — leave it alone.
+#   "resume" — press play again afterwards. A classic Bluetooth headset switches
+#              to its headset profile when its microphone opens; the stereo
+#              output vanishes for an instant and every player pauses itself,
+#              then never resumes. Nothing can prevent that, this repairs it.
+#   "duck"   — lower the players' volume to `media_duck_volume` meanwhile, and
+#              restore it (and resume) afterwards. Only visible where the music
+#              survives the microphone: speakers, a wired headset, or a
+#              Bluetooth LE Audio (LC3) headset, which carries stereo and a
+#              microphone at once. On a classic Bluetooth headset it behaves
+#              like "resume".
+# Whatever the mode, the music only comes back once the microphone has been
+# closed for `media_grace_s` seconds: talk mode reopens it every turn.
+media = "resume"
+media_duck_volume = 0.2
+media_grace_s = 1.5
 # Capture sample rate in Hz.
 sample_rate = 44100
 # Resample to this rate before upload (Whisper runs at 16 kHz → smaller upload,

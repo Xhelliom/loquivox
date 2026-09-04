@@ -139,6 +139,12 @@ class Config:
     # = use the system default input. Stored by name (not index) so it survives
     # device reordering; an unknown/disconnected name falls back to the default.
     INPUT_DEVICE: str = ""
+    # Music while the microphone is open: "off", "resume" (press play again on
+    # the players a Bluetooth headset paused by switching to HFP) or "duck"
+    # (lower their volume meanwhile, and resume too). See services/media.py.
+    MEDIA: str = "resume"
+    MEDIA_DUCK_VOLUME: float = 0.2
+    MEDIA_GRACE_S: float = 1.5  # talk mode reopens the mic per turn
 
     # --- History Limits ---
     MAX_TOKENS: int = 32000
@@ -252,7 +258,7 @@ class Config:
     # --- Recording Overlay Geometry ---
     OVERLAY_WIDTH: int = 220
     OVERLAY_HEIGHT: int = 60
-    # Overlay visual style (user-selectable in Settings → Appearance):
+    # Overlay visual style (user-selectable in Settings → Appearance & comfort):
     #   "pill"    — capsule with a pulsing dot + horizontal waveform (default)
     #   "classic" — icon + centered text + mirrored EQ bars (the original look)
     OVERLAY_STYLES: Tuple[str, ...] = ("pill", "classic")
@@ -691,6 +697,12 @@ def _build_config() -> Config:
         overrides["VOCABULARY"] = str(trans["vocabulary"]).strip()
     if "input_device" in trans:
         overrides["INPUT_DEVICE"] = str(trans["input_device"])
+    if str(trans.get("media", "")) in ("off", "resume", "duck"):
+        overrides["MEDIA"] = str(trans["media"])
+    if "media_duck_volume" in trans:
+        overrides["MEDIA_DUCK_VOLUME"] = float(trans["media_duck_volume"])
+    if "media_grace_s" in trans:
+        overrides["MEDIA_GRACE_S"] = float(trans["media_grace_s"])
     if "sample_rate" in trans:
         overrides["SAMPLE_RATE"] = int(trans["sample_rate"])
     if "min_audio_sec" in trans:

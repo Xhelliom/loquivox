@@ -31,6 +31,7 @@ import numpy as np
 import sounddevice as sd
 
 import loquivox.config as config_module
+from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.research import REALTIME_TOOL, STARTED, question_of, result_message
 from loquivox.services.talk import (FINISH_MARKER, _strip_marker, echo_note,
@@ -108,6 +109,7 @@ class RealtimeTalk:
             raise RuntimeError("Realtime session did not open in time")
         self._player = threading.Thread(target=self._play, daemon=True)
         self._player.start()
+        media.mic_opened()
         self._mic = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
                                    device=resolve_input_device(),
                                    callback=self._on_audio)
@@ -122,6 +124,7 @@ class RealtimeTalk:
             self._mic.stop()
             self._mic.close()
             self._mic = None
+            media.mic_closed()
         self._audio.put(None)  # wake the player so it can exit
         if not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
