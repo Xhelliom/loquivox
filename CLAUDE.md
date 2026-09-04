@@ -21,10 +21,8 @@ shown in a GTK overlay, with optional TTS read-back.
 | Default key      | Mode id      | What it does                                              |
 |------------------|--------------|----------------------------------------------------------|
 | `R-Alt` / `F3`   | `dictation`  | Transcribe speech → type at cursor                       |
-| `F4`             | `ai`         | Ask the AI, answer typed + shown in chat overlay         |
-| `F7`             | `ai_rewrite` | Copy selected text, speak an instruction, paste rewrite  |
-| `F8`             | `vision`     | Screenshot + spoken question → Llama 4 vision answer     |
-| `F6`             | `talk`       | Spoken conversation → one ready-to-paste generated text  |
+| `F4`             | `ai`         | Spoken conversation about the screen + selected text     |
+| `F6`             | `talk`       | Spoken conversation → one generated text (reworks the selection if any) |
 | `F9`             | `pin`        | Toggle chat overlay "always on top"                      |
 | `F10`            | `tts`        | Toggle TTS read-back of AI answers                       |
 | `Esc`            | `cancel`     | Abort active recording / in-flight transcription         |
@@ -34,9 +32,24 @@ shown in a GTK overlay, with optional TTS read-back.
 - The first spec in each list is the primary key; the rest are aliases (incl.
   media keys). Specs support chords like `"ALT+SPACE"` or `"CTRL+SHIFT+D"`.
 - Recording modes — the ones whose key records while it is held — are listed in
-  `CFG.RECORDING_MODES`; `KeyboardHandler._is_recording_mode` is the only test,
-  and everything else (`pin`, `tts`, `cancel`, `pause`, `refine`, `talk`) is a
-  session action whose key-up does nothing.
+  `CFG.RECORDING_MODES`; `KeyboardHandler._is_recording_mode` is the only test
+  (only `dictation` today), and everything else (`pin`, `tts`, `cancel`,
+  `pause`, `refine`, `talk`, `ai`) is a session action whose key-up does nothing.
+- `ai` (F4) is a talk session with `write=False`: same worker, same bubble,
+  same engines, but `TalkSession.system_prompt()` swaps in `TALK_CHAT_PROMPT`
+  (no marker protocol, no depth clause), the screen is always captured, the
+  selection copied at the key press rides along in `context_clause()`, and the
+  turns are poured into `STATE.conversation_history` at the end so the bubble's
+  typed input continues the same discussion. Nothing is generated or typed —
+  unless the user says one of `TALK_WRITE_PHRASES` ("écris ça"): `user_asked_write`
+  flips `session.write`, the conversation loop returns and `_talk_worker` runs
+  the same writing phase as F6 on everything said so far.
+- F6 copies the selection too, as the text to rework: "select, F6, say how,
+  done" replaces the old one-shot rewrite (F7) and vision (F8) modes, whose
+  shared `_ai_action_worker` and Cairo review panel are gone with them. **T**
+  during either session (`_talk_take_selection`) replaces that selection with
+  whatever is highlighted now, the way S replaces the screen description — it
+  travels in `context_clause()`, so both engines pick it up the same way.
 - `CFG.MODES` is a *different* table: the overlay's appearance. `talk` has an
   entry there for its look while owning the microphone through its own session
   rather than through the hold-key, which is why it is not in `RECORDING_MODES`
@@ -86,7 +99,8 @@ handlers/         mode.py (routes a transcript per mode), keyboard.py (evdev lis
 `process_stream_async` runs transcription **in a worker thread** → result is
 marshalled to the GTK main loop via `GLib.idle_add` → `ModeHandler.process()`
 applies stale-guard + hallucination-guard, then dispatches to
-`_handle_dictation/_handle_ai/_handle_ai_rewrite/_handle_vision`.
+`_handle_dictation`, the only recording mode left. Everything spoken to the
+AI goes through the talk session (F4 and F6, below).
 
 ## Talk mode (`handlers/mode.py`, `services/talk.py`, `services/vad.py`)
 
@@ -198,6 +212,24 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
 
+### The research tool (`services/research.py`)
+
+Both engines get one function, `research(question)`, when `CFG.TALK_RESEARCH`
+is on. The model calls it, is answered *immediately* with `STARTED` (so it says
+"I'm looking it up" and carries on), and `ResearchDesk.ask` runs the real
+query on a thread: OpenAI Responses + `web_search`, or a Groq compound model
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search).
+The answer is handed back *between turns only*, never mid-sentence: the
+cascade's `_talk_listen` breaks with `action="research"` when the desk is
+ready and the VAD has not heard speech, and `_talk_converse` speaks
+`TalkSession.reply_with_research`; the Realtime loop polls
+`RealtimeTalk.push_research`, which waits for the audio queue to drain and
+the server to report speech stopped, then injects a system item and asks for
+a response. The result lives in `session.turns` as a system message so the
+writing pass has the facts; the tool call and its stub never do — a "tool"
+role would leak into the F4 history and the generation prompt.
+`AIService.complete` reassembles streamed `tool_calls` for the cascade.
+
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
 The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`
@@ -230,13 +262,12 @@ whole confusion. It clears what is on screen only — `answer_history` and the
 models' own histories belong to `HistoryManager`, which now routes its own
 reset through the same `clear()`.
 
-The end-of-session review lives in the bubble too, not in the Cairo AI panel:
+The end-of-session review lives in the bubble:
 `ChatManager.set_result()` adds a message with `role="result"`, which `role`
 turns into a CSS class like any other, so the markdown rendering and the copy
 button come for free and only the styling is new. It replaces the previous
 candidate rather than stacking (R rewrites in place). The key line under it is
-`review_hint_line()` from `recording_overlay.py` — one definition, read by that
-panel (rewrite/vision) and by the bubble (talk). `_talk_generate` hides the
+`review_hint_line()` from `recording_overlay.py`. `_talk_generate` hides the
 recording overlay while reviewing: its hint strip names the conversation's
 keys, which are not the ones that apply then.
 

@@ -88,6 +88,13 @@ provider = "groq"
 # (pip install -e '.[tts]'; the voice is fetched once, ~60 MB).
 chat = "openai/gpt-oss-120b"
 vision = "qwen/qwen3.6-27b"
+# The research tool of talk mode (F4/F6): the conversational model hands a
+# question to this one, which can search the web, and keeps talking until the
+# answer is back. "openai" uses the Responses API with web_search (needs
+# OPENAI_API_KEY); "groq" (default) uses a compound model that searches on its own — measured
+# at 2 s against 16 s for gpt-5-mini, same answer.
+research_provider = "groq"
+research = "groq/compound-mini"
 tts = "canopylabs/orpheus-v1-english"
 
 [clipboard]
@@ -104,8 +111,6 @@ terminal_cache_ttl = 0.2
 #   python -c "from evdev import ecodes; print([k for k in dir(ecodes) if k.startswith('KEY_')])"
 dictation  = ["RIGHTALT", "F3", "F13"]
 ai         = ["F4", "F14"]
-ai_rewrite = ["F7"]
-vision     = ["F8"]
 talk       = ["F6"]
 pin        = ["F9"]
 tts        = ["F10"]
@@ -172,6 +177,12 @@ finish_by_model = false    # the assistant ends it once it has enough context
 # utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
 # stays part of the brief. Ignored when finish_on_phrase = false.
 # finish_phrases = ["j'ai fini", "vas-y", "that's it"]
+# Let the conversation call the research tool ([models] research). Off = the
+# model answers from what it knows.
+research = true
+# Chat mode (F4) writes nothing — until one of these is said: the conversation
+# then becomes a briefing and the text is generated and reviewed like F6's.
+# write_phrases = ["écris ça", "rédige", "write it"]
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.
 review_timeout = 120.0
@@ -262,6 +273,10 @@ screenshot_max_px = 1280
 # and the generation phase (write the final text). Empty = keep the built-ins.
 # system_prompt = ""
 # generate_prompt = ""
+# Chat mode (F4) — the same session with nothing written at the end: an open
+# conversation about what is on screen and the text you had selected. The
+# screen is always captured there. Empty = the built-in prompt.
+# chat_prompt = ""
 
 [overlay]
 # Recording overlay size in pixels.

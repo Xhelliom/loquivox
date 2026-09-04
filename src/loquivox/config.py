@@ -45,9 +45,7 @@ POSTPROCESS_CUSTOM_LEVEL: int = 5
 # startup banner and the hover hotkey bar. Keys match HOTKEY_DEFS.
 HOTKEY_DESCRIPTIONS: Dict[str, str] = {
     "dictation":  "Dictate at the cursor",
-    "ai":         "Ask the AI",
-    "ai_rewrite": "Rewrite the selected text",
-    "vision":     "Screenshot + ask about it",
+    "ai":         "Talk about what's on screen",
     "talk":       "Talk it through, then get the text",
     "pin":        "Pin the chat overlay on top",
     "tts":        "Read AI answers aloud",
@@ -155,6 +153,13 @@ class Config:
     AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
     MODEL_CHAT: str = "openai/gpt-oss-120b"
     MODEL_VISION: str = "qwen/qwen3.8-27b"
+    #: who answers the talk engines' ``research`` tool — a model that can search
+    #: the web: OpenAI's Responses API + web_search, or a Groq compound model.
+    RESEARCH_PROVIDER: str = "groq"
+    RESEARCH_PROVIDERS: Tuple[str, ...] = ("openai", "groq")
+    MODEL_RESEARCH: str = "groq/compound-mini"
+    RESEARCH_DEFAULT_MODELS: Dict[str, str] = field(default_factory=lambda: {
+        "openai": "gpt-5-mini", "groq": "groq/compound-mini"})
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
@@ -367,6 +372,13 @@ class Config:
         "i'm done", "im done", "that's it", "that's all", "go ahead",
         "write it", "write the text", "done",
     )
+    #: Chat mode (F4) has no writing phase — until one of these is said. "Écris
+    #: ça" turns the conversation into a briefing on the spot: the text is
+    #: generated from everything said so far and reviewed like F6's.
+    TALK_WRITE_PHRASES: Tuple[str, ...] = (
+        "ecris ca", "ecris-le", "ecris le", "ecris moi", "redige", "note ca",
+        "write it", "write that", "write this", "write me",
+    )
     # How long the generated text waits for a verdict before being left on the
     # clipboard (seconds) — it is never typed without an explicit accept.
     TALK_REVIEW_TIMEOUT: float = 120.0
@@ -425,6 +437,8 @@ class Config:
     #: moment the conversation ended.
     TALK_AUTO_PASTE: bool = False
     TALK_SPEAK_REPLIES: bool = True
+    #: let the conversation call ``research`` (services/research.py)
+    TALK_RESEARCH: bool = True
 
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
@@ -443,6 +457,23 @@ class Config:
         "intent, tone, key facts, length. Never produce the final text until you "
         "are explicitly asked for it. Always answer in the language the user "
         "speaks."
+    )
+    # F4: an open conversation, nothing written at the end. Same call, same
+    # bubble, same voice — a different reason to talk.
+    TALK_CHAT_PROMPT: str = (
+        "You are on a live voice call with the user. They called you about what "
+        "is in front of them — the screen described in your context and, when "
+        "there is one, the text they had selected — to discuss it, understand "
+        "it, check it or get an opinion. Nothing gets written at the end: this "
+        "is the whole exchange.\n\n"
+        "What reaches you is a speech transcript, so it is spoken language, not "
+        "writing: it wanders, it backtracks, and the recognizer mishears words. "
+        "When a word looks wrong, say what you understood rather than guessing "
+        "silently.\n\n"
+        "Reply in a few short spoken sentences — no markdown, no lists, no "
+        "headings — because your answer is read aloud. Answer what was asked "
+        "first; ask something only when you genuinely cannot answer without it. "
+        "Always answer in the language the user speaks."
     )
     # Generation phase: same conversation, new instructions — write the thing.
     #: Standing instructions for the conversation: persona, language, tone. Added
@@ -471,16 +502,14 @@ class Config:
     # --- Mode Definitions (icon, overlay text, colors) ---
     MODES: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
         "dictation":  {"icon": "🎙️", "text": "Listening...",    "bg": "bg", "fg": "accent"},
-        "ai":         {"icon": "🤖", "text": "AI Listening...", "bg": "bg", "fg": "accent"},
-        "ai_rewrite": {"icon": "✍️", "text": "Rewrite Mode...", "bg": "bg", "fg": "accent"},
-        "vision":     {"icon": "📸", "text": "Vision Mode...",  "bg": "bg", "fg": "accent"},
+        "ai":         {"icon": "🤖", "text": "Chat Mode...",    "bg": "bg", "fg": "accent"},
         "talk":       {"icon": "🗣️", "text": "Talk Mode...",    "bg": "bg", "fg": "accent"},
     })
 
     #: The modes whose hotkey records audio while it is held. MODES above is the
     #: overlay's appearance table and is NOT this list: 'talk' has a look there
     #: but owns the microphone through its own session, not through the key.
-    RECORDING_MODES: Tuple[str, ...] = ("dictation", "ai", "ai_rewrite", "vision")
+    RECORDING_MODES: Tuple[str, ...] = ("dictation",)
 
     # --- Hotkey Definitions ---
     # format: "id": (Label, [chord specs])
@@ -493,8 +522,6 @@ class Config:
     HOTKEY_DEFS: Dict[str, Tuple[str, List[str]]] = field(default_factory=lambda: {
         "dictation":  ("R-Alt / F3", ["RIGHTALT", "F3", "F13"]),
         "ai":         ("F4",  ["F4", "F14"]),
-        "ai_rewrite": ("F7",  ["F7", "PREVIOUSSONG"]),
-        "vision":     ("F8",  ["F8", "PLAYPAUSE"]),
         # Spoken conversation that ends in one generated, ready-to-paste text.
         "talk":       ("F6",  ["F6"]),
         "pin":        ("F9",  ["F9", "NEXTSONG"]),
@@ -729,6 +756,10 @@ def _build_config() -> Config:
         overrides["TALK_FINISH_ON_PHRASE"] = bool(talk["finish_on_phrase"])
     if "finish_by_model" in talk:
         overrides["TALK_FINISH_BY_MODEL"] = bool(talk["finish_by_model"])
+    if "write_phrases" in talk:
+        overrides["TALK_WRITE_PHRASES"] = tuple(
+            str(phrase).strip().lower() for phrase in talk["write_phrases"]
+            if str(phrase).strip())
     if "finish_phrases" in talk:
         overrides["TALK_FINISH_PHRASES"] = tuple(
             str(phrase).strip().lower() for phrase in talk["finish_phrases"]
@@ -782,6 +813,8 @@ def _build_config() -> Config:
         overrides["TALK_BARGE_IN_MARGIN"] = float(talk["barge_in_margin"])
     if str(talk.get("system_prompt", "")).strip():
         overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
+    if "chat_prompt" in talk and str(talk["chat_prompt"]).strip():
+        overrides["TALK_CHAT_PROMPT"] = str(talk["chat_prompt"]).strip()
     if "instructions" in talk:
         overrides["TALK_INSTRUCTIONS"] = str(talk["instructions"]).strip()
     if str(talk.get("generate_prompt", "")).strip():
@@ -802,6 +835,12 @@ def _build_config() -> Config:
         overrides["MODEL_CHAT"] = str(models["chat"])
     if "vision" in models:
         overrides["MODEL_VISION"] = str(models["vision"])
+    if models.get("research_provider") in base.RESEARCH_PROVIDERS:
+        overrides["RESEARCH_PROVIDER"] = str(models["research_provider"])
+    if str(models.get("research", "")).strip():
+        overrides["MODEL_RESEARCH"] = str(models["research"]).strip()
+    if "research" in talk:
+        overrides["TALK_RESEARCH"] = bool(talk["research"])
     if "tts" in models:
         overrides["MODEL_TTS"] = str(models["tts"])
 

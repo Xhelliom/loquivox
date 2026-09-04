@@ -97,30 +97,6 @@ class OverlayManager:
 
     @staticmethod
     @run_on_main_thread
-    def set_ai_panel(mode: str, instruction: str, *, result: Optional[str] = None,
-                     generation: Optional[int] = None) -> None:
-        """
-        Drive the AI action panel (rewrite/vision) on the main thread.
-
-        ``result is None`` → 'thinking' phase (spinner + instruction, while the
-        model runs); a non-None ``result`` → 'review' phase (shows the result and
-        awaits the user's choice). Recreates the overlay window if it was torn
-        down (vision's ``hide_immediate``). Stale-guarded on ``generation`` like
-        ``hide()``: a panel for a superseded recording is dropped.
-        """
-        if generation is not None and generation != STATE.recording_generation:
-            return
-        from loquivox.ui.recording_overlay import GtkOverlay
-        if STATE.overlay_window is None:
-            STATE.overlay_window = GtkOverlay(mode)
-        phase = "thinking" if result is None else "review"
-        try:
-            STATE.overlay_window.set_ai_panel(phase, instruction, result or "")
-        except Exception:
-            pass
-
-    @staticmethod
-    @run_on_main_thread
     def hide(generation: Optional[int] = None) -> None:
         """
         Hide the overlay.
@@ -144,21 +120,3 @@ class OverlayManager:
             except Exception:
                 pass
             STATE.overlay_window = None
-
-    @staticmethod
-    def hide_immediate() -> None:
-        """
-        Destroy the overlay synchronously, skipping the fade-out.
-
-        Unlike ``hide()`` (which marshals onto the GTK loop and fades out over
-        ~370 ms), this tears the window down right away. MUST be called from the
-        GTK main thread — used before a Vision screenshot so the overlay is gone
-        from the captured image.
-        """
-        win = STATE.overlay_window
-        STATE.overlay_window = None
-        if win is not None:
-            try:
-                win.close_immediate()
-            except Exception:
-                pass

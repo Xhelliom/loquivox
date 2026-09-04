@@ -191,9 +191,6 @@ class ModeHandler:
 
         handlers = {
             "dictation": ModeHandler._handle_dictation,
-            "ai": ModeHandler._handle_ai,
-            "ai_rewrite": ModeHandler._handle_ai_rewrite,
-            "vision": ModeHandler._handle_vision,
         }
         handler = handlers.get(mode)
         try:
@@ -243,142 +240,6 @@ class ModeHandler:
         ClipboardService.type_text(text)
 
     @staticmethod
-    def _handle_ai(text: str) -> None:
-        """Handle AI chat mode: get response and type."""
-        response = AIService.chat(text)
-        if not response:
-            return
-        ModeHandler._deliver_response(
-            response, history_user=text, chat_user_text=text, output="type"
-        )
-
-    @staticmethod
-    def _rewrite_prompt(instruction: str, original: str) -> str:
-        """The rewrite prompt — extracted so redo/re-dictate can rebuild it."""
-        return (
-            f"INSTRUCTION:\n{instruction}\n\n"
-            f"ORIGINAL TEXT:\n{original}\n\n"
-            "Rewrite the original text based on the instruction. "
-            "Output ONLY the finished text, without introduction or formatting."
-        )
-
-    @staticmethod
-    def _handle_ai_rewrite(text: str) -> None:
-        """
-        Rewrite the selected text per the dictated instruction, with a review
-        panel. The selection (captured up-front on the main thread) and the AI
-        call are handed to the shared worker so the GTK loop never freezes.
-        """
-        original = get_clipboard().paste().strip()
-        generation = STATE.recording_generation
-        threading.Thread(
-            target=ModeHandler._ai_action_worker,
-            args=("ai_rewrite", text, generation,
-                  lambda instr: AIService.chat(ModeHandler._rewrite_prompt(instr, original))),
-            kwargs=dict(
-                output="paste",
-                history_fmt=lambda i: f"[Rewrite] {i}\nOriginal: {original[:200]}...",
-                chat_fmt=lambda i: f"✍️ {i}",
-            ),
-            daemon=True,
-        ).start()
-
-    @staticmethod
-    def _handle_vision(text: str) -> None:
-        """
-        Handle vision mode: screenshot + AI analysis, with a review panel.
-
-        Runs on the GTK main thread. The recording overlay is torn down
-        *immediately* (no fade) so it never lands in the screenshot, then the
-        blocking capture + vision call + review are handed to a worker thread.
-        """
-        OverlayManager.hide_immediate()
-        # Capture the generation now (process() already validated it) so a late
-        # vision answer from a superseded/cancelled recording is dropped.
-        generation = STATE.recording_generation
-        threading.Thread(
-            target=ModeHandler._vision_action_worker, args=(text, generation), daemon=True
-        ).start()
-
-    @staticmethod
-    def _vision_action_worker(text: str, generation: int) -> None:
-        """Worker: wait out the compositor repaint, capture, then run the panel flow."""
-        import time
-
-        # Give the compositor a frame to drop the just-destroyed overlay before
-        # grabbing the screen (the window is already gone, this is just paint).
-        time.sleep(0.12)
-
-        image_b64 = ImageService.take_screenshot()
-        if not image_b64:
-            OverlayManager.hide(generation)
-            return
-        # The same screenshot is reused across redo/re-dictate (no re-capture).
-        ModeHandler._ai_action_worker(
-            "vision", text, generation,
-            lambda instr: AIService.vision(instr, image_b64),
-            output="type",
-            history_fmt=lambda i: f"[Screenshot] {i}",
-            chat_fmt=lambda i: f"📸 {i}",
-        )
-
-    @staticmethod
-    def _ai_action_worker(mode: str, instruction: str, generation: int, run_ai,
-                          *, output: str, history_fmt, chat_fmt,
-                          max_redos: int = 5) -> None:
-        """
-        Shared rewrite/vision flow on a worker thread: show the thinking panel,
-        run the AI call off the GTK loop, present the result for review, then
-        deliver (accept) / loop (redo) / re-record the instruction (redict) /
-        drop (reject or timeout). Generation-guarded throughout so a superseded
-        recording never shows a panel or inserts text.
-        """
-        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
-
-        redos = 0
-        try:
-            while True:
-                if generation != STATE.recording_generation:
-                    return
-                OverlayManager.set_ai_panel(mode, instruction, generation=generation)
-                response = run_ai(instruction)
-                if not response:
-                    return
-                if generation != STATE.recording_generation:
-                    return
-                OverlayManager.set_ai_panel(mode, instruction, result=response,
-                                            generation=generation)
-
-                action = KeyboardHandler.capture_review(mode)
-                if action == "accept":
-                    resp, instr, gen = response, instruction, generation
-                    GLib.idle_add(lambda: ModeHandler._deliver_response(
-                        resp, history_user=history_fmt(instr),
-                        chat_user_text=chat_fmt(instr),
-                        generation=gen, output=output))
-                    return
-                if action == "copy":
-                    get_clipboard().copy(response)
-                    print("📋 Result copied to the clipboard")
-                    return
-                if action == "redo":
-                    redos += 1
-                    if redos > max_redos:
-                        return
-                    continue
-                if action == "redict":
-                    new = KeyboardHandler.record_instruction(mode)
-                    # start_recording bumped the generation — adopt the new one.
-                    generation = STATE.recording_generation
-                    if not new:
-                        return
-                    instruction = new
-                    continue
-                return  # reject
-        finally:
-            OverlayManager.hide(generation)
-
-    @staticmethod
     def _deliver_response(response: str, *, history_user: str,
                           chat_user_text: Optional[str] = None,
                           generation: Optional[int] = None,
@@ -416,10 +277,16 @@ class ModeHandler:
     # --- Talk mode (spoken conversation → one generated text) ---------------
 
     @staticmethod
-    def start_talk_session() -> None:
+    def start_talk_session(write: bool = True) -> None:
         """
         Open a talk session: several spoken turns to work out what the text
         should say, then one generation pass that writes it.
+
+        ``write=False`` is F4: the same conversation, about what is on screen
+        and the text the user had selected, with no writing phase at the end.
+        Both sessions copy the selection here, on the listener thread, before
+        the keyboard is grabbed: for F4 it is the subject, for F6 the text to
+        rework — "select, F6, say how, done" is what the old rewrite mode was.
 
         Called from the keyboard listener thread on the 'talk' hotkey. The
         session itself runs in its own worker (it blocks on recording,
@@ -431,38 +298,46 @@ class ModeHandler:
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        selection = ClipboardService.copy_selected()
         # Up front, before anything that can block. Opening the keyboards takes
         # ~350 ms and the conversation engine up to a second more; the user
         # pressed a key and needs to see that it registered, not to wonder.
-        ModeHandler._show_talk_overlay()
+        ModeHandler._show_talk_overlay(write)
         ChatManager.set_talk(True)      # deferred — see ChatManager._OPEN_DELAY_MS
-        threading.Thread(target=ModeHandler._talk_worker, daemon=True).start()
+        threading.Thread(target=ModeHandler._talk_worker, args=(write, selection),
+                         daemon=True).start()
 
     @staticmethod
-    def _show_talk_overlay() -> None:
+    def _show_talk_overlay(write: bool = True) -> None:
         """
-        The recording overlay in its talk livery.
+        The recording overlay in its talk (F6) or chat (F4) livery.
 
         Its hint strip names the session's own keys, not the global hotkeys —
         those are grabbed for the session's whole life and would be a lie.
+        ``STATE.current_mode`` is what tells the keyboard which session this is.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
-        STATE.current_mode = "talk"
-        OverlayManager.show("talk", hints=KeyboardHandler.talk_hints())
+        STATE.current_mode = "talk" if write else "ai"
+        OverlayManager.show(STATE.current_mode, hints=KeyboardHandler.talk_hints())
 
     @staticmethod
-    def _talk_worker() -> None:
+    def _talk_worker(write: bool = True, selection: str = "") -> None:
         """
         Worker thread: converse, then write the text, until the user is done.
 
         'Keep talking' from the review panel loops back into the conversation
         with everything already said still in the brief, so a wrong result is
         one sentence away from being right.
+
+        With ``write=False`` (F4) the conversation IS the session: it ends when
+        the user ends it, and its turns are poured into the F4 chat history so
+        the bubble's typed input carries the same discussion on.
         """
         from loquivox.handlers.keyboard import GrabbedKeys  # lazy: avoid import cycle
         from loquivox.services.talk import TalkSession
 
-        session = TalkSession()
+        session = TalkSession(write=write)
+        session.selection = selection.strip() or None
         STATE.echo_advised = False
         try:
             with GrabbedKeys() as keys:
@@ -470,13 +345,24 @@ class ModeHandler:
                     print("⚠️  Talk mode needs keyboard access — is your user in "
                           "the 'input' group?")
                     return
-                print("🗣️  Talk mode — speak freely. Enter: write the text · "
-                      "Space: end this turn · Esc: drop the conversation")
-                if config_module.CFG.TALK_SCREENSHOT:
-                    ModeHandler._talk_look(session)
+                if write:
+                    print("🗣️  Talk mode — speak freely. Enter: write the text · "
+                          "Space: end this turn · Esc: drop the conversation")
+                else:
+                    print("💬 Chat mode — speak freely. Enter/Esc: end · "
+                          "Space: end this turn · S: look again · say "
+                          "\"écris ça\" to get a text")
+                if not write or config_module.CFG.TALK_SCREENSHOT:
+                    ModeHandler._talk_look(session)  # in chat, the screen IS the subject
                 while True:
                     if ModeHandler._talk_conversation(session, keys):  # cancelled
                         print("✖️  Talk mode cancelled — nothing written")
+                        return
+                    if not session.write:
+                        # A chat that simply ended: keep it as F4 history so
+                        # the bubble's typed input carries the discussion on.
+                        for turn in session.turns:
+                            HistoryManager.add_message(turn["role"], turn["content"])
                         return
                     if not ModeHandler._talk_generate(session, keys):
                         return  # delivered, copied or dropped — the session is over
@@ -514,6 +400,28 @@ class ModeHandler:
         """
         threading.Thread(target=ModeHandler._talk_screen_worker,
                          args=(session,), daemon=True).start()
+
+    @staticmethod
+    def _talk_take_selection(session) -> None:
+        """
+        T during a conversation: hand the model whatever is highlighted now.
+
+        The selection copied at the key press is the one the session opened
+        on; this replaces it with the current one, mid-conversation, the way S
+        replaces the screen description. It rides in ``context_clause()``, so
+        the cascade sees it on its next call and the Realtime session on its
+        next ``push_context``. The synthetic Ctrl+C goes through the
+        compositor, not evdev, so the exclusive grab does not stop it.
+        """
+        text = ClipboardService.copy_selected()
+        if not text:
+            print("📋 Nothing selected")
+            return
+        session.selection = text
+        preview = " ".join(text.split())
+        preview = preview if len(preview) <= 60 else preview[:59] + "…"
+        print(f"📋 Selection handed to the conversation: {preview}")
+        ChatManager.add_message("note", f"📋 Texte sélectionné envoyé : {preview}")
 
     @staticmethod
     def _talk_screen_worker(session) -> None:
@@ -621,9 +529,13 @@ class ModeHandler:
                     pressed = keys.poll(mapping, 0.05)
                     if talk.push_context():
                         print("👁️  Screen context handed to the Realtime session")
+                    talk.push_research()
                     if pressed == "screen":
                         ModeHandler._talk_look(session)
                         continue  # not a turn boundary — keep listening
+                    if pressed == "select":
+                        ModeHandler._talk_take_selection(session)
+                        continue
                     if pressed == "cancel":
                         cancelled = True
                         break
@@ -661,7 +573,7 @@ class ModeHandler:
         ``services/talk.py``. Everything said is kept as part of the brief
         either way.
         """
-        from loquivox.services.talk import user_said_done
+        from loquivox.services.talk import user_asked_write, user_said_done
 
         cfg = config_module.CFG
         prefix = None  # audio captured over a reply — the next turn's first words
@@ -672,6 +584,29 @@ class ModeHandler:
             prefix = None
             if action == "cancel":
                 return True
+            if action == "research":
+                # Nothing was said: drop the (silent) capture without paying
+                # for its transcription. The turn is the assistant's.
+                stream, STATE.stream_session = STATE.stream_session, None
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+                STATE.audio_buffer = []
+                found = session.research.take()
+                if found is None:
+                    continue
+                OverlayManager.set_status("Thinking…")
+                reply = session.reply_with_research(
+                    *found, on_delta=lambda t: ChatManager.stream("assistant", t))
+                if reply is not None and reply.text:
+                    ChatManager.add_message("assistant", reply.text)
+                    OverlayManager.set_status("Speaking…")
+                    prefix = ModeHandler._talk_speak(reply.text)
+                    if prefix is not None:
+                        session.mark_interrupted()
+                continue
 
             text = ModeHandler._talk_transcribe(audio)
             if action == "finish":
@@ -684,6 +619,12 @@ class ModeHandler:
                 continue  # nothing said (or a hallucination) — just listen again
 
             ChatManager.add_message("user", f"🗣️ {text}")
+            if not session.write and user_asked_write(text):
+                # "Écris ça" — the chat becomes a briefing; the worker sees
+                # the flag and runs the writing phase on everything said.
+                session.add_user(text)
+                session.write = True
+                return False
             if user_said_done(text):
                 # "Vas-y, écris-le" — no point paying for a reply that would
                 # only say "ok"; the turn still counts as part of the brief.
@@ -706,7 +647,8 @@ class ModeHandler:
                 # the user said so in words the phrase list doesn't cover, or
                 # (finish_by_model) because it judged the brief complete.
                 return False
-        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
+        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached"
+              + (" — writing the text" if session.write else ""))
         return False
 
     @staticmethod
@@ -790,6 +732,8 @@ class ModeHandler:
                     # Looking again does not end the turn: the user is very
                     # likely mid-sentence about the thing they just changed.
                     ModeHandler._talk_look(session)
+                elif pressed == "select":
+                    ModeHandler._talk_take_selection(session)
                 elif pressed is not None:
                     action = pressed
                     break
@@ -803,6 +747,11 @@ class ModeHandler:
                             break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
                         action = idle_action
+                        break
+                    if not vad.speech_started and session.research.ready():
+                        # An answer is back and the user has not started
+                        # talking: the one moment it can be given.
+                        action = "research"
                         break
                 if time.monotonic() >= deadline:
                     break

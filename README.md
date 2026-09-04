@@ -38,10 +38,8 @@ identically under X11 and Wayland), records while you hold the key, transcribes,
 | | Feature | |
 |:---:|:---|:---|
 | 🎙️ | **Dictation** | Speak, and your words are typed at the cursor — in *any* application. |
-| 💬 | **AI chat** | Ask out loud, or type into the chat overlay. The answer lands in the overlay and at your cursor. |
-| ✍️ | **Smart rewrite** | Select text, say how to change it (*"make it formal"*, *"shorten this"*), and it's replaced. |
-| 👁️ | **Vision** | Screenshot + a spoken question → a vision model explains the error, the page, the screen. |
-| 🗣️ | **Talk mode** | Discuss what you need out loud, back and forth, then say the word: the whole conversation becomes one finished text, typed and copied. |
+| 💬 | **AI chat** | Talk about what is on your screen — the error, the page, the text you selected — back and forth, out loud. Or type into the overlay. |
+| 🗣️ | **Talk mode** | Discuss what you need out loud, then say the word: the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework (*"make it formal"*, *"shorten this"*). |
 | 🪄 | **Refinement levels** | Raw transcript, grammar fix, light/medium/strong reformulation, or a custom prompt — pick it per dictation, on the fly. |
 | 🌍 | **Live translation** | Dictate in one language, have the text typed in another. |
 | 🔊 | **Voice feedback** | Optional TTS reads AI answers aloud, so you stay hands-free end to end. |
@@ -50,8 +48,8 @@ identically under X11 and Wayland), records while you hold the key, transcribes,
 | ⌨️ | **Fully remappable** | Every hotkey is editable in the UI, combos included (`Alt+Space`, `Ctrl+Shift+D`…). |
 | 🐧 | **Linux-native** | GTK3 overlays, `gtk-layer-shell` on Wayland, tray icon, no Electron. |
 
-Nice touches: a hover cheat-sheet tab at the top of the screen, a review panel to
-accept/redo rewrite & vision results, microphone selection, a custom vocabulary for
+Nice touches: a hover cheat-sheet tab at the top of the screen, a review of the
+generated text before it is typed, microphone selection, a custom vocabulary for
 proper nouns and jargon, conversation history in the tray, and nine color schemes.
 
 ---
@@ -90,8 +88,8 @@ network, no key, API error.
 
 > [!IMPORTANT]
 > **Scope of the offline mode today:** local execution covers *speech-to-text*, which is what
-> dictation needs — so **dictation works fully offline**. The AI features (chat, rewrite,
-> vision and the optional dictation refinement) call a cloud provider: **Groq** or
+> dictation needs — so **dictation works fully offline**. The AI features (chat, talk
+> and the optional dictation refinement) call a cloud provider: **Groq** or
 > **OpenAI**, picked in Settings → Models. Pointing them at a self-hosted chat model is
 > not supported yet. The voice is the exception — Settings → Models offers OpenAI's
 > multilingual voices (`OPENAI_API_KEY`, Groq's Orpheus only speaks English) and
@@ -104,10 +102,12 @@ network, no key, API error.
 | Key | Action | What it does |
 |:---:|:---|:---|
 | `R-Alt` / `F3` | **Dictate** | Transcribe your voice to text at the cursor |
-| `F4` | **Chat** | Ask a question aloud — or type it in the overlay |
-| `F7` | **Rewrite** | Select text → speak an instruction → it's replaced |
-| `F8` | **Vision** | Screenshot + spoken question → visual analysis |
-| `F6` | **Talk** | Talk it through with the AI, then get the text it was all about |
+| `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"écris ça"* to turn it into a text |
+| `F6` | **Talk** | Talk it through with the AI, then get the text it was all about — select text first to rework it, or press `T` mid-conversation to send a selection |
+
+Both conversations can **look things up**: when the model needs a fact it hands the
+question to a web-searching model (Settings → Models → Search) and keeps talking;
+the answer is given as soon as it is back.
 | `F9` | **Pin** | Toggle "always on top" for the chat overlay |
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
 | `Esc` | **Cancel** | Abort the active recording / transcription (nothing inserted) |
@@ -150,7 +150,7 @@ batch one your turn simply appears when you finish it.
 
 **Or skip the review entirely.** Settings → Talk → *Paste the finished text
 straight away* pastes it where your cursor was the moment the conversation
-ended, with no key to press — the trade being that there is then no rewrite and
+ended, with no key to press — the trade being that there is then no redo and
 no going back. Off by default: talk mode otherwise never types anything you
 have not accepted.
 
@@ -348,8 +348,7 @@ starts. UI-toggled preferences (voice, color scheme, …) are stored separately 
 ```
 keyboard.py  ──▶  AudioService  ──▶  transcription backend  ──▶  ModeHandler
  (evdev,          (record while       (groq / whispercpp /      (dictation, chat,
-  own thread)      the key is held)    deepgram / openai)        rewrite, vision,
-                                                                   talk)
+  own thread)      the key is held)    deepgram / openai)        talk)
                                               │                        │
                                         worker thread ──GLib.idle_add──▶ GTK main loop
                                                                         (type / overlay / TTS)
