@@ -13,13 +13,13 @@
 # build-essential, git, dpkg-dev, plus the runtime apt deps so the venv can see
 # them. Run on the SAME distro you target (the venv is tied to its python ABI).
 #
-# Usage:  VERSION=1.1.0 packaging/deb/build-deb.sh
+# Usage:  VERSION=2.0.0 packaging/deb/build-deb.sh
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-2.0.0}"
 WHISPER_VER="$(tr -d '[:space:]' < packaging/whisper-cpp.version)"
 ARCH="$(dpkg --print-architecture)"
 

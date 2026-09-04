@@ -40,7 +40,7 @@ Builds a static `whisper-cli` from source and installs it to
 Build **on the distro you target** (the bundled venv is tied to that distro's
 python ABI):
 ```sh
-VERSION=1.1.0 packaging/deb/build-deb.sh   # → dist/loquivox_<ver>_<arch>.deb
+VERSION=2.0.0 packaging/deb/build-deb.sh   # → dist/loquivox_<ver>_<arch>.deb
 ```
 Hybrid strategy: apt provides the system stack + numpy/scipy/gi/cairo/tomlkit/
 openai; `groq`/`sounddevice`/`deepgram-sdk` + the app are bundled into a
