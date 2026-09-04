@@ -34,6 +34,9 @@ LOCAL_PROVIDER: str = "piper"
 _NO_PCM: set = set()
 #: the local engine has been reported missing — one warning, not one per reply
 _WARNED: bool = False
+#: TTS failures already shown in the bubble — one note per distinct error, not
+#: one per reply: a spent API key would otherwise stack a note on every turn
+_NOTED: set = set()
 
 
 class TTSService:
@@ -173,11 +176,28 @@ class TTSService:
             return True
         except Exception as e:
             if playing or provider == LOCAL_PROVIDER:
-                print(f"❌ TTS Error: {e}")
+                TTSService._report(e)
                 return True
             _NO_PCM.add(model)
             print(f"ℹ️  No PCM stream for {model} ({e}) — playing the whole file")
             return False
+
+    @staticmethod
+    def _report(error: Exception) -> None:
+        """
+        Say why nothing was heard — in the bubble, not only on stdout.
+
+        Loquivox usually runs as a service, where nothing printed is ever read,
+        and a silent reply looks like a sound problem: the user goes checking
+        sinks and headsets while the actual cause is an exhausted API key.
+        """
+        print(f"❌ TTS Error: {error}")
+        key = str(error)[:120]
+        if key in _NOTED:
+            return
+        _NOTED.add(key)
+        from loquivox.managers.chat import ChatManager  # lazy: avoid import cycle
+        ChatManager.add_message("note", f"🔇 La voix n'a pas pu être lue : {error}")
 
     @staticmethod
     def _synthesize_and_play(text: str, stop: Optional[threading.Event] = None,
@@ -221,7 +241,7 @@ class TTSService:
                         return
                 sd.stop()
         except Exception as e:
-            print(f"❌ TTS Error: {e}")
+            TTSService._report(e)
         finally:
             if started is not None:
                 started.set()  # a failed synthesis must not hang the caller
