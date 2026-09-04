@@ -156,7 +156,11 @@ def _normalize(text: str) -> str:
     """Lowercase, strip accents and punctuation — for phrase matching."""
     decomposed = unicodedata.normalize("NFKD", text.lower())
     stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
-    return " ".join(re.sub(r"[^\w\s\']", " ", stripped).split())
+    # Every apostrophe goes: the Realtime transcript writes "c’est" with the
+    # typographic one, the phrase list "c'est" with the straight one, and a
+    # space for either would leave "c est" against "c'est" — never a match.
+    stripped = re.sub(r"[\'’‘`]", "", stripped)
+    return " ".join(re.sub(r"[^\w\s]", " ", stripped).split())
 
 
 def user_said_done(text: str, max_words: int = 6) -> bool:
@@ -434,6 +438,7 @@ if __name__ == "__main__":
     assert FINISH_MARKER in TalkSession().system_prompt() or "never write it" in TalkSession().system_prompt().lower()
     chat.selection = "hello"
     assert "SELECTED TEXT" in chat.context_clause() and "hello" in chat.context_clause()
+    assert user_said_done("C’est bon, on a fini.") and user_said_done("J'ai fini")
     assert user_asked_write("Écris ça !") and not user_asked_write("quand tu écris ça, fais court, sinon ça ne passe pas")
     brief = TalkSession(); brief.selection = "hello"
     assert "STARTING TEXT" in brief.context_clause()
