@@ -102,6 +102,13 @@ nav {
   pointer-events: none;
 }
 .hero-inner { position: relative; z-index: 3; padding: 100px 0 150px; max-width: 660px; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  font-size: .8rem; font-weight: 600; color: var(--accent);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 999px; padding: 5px 14px 5px 10px;
+}
+.eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: blink 2s ease-in-out infinite; }
 .hero h1 {
   font-size: clamp(2.4rem, 5.5vw, 3.7rem);
   line-height: 1.12; letter-spacing: -.02em; margin-bottom: 20px;
@@ -164,6 +171,9 @@ section { padding: 86px 0; }
 
 /* Features */
 .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 22px; }
+.card-wide { grid-column: span 2; background: linear-gradient(135deg, var(--bg-elevated), color-mix(in srgb, var(--accent) 7%, var(--bg-elevated))); }
+.card-wide p { max-width: 62ch; font-size: 1.02rem; }
+@media (max-width: 660px) { .card-wide { grid-column: span 1; } }
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -189,11 +199,16 @@ section { padding: 86px 0; }
 
 
 /* ───── Talk mode ───── */
+.stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 44px; margin: -24px auto 48px; }
+.stats div { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.stats b { font-size: 1.7rem; letter-spacing: -.02em; background: linear-gradient(92deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stats span { font-size: .8rem; color: var(--text-muted); }
 .talk-grid { display: grid; grid-template-columns: minmax(300px, 440px) 1fr; gap: 44px; align-items: start; }
 .talk-stage { position: relative; }
 .talk-bubble {
   background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
-  box-shadow: var(--shadow); padding: 16px 18px; min-height: 380px;
+  box-shadow: var(--shadow), 0 0 60px -20px var(--accent-glow); padding: 16px 18px; min-height: 380px;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
   display: flex; flex-direction: column;
 }
 .talk-head { display: flex; justify-content: space-between; font-size: .78rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; }
@@ -216,14 +231,14 @@ section { padding: 86px 0; }
 }
 .talk-replay:hover { color: var(--accent); border-color: var(--accent); }
 .talk-copy h3 { font-size: 1.15rem; margin-bottom: 14px; }
-.pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px 18px; margin-bottom: 14px; }
 .pipeline .stage {
-  display: inline-flex; flex-direction: column; align-items: center; gap: 2px;
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
-  padding: 8px 12px; font-size: .88rem; font-weight: 600;
+  padding: 8px 6px; font-size: .8rem; font-weight: 600; text-align: center;
 }
-.pipeline .stage small { font-size: .68rem; font-weight: 500; color: var(--text-muted); }
-.pipeline .arrow { color: var(--accent); font-weight: 700; }
+.pipeline .stage:not(:last-child)::after { content: "→"; position: absolute; right: -15px; top: 50%; transform: translateY(-50%); color: var(--accent); font-weight: 700; }
+.pipeline .stage small { font-size: .62rem; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
 .pipe-alt { color: var(--text-muted); font-size: .9rem; margin-bottom: 22px; }
 .talk-points { list-style: none; }
 .talk-points li { color: var(--text-muted); font-size: .95rem; padding: 8px 0 8px 26px; position: relative; line-height: 1.55; }
@@ -443,6 +458,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 <header class="hero">
   <div class="container">
     <div class="hero-inner">
+      <a class="eyebrow" href="https://github.com/Xhelliom/loquivox/releases" target="_blank" rel="noopener"><span class="dot"></span>v2.0 — talk mode: speech to speech, with web search</a>
       <h1>Your voice,<br><span class="swap-wrap"><span class="swap" id="swap-word">everywhere</span></span><br>on Linux.</h1>
       <p class="sub"><strong>Talk it through with an AI, out loud.</strong> It asks the right questions, looks things up on the web while it keeps talking, and writes the text you were after. Or just dictate into any app. All from a global hotkey — transcription <strong>fully offline if you want</strong>.</p>
       <div class="cta-row">
@@ -473,7 +489,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
     <h2 class="section-title reveal">One hotkey away</h2>
     <p class="section-sub reveal">No window switching, no copy-paste gymnastics. Press a key, speak, done.</p>
     <div class="features-grid">
-      <div class="card reveal">
+      <div class="card card-wide reveal">
         <div class="icon">🗣️</div>
         <h3>Talk mode<span class="key">F6</span></h3>
         <p>Speech in, speech out. Discuss what you need — no key to hold — and the assistant asks who it is for, what tone, what must be in. Say the word, and the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework.</p>
@@ -521,6 +537,12 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
   <div class="container">
     <h2 class="section-title reveal">Think out loud. Get the text.</h2>
     <p class="section-sub reveal">Dictation gives you what you said. Talk mode gives you what you <em>meant</em> — a spoken conversation that reasons, searches, and writes.</p>
+    <div class="stats reveal">
+      <div><b>~1.0 s</b><span>to a spoken reply</span></div>
+      <div><b>0</b><span>keys to hold</span></div>
+      <div><b>~2 s</b><span>to a web-searched fact</span></div>
+      <div><b>23</b><span>languages, turn detection on-device</span></div>
+    </div>
     <div class="talk-grid">
       <div class="talk-stage reveal">
         <div class="talk-bubble" id="talk-bubble">
@@ -538,10 +560,10 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
       <div class="talk-copy reveal">
         <h3>How a turn travels</h3>
         <div class="pipeline">
-          <span class="stage">🎤 Mic</span><span class="arrow">→</span>
-          <span class="stage">📝 Whisper<small>cloud or local</small></span><span class="arrow">→</span>
-          <span class="stage">🧭 Smart Turn<small>on-device</small></span><span class="arrow">→</span>
-          <span class="stage">🧠 Chat model<small>+ 🔎 research</small></span><span class="arrow">→</span>
+          <span class="stage">🎤 Mic</span>
+          <span class="stage">📝 Whisper<small>cloud or local</small></span>
+          <span class="stage">🧭 Smart Turn<small>on-device</small></span>
+          <span class="stage">🧠 Chat model<small>+ 🔎 research</small></span>
           <span class="stage">🔊 Voice<small>OpenAI · Groq · Piper</small></span>
         </div>
         <p class="pipe-alt">or, with the <strong>Realtime</strong> engine: one OpenAI speech-to-speech session holds the whole conversation — ~1.0 s and the prosody of speech, the server handles turn-taking and interruption.</p>
@@ -715,6 +737,8 @@ loquivox</div>
       <a href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/Xhelliom/loquivox/issues" target="_blank" rel="noopener">Issues</a>
       <a href="https://github.com/Xhelliom/loquivox/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+      <a href="https://github.com/Xhelliom/loquivox/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/Xhelliom/loquivox/releases" target="_blank" rel="noopener">Releases</a>
     </div>
     <p>Loquivox — a voice assistant &amp; AI companion for Linux. Free and open source.</p>
   </div>
