@@ -73,6 +73,7 @@ class SettingsDialog:
     _hotkey_capture_btns: Optional[list] = None
     _key_entries: Optional[dict] = None
     _key_status: Optional[Gtk.Label] = None
+    _support_status: Optional[Gtk.Label] = None
     _pp_scale: Optional[Gtk.Scale] = None
     _pp_scale_label: Optional[Gtk.Label] = None
     _pp_translate_check: Optional[Gtk.CheckButton] = None
@@ -151,7 +152,8 @@ class SettingsDialog:
 
         # Group the (now numerous) settings into tabs instead of one long scroll.
         # Order: what the app does (Models → Talk → Refinement), then how you
-        # drive it (Hotkeys, Appearance & comfort), then one-time setup (API Keys).
+        # drive it (Hotkeys, Appearance & comfort), then one-time setup (API
+        # Keys), then where to look when something breaks (Support).
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
         for m in ("top", "start", "end"):
@@ -165,6 +167,7 @@ class SettingsDialog:
             ("Hotkeys", cls._build_hotkeys_section),
             ("Appearance & comfort", cls._build_appearance_page),
             ("API Keys", cls._build_api_keys_section),
+            ("Support", cls._build_support_page),
         ):
             page = cls._page()
             build(page)
@@ -1909,6 +1912,65 @@ class SettingsDialog:
         if cls._backend_combo is not None:
             cls._sync_model_entry()
         print("🔑 API keys saved & applied.")
+
+    # -----------------------------------------------------------------
+    # Support: the log and the bug report, from where a user in trouble looks
+    # -----------------------------------------------------------------
+    @classmethod
+    def _build_support_page(cls, vbox: Gtk.Box) -> None:
+        from loquivox import __version__
+        from loquivox.diagnostics import log_file_path
+        from loquivox.ui.report_dialog import LogDialog, ReportDialog
+
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        path = log_file_path()
+
+        body = cls._group(
+            vbox, "Logs",
+            "Everything Loquivox prints goes to a log file too, so a session "
+            "started at login leaves a trace. View shows the last lines live, "
+            "unredacted, for your own eyes; Save writes the whole log with "
+            "keys, names and addresses removed, ready to attach to an issue.")
+        where = Gtk.Label(label=str(path) if path else "(disabled via LOQUIVOX_LOG_FILE)")
+        where.set_halign(Gtk.Align.START)
+        where.set_xalign(0)
+        where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        where.set_selectable(True)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        view_btn = Gtk.Button(label="View log…")
+        view_btn.connect("clicked", lambda _w: LogDialog.show())
+        save_btn = Gtk.Button(label="Save log…")
+        save_btn.set_tooltip_text("The whole log with keys, names and addresses "
+                                  "removed — the file to attach to a bug report")
+        save_btn.connect("clicked", lambda _w: LogDialog.save_for_sharing(
+            cls._instance, cls._support_status.set_text))
+        buttons.pack_start(view_btn, False, False, 0)
+        buttons.pack_start(save_btn, False, False, 0)
+        cls._field(body, "Log file", where, labels, extra=buttons)
+        cls._support_status = Gtk.Label()
+        cls._support_status.set_halign(Gtk.Align.START)
+        cls._support_status.set_xalign(0)
+        cls._support_status.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        body.pack_start(cls._support_status, False, False, 0)
+
+        body = cls._group(
+            vbox, "Bug report",
+            "One text with the version, system, tools, config, key presence and "
+            "the recent log. API keys, your user name, home directory, e-mail "
+            "and IP addresses are removed; what you said is replaced by its "
+            "length unless you choose to include it. You read it before "
+            "anything is copied or saved.")
+        report_btn = Gtk.Button(label="Diagnostic report…")
+        report_btn.set_halign(Gtk.Align.START)
+        report_btn.connect("clicked", lambda _w: ReportDialog.show())
+        cls._field(body, "Report", report_btn, labels)
+        cli = Gtk.Label()
+        cli.set_halign(Gtk.Align.START)
+        cli.set_xalign(0)
+        cli.set_markup(f"<small>Without the tray: <tt>loquivox --report</tt> · "
+                       f"version {GLib.markup_escape_text(__version__)}</small>")
+        cli.get_style_context().add_class("dim-label")
+        body.pack_start(cli, False, False, 0)
 
     # -----------------------------------------------------------------
     # Hotkeys section (editable)

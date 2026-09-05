@@ -410,6 +410,33 @@ Every layer degrades to the next one; a missing model is a printed warning, neve
 an error. `services/_whisper_features.py` is vendored from Pipecat (BSD-2) — keep
 it in sync with upstream instead of editing it.
 
+## Logs & the diagnostic report (`diagnostics.py`)
+
+The app logs through `print()`, and `install_log_file()` (called first thing
+in `app._run`) tees stdout/stderr into `~/.local/state/loquivox/loquivox.log`
+— timestamped, rotated at 2 MB, one generation kept — so a session started
+from the autostart entry leaves a trace. Uncaught tracebacks land there too:
+Python prints them to `sys.stderr`, which is the tee. `LOQUIVOX_LOG_FILE`
+moves it, an empty value disables it.
+
+`build_report()` is what a user attaches to a bug: environment, tools, config,
+key *presence*, the log tail and the user journal, all through `redact()`.
+Keys, e-mail, home dir, user/host names, IPs and URL query strings are always
+removed; the user's own words are elided by default (`keep_content=True`
+keeps them). Content is recognised by *shape* — `label: 'sentence'` at the
+end of a line, and the `Screen context (…): ` / `Research (…): ` prefixes —
+so **a new print that quotes what the user said or saw must follow one of
+those shapes** (or add a rule to `_CONTENT_PATTERNS`), and
+`tests/test_diagnostics.py` pins both directions: no key format survives, and
+no error message is eaten. Reachable as `loquivox --report` (handled in
+`app.main` *before* GTK is imported, so it works where GTK is the problem)
+and as tray → "Diagnostic report…" / Settings → Support (`ui/report_dialog.py`,
+which shows the text before anything is copied or saved). The same tab's
+"View log…" (`LogDialog`) is the raw log, live and *unredacted* — it is for
+the user's own eyes and never leaves the machine on its own; "Save log…" /
+`loquivox --export-log` (`export_log()`) is the whole log, both generations,
+through the same `redact()`.
+
 ## Threading rules (important)
 
 - The keyboard listener and all network/transcription work run **off** the GTK
@@ -486,8 +513,10 @@ pip install -e '.[deepgram]'     # streaming extra (also '.[openai]')
 sudo usermod -aG input $USER     # required for global hotkeys (re-login after)
 ```
 
-- There is **no automated test suite** in the repo today; verify changes by
-  running the app. CI only builds the whisper.cpp engine binary on version bumps.
+- There is **no test framework** in the repo; `tests/` holds standalone
+  self-checks (`python tests/test_<x>.py`, most need GTK; `test_diagnostics.py`
+  does not). Verify UI changes by running the app. CI only builds the
+  whisper.cpp engine binary on version bumps.
 - Packaging recipes (AUR, .deb) live under `packaging/`.
 
 ## Conventions

@@ -362,8 +362,8 @@ layer-rule {
 
 ## ⚙️ Configuration
 
-Most things are adjustable from the tray icon (**Settings**: Transcription, API Keys, Hotkeys,
-Appearance & comfort). Everything else lives in an optional TOML file:
+Most things are adjustable from the tray icon (**Settings**: Models, Talk, Refinement, Hotkeys,
+Appearance & comfort, API Keys, Support). Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml
@@ -374,6 +374,31 @@ language, vocabulary, microphone, refinement, hotkeys, overlay geometry. Any key
 back to the built-in default, and a missing or malformed file is simply ignored: the app always
 starts. UI-toggled preferences (voice, color scheme, …) are stored separately in
 `~/.config/loquivox/settings.json`.
+
+---
+
+## 🐛 Reporting a bug
+
+Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it would
+have printed to a terminal, timestamped, rotated at 2 MB). To send a report, use either:
+
+- **tray icon → Diagnostic report…**, or **Settings → Support** — shows the report, with
+  **Copy** and **Save…**. The same tab has **View log…** (live, unredacted, for your own
+  eyes) and **Save log…**, which writes the *whole* log with the same redaction — the file
+  to attach when 400 lines are not enough.
+- ```bash
+  loquivox --report            # writes ~/loquivox-report-<date>.txt
+  loquivox --report -          # or prints it
+  loquivox --export-log        # the whole log, redacted → ~/loquivox-log-<date>.txt
+  ```
+
+The report carries the version, distro, session type and compositor, which tools and
+optional packages are installed, the effective config, *whether* each API key is set, the
+last 400 log lines and the matching lines of the user journal. **API keys, your user name,
+home directory, e-mail and IP addresses are removed**, and what you said (transcripts,
+screen descriptions) is replaced by its length — tick the box in the window, or pass
+`--keep-content`, if the bug is about what was heard. Read it over, then attach it to the
+issue. `LOQUIVOX_LOG_FILE=/elsewhere.log` moves the log; an empty value disables it.
 
 ---
 
