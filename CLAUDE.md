@@ -430,8 +430,10 @@ those shapes** (or add a rule to `_CONTENT_PATTERNS`), and
 `tests/test_diagnostics.py` pins both directions: no key format survives, and
 no error message is eaten. Reachable as `loquivox --report` (handled in
 `app.main` *before* GTK is imported, so it works where GTK is the problem)
-and as tray → "Diagnostic report…" (`ui/report_dialog.py`, which shows the
-text before anything is copied or saved).
+and as tray → "Diagnostic report…" / Settings → Support (`ui/report_dialog.py`,
+which shows the text before anything is copied or saved). The same tab's
+"View log…" (`LogDialog`) is the raw log, live and *unredacted* — it is for
+the user's own eyes and never leaves the machine on its own.
 
 ## Threading rules (important)
 

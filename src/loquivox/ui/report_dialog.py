@@ -190,3 +190,178 @@ class ReportDialog:
         cls._view = None
         cls._status = None
         cls._keep = None
+
+
+class LogDialog:
+    """
+    The log itself, live, for the user's own eyes.
+
+    Unlike the report this is NOT redacted: it never leaves the machine on its
+    own, and a user reading their own log wants the sentence that was dropped,
+    not its length. It refreshes every two seconds while open and keeps the
+    view pinned to the newest lines unless the user has scrolled up.
+    """
+
+    LINES = 500
+    REFRESH_MS = 2000
+
+    _instance: Optional[Gtk.Window] = None
+    _view: Optional[Gtk.TextView] = None
+    _status: Optional[Gtk.Label] = None
+    _timer: int = 0
+    _shown: str = ""
+
+    @classmethod
+    def show(cls) -> None:
+        if cls._instance is not None:
+            cls._instance.present()
+            return
+        cls._instance = cls._build()
+        cls._instance.show_all()
+        cls._refresh()
+        cls._timer = GLib.timeout_add(cls.REFRESH_MS, cls._tick)
+
+    @classmethod
+    def _build(cls) -> Gtk.Window:
+        from loquivox.diagnostics import log_file_path
+
+        path = log_file_path()
+        win = Gtk.Window(title="Loquivox — Log")
+        win.set_default_size(760, 520)
+        win.set_position(Gtk.WindowPosition.CENTER)
+        win.set_keep_above(True)
+        win.connect("destroy", cls._on_destroy)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        for m in ("top", "bottom", "start", "end"):
+            getattr(root, f"set_margin_{m}")(12)
+
+        intro = Gtk.Label()
+        intro.set_halign(Gtk.Align.START)
+        intro.set_xalign(0)
+        intro.set_line_wrap(True)
+        intro.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        intro.set_markup(
+            f"<tt>{GLib.markup_escape_text(str(path) if path else '(disabled)')}</tt> — "
+            f"last {cls.LINES} lines, refreshed live. Nothing here is redacted: "
+            "to share it, use <b>Diagnostic report…</b> instead.")
+        root.pack_start(intro, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_shadow_type(Gtk.ShadowType.IN)
+        cls._view = Gtk.TextView()
+        cls._view.set_editable(False)
+        cls._view.set_monospace(True)
+        cls._view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        for m in ("top", "bottom", "left", "right"):
+            getattr(cls._view, f"set_{m}_margin")(8)
+        scroll.add(cls._view)
+        root.pack_start(scroll, True, True, 0)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        cls._status = Gtk.Label()
+        cls._status.set_halign(Gtk.Align.START)
+        cls._status.set_xalign(0)
+        cls._status.set_ellipsize(Pango.EllipsizeMode.END)
+        actions.pack_start(cls._status, True, True, 0)
+
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda _w: win.destroy())
+        report = Gtk.Button(label="Diagnostic report…")
+        report.connect("clicked", lambda _w: ReportDialog.show())
+        open_btn = Gtk.Button(label="Open file")
+        open_btn.set_tooltip_text("Open the whole log in your text editor")
+        open_btn.set_sensitive(path is not None)
+        open_btn.connect("clicked", cls._on_open)
+        copy = Gtk.Button(label="Copy")
+        copy.connect("clicked", cls._on_copy)
+        actions.pack_end(report, False, False, 0)
+        actions.pack_end(copy, False, False, 0)
+        actions.pack_end(open_btn, False, False, 0)
+        actions.pack_end(close, False, False, 0)
+        root.pack_start(actions, False, False, 0)
+
+        win.add(root)
+        return win
+
+    @classmethod
+    def _tail(cls) -> str:
+        from loquivox.diagnostics import log_file_path
+
+        path = log_file_path()
+        if path is None:
+            return "(log file disabled via LOQUIVOX_LOG_FILE)"
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.readlines()
+        except FileNotFoundError:
+            return f"(no log yet at {path})"
+        except OSError as e:
+            return f"(unreadable: {e})"
+        return "".join(lines[-cls.LINES:])
+
+    @classmethod
+    def _refresh(cls) -> None:
+        if cls._view is None:
+            return
+        text = cls._tail()
+        if text == cls._shown:
+            return
+        parent = cls._view.get_parent()
+        adj = parent.get_vadjustment() if isinstance(parent, Gtk.ScrolledWindow) else None
+        at_end = adj is None or \
+            adj.get_value() + adj.get_page_size() >= adj.get_upper() - 2
+        cls._shown = text
+        buf = cls._view.get_buffer()
+        buf.set_text(text)
+        if at_end:
+            # After the buffer settles, not now: the upper bound is stale.
+            GLib.idle_add(cls._scroll_to_end)
+        if cls._status is not None:
+            cls._status.set_text(f"{len(text.splitlines())} lines")
+
+    @classmethod
+    def _scroll_to_end(cls) -> bool:
+        if cls._view is not None:
+            buf = cls._view.get_buffer()
+            cls._view.scroll_to_iter(buf.get_end_iter(), 0.0, False, 0.0, 1.0)
+        return False
+
+    @classmethod
+    def _tick(cls) -> bool:
+        if cls._instance is None:
+            return False
+        cls._refresh()
+        return True
+
+    @classmethod
+    def _on_copy(cls, _btn: Gtk.Button) -> None:
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(cls._shown, -1)
+        clipboard.store()
+        if cls._status is not None:
+            cls._status.set_text("📋 Copied (unredacted)")
+
+    @classmethod
+    def _on_open(cls, _btn: Gtk.Button) -> None:
+        from loquivox.diagnostics import log_file_path
+
+        path = log_file_path()
+        if path is None:
+            return
+        try:
+            Gtk.show_uri_on_window(cls._instance, path.as_uri(), Gdk.CURRENT_TIME)
+        except Exception as e:
+            if cls._status is not None:
+                cls._status.set_text(f"❌ Could not open: {e}")
+
+    @classmethod
+    def _on_destroy(cls, _win: Gtk.Window) -> None:
+        if cls._timer:
+            GLib.source_remove(cls._timer)
+        cls._timer = 0
+        cls._instance = None
+        cls._view = None
+        cls._status = None
+        cls._shown = ""

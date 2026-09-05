@@ -328,8 +328,8 @@ layer-rule {
 
 ## ⚙️ Configuration
 
-Most things are adjustable from the tray icon (**Settings**: Transcription, API Keys, Hotkeys,
-Appearance & comfort). Everything else lives in an optional TOML file:
+Most things are adjustable from the tray icon (**Settings**: Models, Talk, Refinement, Hotkeys,
+Appearance & comfort, API Keys, Support). Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml
@@ -348,7 +348,9 @@ starts. UI-toggled preferences (voice, color scheme, …) are stored separately 
 Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it would
 have printed to a terminal, timestamped, rotated at 2 MB). To send a report, use either:
 
-- **tray icon → Diagnostic report…** — shows the report, with **Copy** and **Save…**
+- **tray icon → Diagnostic report…**, or **Settings → Support** — shows the report, with
+  **Copy** and **Save…**. The same tab has **View log…**, a live, unredacted view of the log
+  for your own eyes.
 - ```bash
   loquivox --report            # writes ~/loquivox-report-<date>.txt
   loquivox --report -          # or prints it
