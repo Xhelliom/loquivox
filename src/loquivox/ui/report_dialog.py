@@ -14,6 +14,7 @@ appears at once with a placeholder, the way every other overlay does.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Optional
 
 import gi
@@ -21,7 +22,47 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
-from loquivox.diagnostics import build_report, default_report_path
+from loquivox.diagnostics import (build_report, default_log_export_path,
+                                  default_report_path, export_log)
+
+
+def save_text_as(parent: Optional[Gtk.Window], default: Path, text: str,
+                 extra: Optional[Gtk.Widget] = None,
+                 produce=None) -> Optional[str]:
+    """
+    One Save… dialog for both windows. Returns the path written, or None.
+
+    ``produce`` (called after OK, with ``extra`` still alive) lets the caller
+    build the text from a checkbox in the chooser — the log export decides
+    whether to keep spoken content at the moment of saving, not before.
+    """
+    chooser = Gtk.FileChooserDialog(title="Save for sharing", parent=parent,
+                                    action=Gtk.FileChooserAction.SAVE)
+    chooser.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
+    chooser.set_do_overwrite_confirmation(True)
+    chooser.set_current_folder(str(default.parent))
+    chooser.set_current_name(default.name)
+    if extra is not None:
+        extra.show_all()
+        chooser.set_extra_widget(extra)
+    try:
+        if chooser.run() != Gtk.ResponseType.OK:
+            return None
+        target = chooser.get_filename()
+        body = produce() if produce is not None else text
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(body)
+        return target
+    finally:
+        chooser.destroy()
+
+
+def keep_content_check() -> Gtk.CheckButton:
+    chk = Gtk.CheckButton(
+        label="Include what was said (transcripts, screen descriptions)")
+    chk.set_tooltip_text("Keys, addresses and names are removed either way.")
+    return chk
 
 
 class ReportDialog:
@@ -164,25 +205,13 @@ class ReportDialog:
 
     @classmethod
     def _on_save(cls, _btn: Gtk.Button) -> None:
-        chooser = Gtk.FileChooserDialog(
-            title="Save the diagnostic report", parent=cls._instance,
-            action=Gtk.FileChooserAction.SAVE)
-        chooser.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-                            Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
-        chooser.set_do_overwrite_confirmation(True)
-        default = default_report_path()
-        chooser.set_current_folder(str(default.parent))
-        chooser.set_current_name(default.name)
         try:
-            if chooser.run() == Gtk.ResponseType.OK:
-                target = chooser.get_filename()
-                with open(target, "w", encoding="utf-8") as fh:
-                    fh.write(cls._text())
-                cls._say(f"💾 Saved to {target}")
+            target = save_text_as(cls._instance, default_report_path(), cls._text())
         except OSError as e:
             cls._say(f"❌ Could not save: {e}")
-        finally:
-            chooser.destroy()
+            return
+        if target:
+            cls._say(f"💾 Saved to {target}")
 
     @classmethod
     def _on_destroy(cls, _win: Gtk.Window) -> None:
@@ -243,8 +272,9 @@ class LogDialog:
         intro.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         intro.set_markup(
             f"<tt>{GLib.markup_escape_text(str(path) if path else '(disabled)')}</tt> — "
-            f"last {cls.LINES} lines, refreshed live. Nothing here is redacted: "
-            "to share it, use <b>Diagnostic report…</b> instead.")
+            f"last {cls.LINES} lines, refreshed live. Nothing on screen is "
+            "redacted; <b>Save for sharing…</b> writes the whole log with keys, "
+            "names and addresses removed.")
         root.pack_start(intro, False, False, 0)
 
         scroll = Gtk.ScrolledWindow()
@@ -276,6 +306,13 @@ class LogDialog:
         open_btn.connect("clicked", cls._on_open)
         copy = Gtk.Button(label="Copy")
         copy.connect("clicked", cls._on_copy)
+        share = Gtk.Button(label="Save for sharing…")
+        share.get_style_context().add_class("suggested-action")
+        share.set_tooltip_text("The whole log, with keys, names and addresses "
+                               "removed — the file to attach to a bug report")
+        share.set_sensitive(path is not None)
+        share.connect("clicked", lambda _w: cls.save_for_sharing(cls._instance, cls._say))
+        actions.pack_end(share, False, False, 0)
         actions.pack_end(report, False, False, 0)
         actions.pack_end(copy, False, False, 0)
         actions.pack_end(open_btn, False, False, 0)
@@ -336,12 +373,35 @@ class LogDialog:
         return True
 
     @classmethod
+    def _say(cls, msg: str) -> None:
+        if cls._status is not None:
+            cls._status.set_text(msg)
+
+    @staticmethod
+    def save_for_sharing(parent: Optional[Gtk.Window], say=print) -> None:
+        """
+        Write the whole log, redacted, where the user says. Also the Support
+        tab's "Save log…", which is why it takes its window and its status
+        line rather than the dialog's.
+        """
+        chk = keep_content_check()
+        try:
+            target = save_text_as(
+                parent, default_log_export_path(), "", extra=chk,
+                produce=lambda: export_log(keep_content=chk.get_active())
+                or "(the log is empty)\n")
+        except OSError as e:
+            say(f"❌ Could not save: {e}")
+            return
+        if target:
+            say(f"💾 Redacted log saved to {target}")
+
+    @classmethod
     def _on_copy(cls, _btn: Gtk.Button) -> None:
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(cls._shown, -1)
         clipboard.store()
-        if cls._status is not None:
-            cls._status.set_text("📋 Copied (unredacted)")
+        cls._say("📋 Copied (unredacted)")
 
     @classmethod
     def _on_open(cls, _btn: Gtk.Button) -> None:
@@ -353,8 +413,7 @@ class LogDialog:
         try:
             Gtk.show_uri_on_window(cls._instance, path.as_uri(), Gdk.CURRENT_TIME)
         except Exception as e:
-            if cls._status is not None:
-                cls._status.set_text(f"❌ Could not open: {e}")
+            cls._say(f"❌ Could not open: {e}")
 
     @classmethod
     def _on_destroy(cls, _win: Gtk.Window) -> None:

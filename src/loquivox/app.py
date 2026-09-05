@@ -23,14 +23,16 @@ warnings.filterwarnings("ignore", message=".*Specified provider 'CUDAExecutionPr
 from loquivox import __version__
 
 USAGE = """\
-usage: loquivox [--report [PATH] [--keep-content]] [--version]
+usage: loquivox [--report [PATH] | --export-log [PATH]] [--keep-content] [--version]
 
-  (no flag)        run the assistant (tray icon + global hotkeys)
-  --report [PATH]  write the redacted diagnostic report (default:
-                   ~/loquivox-report-<date>.txt; '-' prints it) and exit
-  --keep-content   with --report: keep transcripts and screen descriptions
-                   (keys, addresses and names are removed either way)
-  --version        print the version and exit
+  (no flag)           run the assistant (tray icon + global hotkeys)
+  --report [PATH]     write the redacted diagnostic report (default:
+                      ~/loquivox-report-<date>.txt; '-' prints it) and exit
+  --export-log [PATH] write the whole log, redacted the same way (default:
+                      ~/loquivox-log-<date>.txt; '-' prints it) and exit
+  --keep-content      keep transcripts and screen descriptions in either
+                      (keys, addresses and names are removed regardless)
+  --version           print the version and exit
 """
 
 
@@ -65,9 +67,10 @@ def main() -> None:
     if "--version" in argv:
         print(f"loquivox {__version__}")
         return
-    if "--report" in argv:
+    if "--report" in argv or "--export-log" in argv:
         from loquivox.diagnostics import report_cli
-        sys.exit(report_cli([a for a in argv if a != "--report"]))
+        rest = [a for a in argv if a not in ("--report", "--export-log")]
+        sys.exit(report_cli(rest, full_log="--export-log" in argv))
     _run()
 
 

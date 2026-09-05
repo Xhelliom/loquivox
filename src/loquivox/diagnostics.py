@@ -259,7 +259,10 @@ _CONTENT_PATTERNS = [
     # sentence quoted to the end of the line. Anchoring on that shape (rather
     # than on any quoted string) is what keeps an exception message such as
     # "cannot import name '_gi' from module 'gi'" readable.
-    (re.compile(r"^(.*: )(['\"])([^'\"\n]{%d,})\2\s*$" % CONTENT_QUOTE_MIN, re.M),
+    # The body runs to the LAST quote on the line: French is full of
+    # apostrophes ("merci d'avoir…") and stopping at the first one would
+    # leave the rest of the sentence in the report.
+    (re.compile(r"^(.*?: )(['\"])(.{%d,})\2\s*$" % CONTENT_QUOTE_MIN, re.M),
      lambda m: m.group(1) + m.group(2) + _elided(m.group(3)) + m.group(2)),
 ]
 
@@ -529,6 +532,40 @@ def default_report_path() -> Path:
     return Path.home() / f"loquivox-report-{stamp}.txt"
 
 
+def default_log_export_path() -> Path:
+    stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return Path.home() / f"loquivox-log-{stamp}.txt"
+
+
+def export_log(*, keep_content: bool = False) -> str:
+    """
+    The whole log (previous generation first, then the current one), redacted
+    like the report — the file a user hands over when 400 lines are not
+    enough. Empty when there is no log.
+    """
+    path = log_file_path()
+    if path is None:
+        return ""
+    parts = []
+    for candidate in (path.with_name(path.name + ".1"), path):
+        try:
+            parts.append(candidate.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    text = "".join(parts)
+    if not text:
+        return ""
+    header = (f"# Loquivox {__version__} log export — keys/identity removed; "
+              f"spoken content {'KEPT' if keep_content else 'elided'}\n")
+    return header + redact(text, content=not keep_content)
+
+
+def write_log_export(path: Optional[Path] = None, *, keep_content: bool = False) -> Path:
+    path = path or default_log_export_path()
+    path.write_text(export_log(keep_content=keep_content), encoding="utf-8")
+    return path
+
+
 def write_report(path: Optional[Path] = None, *, keep_content: bool = False) -> Path:
     """Write the report to ``path`` (default: ``~/loquivox-report-<stamp>.txt``)."""
     path = path or default_report_path()
@@ -536,9 +573,12 @@ def write_report(path: Optional[Path] = None, *, keep_content: bool = False) -> 
     return path
 
 
-def report_cli(argv: List[str], out: Callable[[str], None] = print) -> int:
+def report_cli(argv: List[str], out: Callable[[str], None] = print,
+               *, full_log: bool = False) -> int:
     """
     ``loquivox --report [PATH] [--keep-content]``: PATH ``-`` prints to stdout.
+    ``full_log=True`` (``loquivox --export-log``) writes the whole redacted
+    log instead of the report.
 
     Kept free of GTK on purpose: the machine that needs a report is often the
     one where the GTK stack is what is broken.
@@ -546,12 +586,19 @@ def report_cli(argv: List[str], out: Callable[[str], None] = print) -> int:
     keep = "--keep-content" in argv
     paths = [a for a in argv if not a.startswith("--")]
     target = paths[0] if paths else None
+    build = (lambda: export_log(keep_content=keep)) if full_log \
+        else (lambda: build_report(keep_content=keep))
     if target == "-":
-        out(build_report(keep_content=keep))
+        out(build())
         return 0
-    path = write_report(Path(target).expanduser() if target else None,
-                        keep_content=keep)
-    out(f"📋 Diagnostic report written to {path}")
+    if full_log:
+        path = write_log_export(Path(target).expanduser() if target else None,
+                                keep_content=keep)
+        out(f"🪵 Redacted log written to {path}")
+    else:
+        path = write_report(Path(target).expanduser() if target else None,
+                            keep_content=keep)
+        out(f"📋 Diagnostic report written to {path}")
     out("   Keys, addresses and names are redacted"
         + ("; spoken content was KEPT (--keep-content)." if keep
            else "; spoken content is elided (add --keep-content to include it)."))

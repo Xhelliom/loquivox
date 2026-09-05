@@ -73,6 +73,7 @@ class SettingsDialog:
     _hotkey_capture_btns: Optional[list] = None
     _key_entries: Optional[dict] = None
     _key_status: Optional[Gtk.Label] = None
+    _support_status: Optional[Gtk.Label] = None
     _pp_scale: Optional[Gtk.Scale] = None
     _pp_scale_label: Optional[Gtk.Label] = None
     _pp_translate_check: Optional[Gtk.CheckButton] = None
@@ -1927,16 +1928,30 @@ class SettingsDialog:
         body = cls._group(
             vbox, "Logs",
             "Everything Loquivox prints goes to a log file too, so a session "
-            "started at login leaves a trace. The viewer shows the last "
-            "lines live and is not redacted — it stays on this machine.")
+            "started at login leaves a trace. View shows the last lines live, "
+            "unredacted, for your own eyes; Save writes the whole log with "
+            "keys, names and addresses removed, ready to attach to an issue.")
         where = Gtk.Label(label=str(path) if path else "(disabled via LOQUIVOX_LOG_FILE)")
         where.set_halign(Gtk.Align.START)
         where.set_xalign(0)
         where.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         where.set_selectable(True)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         view_btn = Gtk.Button(label="View log…")
         view_btn.connect("clicked", lambda _w: LogDialog.show())
-        cls._field(body, "Log file", where, labels, extra=view_btn)
+        save_btn = Gtk.Button(label="Save log…")
+        save_btn.set_tooltip_text("The whole log with keys, names and addresses "
+                                  "removed — the file to attach to a bug report")
+        save_btn.connect("clicked", lambda _w: LogDialog.save_for_sharing(
+            cls._instance, cls._support_status.set_text))
+        buttons.pack_start(view_btn, False, False, 0)
+        buttons.pack_start(save_btn, False, False, 0)
+        cls._field(body, "Log file", where, labels, extra=buttons)
+        cls._support_status = Gtk.Label()
+        cls._support_status.set_halign(Gtk.Align.START)
+        cls._support_status.set_xalign(0)
+        cls._support_status.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        body.pack_start(cls._support_status, False, False, 0)
 
         body = cls._group(
             vbox, "Bug report",

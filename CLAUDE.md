@@ -433,7 +433,9 @@ no error message is eaten. Reachable as `loquivox --report` (handled in
 and as tray → "Diagnostic report…" / Settings → Support (`ui/report_dialog.py`,
 which shows the text before anything is copied or saved). The same tab's
 "View log…" (`LogDialog`) is the raw log, live and *unredacted* — it is for
-the user's own eyes and never leaves the machine on its own.
+the user's own eyes and never leaves the machine on its own; "Save log…" /
+`loquivox --export-log` (`export_log()`) is the whole log, both generations,
+through the same `redact()`.
 
 ## Threading rules (important)
 

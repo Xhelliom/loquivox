@@ -349,11 +349,13 @@ Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it wo
 have printed to a terminal, timestamped, rotated at 2 MB). To send a report, use either:
 
 - **tray icon → Diagnostic report…**, or **Settings → Support** — shows the report, with
-  **Copy** and **Save…**. The same tab has **View log…**, a live, unredacted view of the log
-  for your own eyes.
+  **Copy** and **Save…**. The same tab has **View log…** (live, unredacted, for your own
+  eyes) and **Save log…**, which writes the *whole* log with the same redaction — the file
+  to attach when 400 lines are not enough.
 - ```bash
   loquivox --report            # writes ~/loquivox-report-<date>.txt
   loquivox --report -          # or prints it
+  loquivox --export-log        # the whole log, redacted → ~/loquivox-log-<date>.txt
   ```
 
 The report carries the version, distro, session type and compositor, which tools and

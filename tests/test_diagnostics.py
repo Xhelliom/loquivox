@@ -138,6 +138,35 @@ def test_report_cli_writes_a_file():
     print("✓ --report writes a file, or prints with '-'")
 
 
+def test_log_export_is_whole_and_redacted():
+    """The shareable log: both generations, every key gone, content elided."""
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "loquivox.log"
+        key = "gsk_" + "Z" * 40
+        log.with_name("loquivox.log.1").write_text("old line one\n")
+        log.write_text(f"GROQ_API_KEY={key}\n"
+                       "⚠️ Ignored Hallucination: 'merci d'avoir regardé la vidéo'\n")
+        os.environ["LOQUIVOX_LOG_FILE"] = str(log)
+        try:
+            text = diagnostics.export_log()
+            assert text.startswith("# Loquivox"), text
+            assert "old line one" in text and key not in text, text
+            assert "merci d'avoir" not in text and "chars]" in text, text
+            kept = diagnostics.export_log(keep_content=True)
+            assert "merci d'avoir" in kept and key not in kept, kept
+
+            target = Path(tmp) / "share.txt"
+            said = []
+            assert diagnostics.report_cli([str(target)], out=said.append,
+                                          full_log=True) == 0
+            assert target.read_text() == text
+            os.environ["LOQUIVOX_LOG_FILE"] = str(Path(tmp) / "absent.log")
+            assert diagnostics.export_log() == ""
+        finally:
+            del os.environ["LOQUIVOX_LOG_FILE"]
+    print("✓ the log export covers both generations, redacted")
+
+
 if __name__ == "__main__":
     test_keys_never_survive()
     test_identity_is_masked()
@@ -146,4 +175,5 @@ if __name__ == "__main__":
     test_log_tee_timestamps_and_rotates()
     test_report_builds_without_gtk_and_is_redacted()
     test_report_cli_writes_a_file()
+    test_log_export_is_whole_and_redacted()
     print("\nAll diagnostics checks passed.")
