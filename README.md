@@ -43,7 +43,7 @@ be cut off mid-sentence like a person. At the end it writes the text the convers
 | | Feature | |
 |:---:|:---|:---|
 | 🗣️ | **Talk mode** (`F6`) | Discuss what you need out loud, then say the word: the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework (*"make it formal"*, *"shorten this"*). Details below. |
-| 💬 | **AI chat** (`F4`) | The same conversation, about what is on your screen — the error, the page, the text you selected. Nothing written at the end, unless you say *"écris ça"*. Or type into the overlay. |
+| 💬 | **AI chat** (`F4`) | The same conversation, about what is on your screen — the error, the page, the text you selected. Nothing written at the end, unless you say *"write it"*. Or type into the overlay. |
 | 🔎 | **Web search** | Mid-conversation, the assistant hands a question to a web-searching model, says it is looking it up, and carries on; the answer arrives between turns. |
 | 🎭 | **Two engines** | *Cascade*: transcription → chat model → voice, each slot local or cloud. *Realtime*: one OpenAI speech-to-speech session, faster and with the prosody of speech. |
 | ✋ | **Interruptible** | Start talking over the reply and it stops and listens; your first words are kept. Turns end on *meaning*, thanks to an on-device turn-detection model. |
@@ -113,7 +113,7 @@ network, no key, API error.
 | Key | Action | What it does |
 |:---:|:---|:---|
 | `R-Alt` / `F3` | **Dictate** | Transcribe your voice to text at the cursor |
-| `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"écris ça"* to turn it into a text |
+| `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"write it"* to turn it into a text |
 | `F6` | **Talk** | Talk it through with the AI, then get the text it was all about — select text first to rework it, or press `T` mid-conversation to send a selection |
 | `F9` | **Pin** | Toggle "always on top" for the chat overlay |
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
@@ -147,7 +147,7 @@ becomes **one finished text**, ready to paste.
 
 `F4` is the same conversation with a different reason to talk: it looks at your screen and
 the text you selected, and you discuss it — check an error, get an opinion, understand a
-page. Nothing is written at the end, until you say *"écris ça"* / *"write it"*: the chat
+page. Nothing is written at the end, until you say *"write it"* (or *"écris ça"* in French): the chat
 then turns into a briefing on the spot and the text is generated from everything said so far.
 
 **Speech to speech, two ways** — in Settings → Models, or with one of the presets there
@@ -207,7 +207,7 @@ actually want — the unstated assumption, the objection your reader will raise.
 | | | |
 |:---|:---|:---|
 | `Enter` | always works, whatever the settings | — |
-| *"j'ai fini"*, *"vas-y"*, *"that's it"* | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
+| *"I'm done"*, *"go ahead"*, *"that's it"* (French phrases work too) | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
 | the assistant decides | it hands itself over once it could write the text well | `finish_by_model` |
 
 The last two are independent toggles — in **Settings → Talk**, or under `[talk]` in
