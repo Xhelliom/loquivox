@@ -57,6 +57,7 @@ class TrayManager:
         # Late imports to avoid circular dependencies
         from loquivox.managers.history import HistoryManager
         from loquivox.services.clipboard import ClipboardService
+        from loquivox.ui.report_dialog import ReportDialog
         from loquivox.ui.settings_dialog import SettingsDialog
 
         menu = Gtk.Menu()
@@ -104,6 +105,12 @@ class TrayManager:
         settings_item = Gtk.MenuItem(label="Settings")
         settings_item.connect("activate", lambda w: SettingsDialog.show())
         menu.append(settings_item)
+
+        # Diagnostics: the redacted report to attach to a bug — reachable
+        # from where a user in trouble looks first, without a terminal.
+        report_item = Gtk.MenuItem(label="Diagnostic report…")
+        report_item.connect("activate", lambda w: ReportDialog.show())
+        menu.append(report_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 

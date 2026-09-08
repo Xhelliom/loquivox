@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Loquivox — Voice assistant &amp; AI companion for Linux</title>
-<meta name="description" content="Dictate, chat about your screen and write by voice with global hotkeys. Powered by Whisper — fully offline if you want. Native GTK app for X11 and Wayland.">
+<meta name="description" content="Talk with an AI out loud — speech to speech, it thinks, searches the web and writes the text you were after. Dictate into any app. Global hotkeys, Whisper, fully offline transcription if you want. Native GTK app for X11 and Wayland.">
 <meta property="og:title" content="Loquivox — Voice assistant for Linux">
-<meta property="og:description" content="Dictate anywhere, chat with AI about your screen, write text by voice. Offline-capable, X11 &amp; Wayland, MIT licensed.">
+<meta property="og:description" content="Speech-to-speech AI companion for Linux: talk it through, it searches the web and writes the text. Dictate anywhere. Offline-capable, X11 &amp; Wayland, MIT licensed.">
 <meta property="og:image" content="assets/hero-dark.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="assets/logo.png">
@@ -102,6 +102,13 @@ nav {
   pointer-events: none;
 }
 .hero-inner { position: relative; z-index: 3; padding: 100px 0 150px; max-width: 660px; }
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px;
+  font-size: .8rem; font-weight: 600; color: var(--accent);
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 999px; padding: 5px 14px 5px 10px;
+}
+.eyebrow .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: blink 2s ease-in-out infinite; }
 .hero h1 {
   font-size: clamp(2.4rem, 5.5vw, 3.7rem);
   line-height: 1.12; letter-spacing: -.02em; margin-bottom: 20px;
@@ -164,6 +171,9 @@ section { padding: 86px 0; }
 
 /* Features */
 .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 22px; }
+.card-wide { grid-column: span 2; background: linear-gradient(135deg, var(--bg-elevated), color-mix(in srgb, var(--accent) 7%, var(--bg-elevated))); }
+.card-wide p { max-width: 62ch; font-size: 1.02rem; }
+@media (max-width: 660px) { .card-wide { grid-column: span 1; } }
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -186,6 +196,59 @@ section { padding: 86px 0; }
   background: var(--accent-soft); color: var(--accent);
 }
 .card p { color: var(--text-muted); font-size: .95rem; }
+
+
+/* ───── Talk mode ───── */
+.stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 44px; margin: -24px auto 48px; }
+.stats div { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.stats b { font-size: 1.7rem; letter-spacing: -.02em; background: linear-gradient(92deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.stats span { font-size: .8rem; color: var(--text-muted); }
+.talk-grid { display: grid; grid-template-columns: minmax(300px, 440px) 1fr; gap: 44px; align-items: start; }
+.talk-stage { position: relative; }
+.talk-bubble {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 18px;
+  box-shadow: var(--shadow), 0 0 60px -20px var(--accent-glow); padding: 16px 18px; min-height: 380px;
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  display: flex; flex-direction: column;
+}
+.talk-head { display: flex; justify-content: space-between; font-size: .78rem; font-weight: 700; color: var(--text-muted); margin-bottom: 12px; }
+.talk-head .live { color: var(--accent); }
+.talk-log { display: flex; flex-direction: column; gap: 9px; flex: 1; justify-content: flex-end; }
+.tb { font-size: .88rem; line-height: 1.45; border-radius: 12px; padding: 9px 13px; max-width: 92%; animation: popIn .3s ease both; }
+.tb.user { background: linear-gradient(92deg, #2563eb, #38bdf8); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+.tb.ai { background: var(--accent-soft); color: var(--text); border-bottom-left-radius: 4px; }
+.tb.note { background: transparent; border: 1px dashed var(--kbd-border); color: var(--text-muted); font-size: .8rem; align-self: center; max-width: 100%; }
+.tb.result { background: var(--bg-elevated); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--text); max-width: 100%; white-space: pre-line; font-family: ui-monospace, "JetBrains Mono", monospace; font-size: .8rem; }
+.tb.result::before { content: "✓ Typed at the cursor · copied"; display: block; color: var(--accent); font-family: inherit; font-weight: 700; margin-bottom: 6px; }
+.tb.live { opacity: .75; }
+.tb.live::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--accent); }
+.tb.thinking::after { content: " …"; animation: blink 1s steps(1) infinite; }
+.talk-keys { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: center; margin-top: 14px; font-size: .8rem; color: var(--text-muted); }
+.talk-keys kbd { font-size: .75rem; padding: 2px 8px; border-bottom-width: 2px; margin-right: 4px; }
+.talk-replay {
+  margin-left: 10px; background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; font-size: .78rem; cursor: pointer; line-height: 1.3;
+}
+.talk-replay:hover { color: var(--accent); border-color: var(--accent); }
+.talk-copy h3 { font-size: 1.15rem; margin-bottom: 14px; }
+.pipeline { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px 18px; margin-bottom: 14px; }
+.pipeline .stage {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 6px; font-size: .8rem; font-weight: 600; text-align: center;
+}
+.pipeline .stage:not(:last-child)::after { content: "→"; position: absolute; right: -15px; top: 50%; transform: translateY(-50%); color: var(--accent); font-weight: 700; }
+.pipeline .stage small { font-size: .62rem; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.pipe-alt { color: var(--text-muted); font-size: .9rem; margin-bottom: 22px; }
+.talk-points { list-style: none; }
+.talk-points li { color: var(--text-muted); font-size: .95rem; padding: 8px 0 8px 26px; position: relative; line-height: 1.55; }
+.talk-points li::before { content: "◆"; position: absolute; left: 0; top: 11px; color: var(--accent); font-size: .6rem; }
+.talk-points strong { color: var(--text); }
+.talk-points kbd { font-size: .78rem; padding: 2px 8px; border-bottom-width: 2px; }
+.talk-points code { font-family: ui-monospace, "JetBrains Mono", monospace; font-size: .85em; color: var(--accent); }
+@keyframes popIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes blink { 50% { opacity: 0; } }
+@media (max-width: 860px) { .talk-grid { grid-template-columns: 1fr; } }
 
 /* ───── Refinement pipeline demo ───── */
 .pipe-levels { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 28px; }
@@ -382,7 +445,8 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
     <a class="brand" href="#"><img src="assets/logo.png" alt="Loquivox logo">Loquivox</a>
     <div class="nav-links">
       <a href="#features">Features</a>
-      <a href="#demo">Demo</a>
+      <a href="#talk">Talk</a>
+      <a href="#demo">Dictation</a>
       <a href="#hotkeys">Hotkeys</a>
       <a href="#install">Install</a>
       <a class="gh" href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
@@ -394,13 +458,16 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 <header class="hero">
   <div class="container">
     <div class="hero-inner">
+      <a class="eyebrow" href="https://github.com/Xhelliom/loquivox/releases" target="_blank" rel="noopener"><span class="dot"></span>v2.0 — talk mode: speech to speech, with web search</a>
       <h1>Your voice,<br><span class="swap-wrap"><span class="swap" id="swap-word">everywhere</span></span><br>on Linux.</h1>
-      <p class="sub">Dictate into any app, talk with an AI about your screen, or write a text by voice — all from a global hotkey. Powered by Whisper, <strong>fully offline if you want</strong>.</p>
+      <p class="sub"><strong>Talk it through with an AI, out loud.</strong> It asks the right questions, looks things up on the web while it keeps talking, and writes the text you were after. Or just dictate into any app. All from a global hotkey — transcription <strong>fully offline if you want</strong>.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#install">⬇ Install now</a>
         <a class="btn btn-ghost" href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">★ Star on GitHub</a>
       </div>
       <div class="hero-badges">
+        <span class="pill">Speech to speech</span>
+        <span class="pill">Web search</span>
         <span class="pill">X11 &amp; Wayland</span>
         <span class="pill">Offline-capable</span>
         <span class="pill">Native GTK</span>
@@ -413,7 +480,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 
 <div class="marquee" aria-hidden="true">
   <div class="marquee-track" id="marquee-track">
-    <span>X11</span><span>Wayland</span><span>GNOME</span><span>Niri</span><span>Arch Linux</span><span>Debian</span><span>Ubuntu</span><span>whisper.cpp</span><span>Groq</span><span>Deepgram</span><span>OpenAI</span><span>GTK3</span><span>evdev</span>
+    <span>X11</span><span>Wayland</span><span>GNOME</span><span>Niri</span><span>Arch Linux</span><span>Debian</span><span>Ubuntu</span><span>whisper.cpp</span><span>Groq</span><span>Deepgram</span><span>OpenAI Realtime</span><span>Piper TTS</span><span>Smart Turn</span><span>GTK3</span><span>evdev</span>
   </div>
 </div>
 
@@ -422,39 +489,98 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
     <h2 class="section-title reveal">One hotkey away</h2>
     <p class="section-sub reveal">No window switching, no copy-paste gymnastics. Press a key, speak, done.</p>
     <div class="features-grid">
-      <div class="card reveal">
-        <div class="icon">🎙️</div>
-        <h3>Dictation<span class="key">F3</span></h3>
-        <p>Speak and watch your words appear at the cursor — in any application. Backed by Whisper large-v3 for state-of-the-art accuracy.</p>
+      <div class="card card-wide reveal">
+        <div class="icon">🗣️</div>
+        <h3>Talk mode<span class="key">F6</span></h3>
+        <p>Speech in, speech out. Discuss what you need — no key to hold — and the assistant asks who it is for, what tone, what must be in. Say the word, and the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework.</p>
       </div>
       <div class="card reveal">
         <div class="icon">💬</div>
         <h3>AI Chat<span class="key">F4</span></h3>
-        <p>Press F4 to talk about what is on your screen — select some text first and it comes along. A spoken back-and-forth, nothing written at the end. Or type straight into the overlay. Pin it on top with F9.</p>
+        <p>The same conversation, about what is on your screen — the error, the page, the text you selected. Nothing written at the end, unless you say <em>“write it”</em>. Or type straight into the overlay; pin it on top with F9.</p>
       </div>
       <div class="card reveal">
-        <div class="icon">🗣️</div>
-        <h3>Talk mode<span class="key">F6</span></h3>
-        <p>Talk it through first — turns end on meaning, not on a timer: a small on-device model reads your prosody and lets you hesitate. Then one key, and the whole conversation becomes a finished text, typed and copied.</p>
+        <div class="icon">🔎</div>
+        <h3>It looks things up</h3>
+        <p>Need a fact mid-sentence — a price, a date, a version, a person? The assistant hands the question to a web-searching model, says it is looking it up, and <strong>keeps talking</strong>. The answer arrives between turns and lands in the final text.</p>
       </div>
       <div class="card reveal">
-        <div class="icon">🪄</div>
-        <h3>Refinement levels</h3>
-        <p>Raw transcript, grammar correction, full reformulation or translation — pick a post-processing level on the fly, per dictation.</p>
+        <div class="icon">✋</div>
+        <h3>Interrupt it</h3>
+        <p>Talk over the reply and it stops mid-sentence and listens — your first words are kept. Turns end on <em>meaning</em>, not on a stopwatch: a small on-device model reads your prosody and lets you hesitate.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon">👁️</div>
+        <h3>It can see your screen</h3>
+        <p>Optionally, the focused window is captured and described once by a vision model, in parallel with your first sentence. You never have to read the stack trace out loud. Press S to look again.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon">🎙️</div>
+        <h3>Dictation<span class="key">F3</span></h3>
+        <p>Speak and watch your words appear at the cursor — in any application. Backed by Whisper large-v3 for state-of-the-art accuracy, with refinement levels and live translation.</p>
+      </div>
+      <div class="card reveal">
+        <div class="icon">🎭</div>
+        <h3>Two engines, one promise</h3>
+        <p><strong>Cascade</strong>: transcription → chat model → voice, every slot local or cloud, ~1.8 s. <strong>Realtime</strong>: one OpenAI speech-to-speech session, ~1.0 s, with the prosody of speech. Presets pick a whole setup in one click.</p>
       </div>
       <div class="card reveal">
         <div class="icon">🔊</div>
-        <h3>Voice feedback<span class="key">F10</span></h3>
-        <p>Optional text-to-speech reads AI answers aloud, so you can stay hands-free from question to answer.</p>
+        <h3>A voice of its own<span class="key">F10</span></h3>
+        <p>Replies are read aloud by the voice you pick: OpenAI's multilingual voices, Groq's Orpheus, or <strong>Piper, fully on your machine</strong> — no key, no network, first sample in 0.2 s.</p>
       </div>
     </div>
   </div>
 </section>
 
-<section id="demo" style="padding-top: 0; scroll-margin-top: 80px;">
+<section id="talk" style="background: var(--bg-elevated); border-block: 1px solid var(--border); scroll-margin-top: 80px;">
   <div class="container">
-    <h2 class="section-title reveal">From rambling to ready</h2>
-    <p class="section-sub reveal">You mumble, Loquivox polishes. Pick a refinement level and watch the same take land differently — try them:</p>
+    <h2 class="section-title reveal">Think out loud. Get the text.</h2>
+    <p class="section-sub reveal">Dictation gives you what you said. Talk mode gives you what you <em>meant</em> — a spoken conversation that reasons, searches, and writes.</p>
+    <div class="stats reveal">
+      <div><b>~1.0 s</b><span>to a spoken reply</span></div>
+      <div><b>0</b><span>keys to hold</span></div>
+      <div><b>~2 s</b><span>to a web-searched fact</span></div>
+      <div><b>23</b><span>languages, turn detection on-device</span></div>
+    </div>
+    <div class="talk-grid">
+      <div class="talk-stage reveal">
+        <div class="talk-bubble" id="talk-bubble">
+          <div class="talk-head"><span>🗣️ TALK MODE</span><span><span class="live" id="talk-status">● listening</span><button class="talk-replay" id="talk-replay" type="button" title="Replay">↻</button></span></div>
+          <div class="talk-log" id="talk-log"></div>
+        </div>
+        <div class="talk-keys" aria-hidden="true">
+          <span><kbd>Space</kbd> end turn</span>
+          <span><kbd>S</kbd> look at screen</span>
+          <span><kbd>T</kbd> send selection</span>
+          <span><kbd>Enter</kbd> write it</span>
+          <span><kbd>Esc</kbd> drop it</span>
+        </div>
+      </div>
+      <div class="talk-copy reveal">
+        <h3>How a turn travels</h3>
+        <div class="pipeline">
+          <span class="stage">🎤 Mic</span>
+          <span class="stage">📝 Whisper<small>cloud or local</small></span>
+          <span class="stage">🧭 Smart Turn<small>on-device</small></span>
+          <span class="stage">🧠 Chat model<small>+ 🔎 research</small></span>
+          <span class="stage">🔊 Voice<small>OpenAI · Groq · Piper</small></span>
+        </div>
+        <p class="pipe-alt">or, with the <strong>Realtime</strong> engine: one OpenAI speech-to-speech session holds the whole conversation — ~1.0 s and the prosody of speech, the server handles turn-taking and interruption.</p>
+        <ul class="talk-points">
+          <li><strong>It reasons before it writes.</strong> Two sentences, one question at a time — audience, intent, tone, key facts. It never quietly guesses at a misheard name: it quotes it back and asks.</li>
+          <li><strong>It searches without stopping.</strong> A <code>research()</code> tool hands the question to a web-searching model on a thread; the reply is spoken between turns, never mid-sentence, and stays in the brief.</li>
+          <li><strong>It knows when you're done.</strong> Say <em>“I'm done”</em>, press <kbd>Enter</kbd>, or let the model decide. The conversation becomes one text, reviewed before it is typed — <kbd>V</kbd> takes you back to fix it by voice.</li>
+          <li><strong>Every slot is your call.</strong> Presets <em>Fast</em>, <em>Natural</em> and <em>Private</em> fill transcription, engine, model and voice at once — the last one keeps the voice and the turn detection on your machine.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="demo" style="scroll-margin-top: 80px;">
+  <div class="container">
+    <h2 class="section-title reveal">Dictation: from rambling to ready</h2>
+    <p class="section-sub reveal">Hold F3 and speak. You mumble, Loquivox polishes. Pick a refinement level and watch the same take land differently — try them:</p>
     <div class="pipe-levels reveal">
       <button class="pipe-btn" data-level="raw">Raw</button>
       <button class="pipe-btn active" data-level="correct">Correct</button>
@@ -484,7 +610,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
       <div class="chat-card">
         <div class="chat-head"><span>LOQUIVOX CHAT</span><span class="live">● F4</span></div>
         <div class="bubble user">What does this stack trace mean?</div>
-        <div class="bubble ai">It's a null pointer in your config loader — the TOML file is missing the [audio] section.</div>
+        <div class="bubble ai">A null pointer in your config loader — the TOML file has no [audio] section. Want me to write the fix?</div>
       </div>
     </div>
   </div>
@@ -493,24 +619,24 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 <section id="privacy" style="background: var(--bg-elevated); border-block: 1px solid var(--border);">
   <div class="container">
     <h2 class="section-title reveal">Your words stay yours</h2>
-    <p class="section-sub reveal">Choose your transcription engine. Go fully local, or plug in the cloud provider you trust.</p>
+    <p class="section-sub reveal">Choose every engine — transcription, turn detection, voice. Go fully local, or plug in the cloud provider you trust.</p>
     <div class="engine-cols">
       <div class="card reveal">
         <div class="icon">🔒</div>
         <h3>100% offline</h3>
         <ul>
           <li>Local whisper.cpp engine — no internet, no API key</li>
-          <li>Models from tiny to large-v3-turbo</li>
-          <li>Static binaries built for x86_64 &amp; aarch64</li>
+          <li>Piper voice and Smart Turn detection run on-device</li>
+          <li>One “Private” preset picks all three at once</li>
         </ul>
       </div>
       <div class="card reveal">
         <div class="icon">☁️</div>
         <h3>Cloud, your pick</h3>
         <ul>
-          <li>Groq — whisper-large-v3 at silly speeds</li>
+          <li>Groq — whisper-large-v3 at silly speeds, compound search</li>
           <li>Deepgram nova-3 — live streaming transcription</li>
-          <li>OpenAI gpt-4o-transcribe</li>
+          <li>OpenAI — gpt-4o-transcribe, Realtime speech to speech, web search</li>
         </ul>
       </div>
       <div class="card reveal">
@@ -554,7 +680,8 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
         </div>
       </div>
       <p class="kb-hint">Click a glowing key — or <span class="real">press the real one</span> on your keyboard. Go on, this page is listening too. 😉</p>
-      <p class="kb-hint">While recording: <span class="real">Esc</span> cancels, <span class="real">Space</span> pauses &amp; resumes, and an optional <span class="real">Refine</span> key lets you pick this dictation's polish level on the fly.</p>
+      <p class="kb-hint">While dictating: <span class="real">Esc</span> cancels, <span class="real">Space</span> pauses &amp; resumes, and an optional <span class="real">Refine</span> key lets you pick this dictation's polish level on the fly.</p>
+      <p class="kb-hint">In a conversation: <span class="real">Space</span> ends the turn, <span class="real">S</span> looks at the screen again, <span class="real">T</span> sends the selection, <span class="real">Enter</span> writes the text.</p>
     </div>
   </div>
 </section>
@@ -610,6 +737,8 @@ loquivox</div>
       <a href="https://github.com/Xhelliom/loquivox" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/Xhelliom/loquivox/issues" target="_blank" rel="noopener">Issues</a>
       <a href="https://github.com/Xhelliom/loquivox/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+      <a href="https://github.com/Xhelliom/loquivox/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+      <a href="https://github.com/Xhelliom/loquivox/releases" target="_blank" rel="noopener">Releases</a>
     </div>
     <p>Loquivox — a voice assistant &amp; AI companion for Linux. Free and open source.</p>
   </div>
@@ -728,13 +857,75 @@ const cycle = setInterval(() => {
 }, 4200);
 document.querySelector('.pipe-levels').addEventListener('click', () => { userTouched = true; });
 
+
+// ───── Talk mode demo: a scripted conversation, replayed ─────
+const TALK_SCRIPT = [
+  { role: 'user',   text: "I need to reply to Marc — his PR review is late and the release is Friday.", type: true },
+  { role: 'ai',     text: "Got it. Firm or friendly? And should it mention what happens if it slips past Friday?", think: 600 },
+  { role: 'user',   text: "Friendly. Oh, and what's the codename of Debian 13? I want to cite it.", type: true },
+  { role: 'ai',     text: "Let me look that up — meanwhile, what's the one thing he must do today?", think: 500 },
+  { role: 'note',   text: "🔎 research(“Debian 13 codename”) — running in the background" },
+  { role: 'user',   text: "Just approve or list the blockers.", type: true },
+  { role: 'ai',     text: "Found it: Debian 13 is “Trixie”. I think I have everything — want me to write it?", think: 900 },
+  { role: 'user',   text: "Yes, write it.", type: true },
+  { role: 'note',   text: "✍️ writing the text from everything said so far…" },
+  { role: 'result', text: "Hi Marc,\n\nQuick nudge on the PR — we ship Friday and your review is the last blocker. If you can, today: either approve it or list what's blocking, and I'll take it from there. It targets Debian 13 “Trixie”, so nothing exotic.\n\nThanks!" },
+];
+const talkLog = document.getElementById('talk-log');
+const talkStatus = document.getElementById('talk-status');
+let talkTimer = null, talkRun = 0;
+function sleep(ms) { return new Promise(r => talkTimer = setTimeout(r, ms)); }
+async function playTalk() {
+  const run = ++talkRun;
+  clearTimeout(talkTimer);
+  talkLog.innerHTML = '';
+  for (const step of TALK_SCRIPT) {
+    if (run !== talkRun) return;
+    const el = document.createElement('div');
+    el.className = 'tb ' + step.role;
+    talkLog.appendChild(el);
+    if (step.type) {
+      talkStatus.textContent = '● listening';
+      el.classList.add('live');
+      for (let i = 1; i <= step.text.length; i++) {
+        if (run !== talkRun) return;
+        el.textContent = step.text.slice(0, i);
+        await sleep(22);
+      }
+      el.classList.remove('live');
+      await sleep(350);
+    } else if (step.role === 'ai') {
+      talkStatus.textContent = '● thinking';
+      el.classList.add('thinking');
+      await sleep(step.think || 600);
+      el.classList.remove('thinking');
+      talkStatus.textContent = '● speaking';
+      for (let i = 1; i <= step.text.length; i++) {
+        if (run !== talkRun) return;
+        el.textContent = step.text.slice(0, i);
+        await sleep(16);
+      }
+      await sleep(500);
+    } else {
+      el.textContent = step.text;
+      talkStatus.textContent = step.role === 'result' ? '● done' : talkStatus.textContent;
+      await sleep(step.role === 'result' ? 0 : 1200);
+    }
+    while (talkLog.children.length > 7) talkLog.removeChild(talkLog.firstChild);
+  }
+}
+document.getElementById('talk-replay').addEventListener('click', playTalk);
+new IntersectionObserver((entries, obs) => {
+  entries.forEach(e => { if (e.isIntersecting) { playTalk(); obs.disconnect(); } });
+}, { threshold: .3 }).observe(document.getElementById('talk-bubble'));
+
 // ───── Interactive keyboard ─────
 const ACTIONS = {
   F3:  { icon: '🎙️', title: 'Dictate',  desc: 'Hold the floor. Your speech lands as text at the cursor, in whatever app has focus.' },
-  F4:  { icon: '💬', title: 'Chat',     desc: 'Talk about what is on screen — the selected text comes along. A conversation, nothing written at the end.' },
-  F6:  { icon: '🗣️', title: 'Talk',     desc: 'Converse with the AI about what you need — no key to hold — then turn the whole conversation into one finished text. Select text first and it is the text to rework.' },
+  F4:  { icon: '💬', title: 'Chat',     desc: 'Talk about what is on screen — the selected text comes along. A conversation, nothing written at the end — unless you say “write it”.' },
+  F6:  { icon: '🗣️', title: 'Talk',     desc: 'Converse with the AI about what you need — no key to hold, it searches the web as it goes — then turn the whole conversation into one finished text. Select text first and it is the text to rework.' },
   F9:  { icon: '📌', title: 'Pin',      desc: 'Nail the chat overlay on top of everything. Unpin when you need your screen back.' },
-  F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. Orpheus TTS reads answers aloud — toggle anytime.' },
+  F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. OpenAI, Groq Orpheus or a local Piper voice reads answers aloud — toggle anytime.' },
   Escape: { icon: '✖️', title: 'Cancel', desc: 'Bail out of a recording mid-sentence — nothing gets transcribed or inserted.' }
 };
 const kpIcon = document.getElementById('kp-icon'),
