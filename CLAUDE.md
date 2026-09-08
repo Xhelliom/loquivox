@@ -224,7 +224,8 @@ A plugin is one `Plugin` dataclass in one file — `name`/`description`/
 twice), `run` (the background work), `message` (its answer as a system
 message), `started` (the stub the model speaks from meanwhile), `enabled` (the
 config key that gates it), and `settings` (its card in Settings, built with the
-dialog's own `_group`/`_field`/`_actions` so it lines up with the rest).
+dialog's own `_group`/`_field`/`_actions` so it lines up with the rest, on
+the Settings → Plugins page they share).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.
@@ -268,7 +269,7 @@ the model having asked for it.
 
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
-(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search),
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Plugins → Search),
 gated by `CFG.TALK_RESEARCH`.
 
 `board` (`services/board.py`) is the first source, and the first integration
@@ -283,7 +284,7 @@ composes nothing: `marker()` / `content()` are the board's own
 the trace of an alert the board has since retracted (its ADR 0011), so
 `still_standing()` re-reads `GET /api/cards/<id>` and drops an entry whose card
 has moved since — a question answered at the keyboard is not asked again out
-loud. Off by default (`CFG.TALK_BOARD`, Settings → Models → Board): it polls a
+loud. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
 local service most installations do not run.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)

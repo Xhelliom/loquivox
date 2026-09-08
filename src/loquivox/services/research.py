@@ -118,7 +118,7 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
 
 def _settings(dialog, vbox, labels) -> None:
     """
-    This plugin's card in Settings → Models, built with the dialog's own
+    This plugin's card in Settings → Plugins, built with the dialog's own
     helpers so it lines up with every other group on the page.
 
     The widgets live in this closure rather than on the dialog class: a plugin
