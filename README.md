@@ -4,11 +4,11 @@
 
 # Loquivox
 
-**A voice assistant & AI companion for Linux — dictate, ask, rewrite and see, from a global hotkey.**
+**A voice assistant & AI companion for Linux — talk it through out loud, dictate anywhere, from a global hotkey.**
 
 ### 👉 [**loquivox — visit the website**](https://xhelliom.github.io/loquivox/) 👈
 
-*Screenshots, live hotkey demo and one-command install instructions.*
+*Screenshots, a live talk-mode demo, the hotkey map and one-command install instructions.*
 
 [![Website](https://img.shields.io/badge/Website-loquivox-2aa198?style=for-the-badge)](https://xhelliom.github.io/loquivox/)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
@@ -24,22 +24,31 @@
 > [!NOTE]
 > **Loquivox is a fork of [Dianjeol/LinuxWhisper](https://github.com/Dianjeol/LinuxWhisper)** (MIT).
 > It keeps the original idea — voice at your cursor, everywhere — and takes it further:
-> pluggable transcription backends with a **fully local, private engine**, live streaming,
-> dictation refinement levels, Wayland/Niri support, a settings UI, and distro packaging
-> (AUR / `.deb`). All credit for the original work goes to [Dianjeol](https://github.com/Dianjeol).
+> a **spoken conversation** with an AI that reasons, looks things up on the web and writes
+> the text you were after; pluggable transcription backends with a **fully local, private
+> engine**; live streaming; dictation refinement levels; Wayland/Niri support; a settings UI;
+> and distro packaging (AUR / `.deb`). All credit for the original work goes to
+> [Dianjeol](https://github.com/Dianjeol).
 
 ---
 
 ## ✨ What it does
 
-Loquivox sits in the background, listens for **global hotkeys** (via `evdev`, so it works
-identically under X11 and Wayland), records while you hold the key, transcribes, and acts.
+Loquivox sits in the background and listens for **global hotkeys** (via `evdev`, so it works
+identically under X11 and Wayland). One key dictates at the cursor. The other two open a
+**spoken conversation** with an AI — speech in, speech out — that asks the right questions,
+looks things up on the web while it keeps talking, reads your screen if you let it, and can
+be cut off mid-sentence like a person. At the end it writes the text the conversation was about.
 
 | | Feature | |
 |:---:|:---|:---|
-| 🎙️ | **Dictation** | Speak, and your words are typed at the cursor — in *any* application. |
-| 💬 | **AI chat** | Talk about what is on your screen — the error, the page, the text you selected — back and forth, out loud. Or type into the overlay. |
-| 🗣️ | **Talk mode** | Discuss what you need out loud, then say the word: the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework (*"make it formal"*, *"shorten this"*). |
+| 🗣️ | **Talk mode** (`F6`) | Discuss what you need out loud, then say the word: the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework (*"make it formal"*, *"shorten this"*). Details below. |
+| 💬 | **AI chat** (`F4`) | The same conversation, about what is on your screen — the error, the page, the text you selected. Nothing written at the end, unless you say *"write it"*. Or type into the overlay. |
+| 🔎 | **Web search** | Mid-conversation, the assistant hands a question to a web-searching model, says it is looking it up, and carries on; the answer arrives between turns. |
+| 🎭 | **Two engines** | *Cascade*: transcription → chat model → voice, each slot local or cloud. *Realtime*: one OpenAI speech-to-speech session, faster and with the prosody of speech. |
+| ✋ | **Interruptible** | Start talking over the reply and it stops and listens; your first words are kept. Turns end on *meaning*, thanks to an on-device turn-detection model. |
+| 👁️ | **Screen context** | Optionally, the focused window is captured and described once by a vision model, so you never have to read the error dialog out loud. |
+| 🎙️ | **Dictation** (`F3`) | Speak, and your words are typed at the cursor — in *any* application. |
 | 🪄 | **Refinement levels** | Raw transcript, grammar fix, light/medium/strong reformulation, or a custom prompt — pick it per dictation, on the fly. |
 | 🌍 | **Live translation** | Dictate in one language, have the text typed in another. |
 | 🔊 | **Voice feedback** | Optional TTS reads AI answers aloud, so you stay hands-free end to end. |
@@ -88,12 +97,14 @@ network, no key, API error.
 
 > [!IMPORTANT]
 > **Scope of the offline mode today:** local execution covers *speech-to-text*, which is what
-> dictation needs — so **dictation works fully offline**. The AI features (chat, talk
-> and the optional dictation refinement) call a cloud provider: **Groq** or
+> dictation needs — so **dictation works fully offline**. The AI features (chat, talk,
+> web search and the optional dictation refinement) call a cloud provider: **Groq** or
 > **OpenAI**, picked in Settings → Models. Pointing them at a self-hosted chat model is
-> not supported yet. The voice is the exception — Settings → Models offers OpenAI's
-> multilingual voices (`OPENAI_API_KEY`, Groq's Orpheus only speaks English) and
-> **Piper**, which speaks French on your machine with no key and no network.
+> not supported yet. In talk mode's cascade engine the voice and the turn detection are
+> local too — Settings → Models offers OpenAI's multilingual voices (`OPENAI_API_KEY`,
+> Groq's Orpheus only speaks English) and **Piper**, which speaks French on your machine
+> with no key and no network; the *Private* preset picks all of that at once, so nothing
+> but the conversation itself leaves the machine.
 
 ---
 
@@ -102,12 +113,8 @@ network, no key, API error.
 | Key | Action | What it does |
 |:---:|:---|:---|
 | `R-Alt` / `F3` | **Dictate** | Transcribe your voice to text at the cursor |
-| `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"écris ça"* to turn it into a text |
+| `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"write it"* to turn it into a text |
 | `F6` | **Talk** | Talk it through with the AI, then get the text it was all about — select text first to rework it, or press `T` mid-conversation to send a selection |
-
-Both conversations can **look things up**: when the model needs a fact it hands the
-question to a web-searching model (Settings → Models → Search) and keeps talking;
-the answer is given as soon as it is back.
 | `F9` | **Pin** | Toggle "always on top" for the chat overlay |
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
 | `Esc` | **Cancel** | Abort the active recording / transcription (nothing inserted) |
@@ -117,6 +124,11 @@ the answer is given as soon as it is back.
 Keys are **hold-to-talk** by default; tick *Toggle Mode* in the tray menu for press-to-start / press-to-stop.
 All of them are remappable in **Settings → Hotkeys**, combos included. `Refine` ships unbound —
 assign a key to use it.
+
+Both conversations (`F4` and `F6`) can **look things up**: when the model needs a fact it
+hands the question to a web-searching model (Settings → Models → Search) and keeps talking;
+the answer is spoken as soon as it is back. Inside a conversation, `S` looks at the screen
+again and `T` sends the current selection — see the key table under Talk mode.
 
 > [!TIP]
 > Forgot a key? A thin tab sits at the top-center of your screen — hover it and the full list
@@ -133,13 +145,30 @@ never more) and you keep going: it asks who the text is for, what tone you want,
 absolutely be in it. When you're done briefing it, press `Enter` — and the entire conversation
 becomes **one finished text**, ready to paste.
 
-**Two ways to hold the conversation**, in Settings → Models. *Cascade* chains
-transcription, the chat model and the voice — every one of which can run on your
-machine — and answers in about 1.8 s. *Realtime* hands the whole conversation to
-one OpenAI model that hears and answers directly: about 1.0 s, and it keeps the
-prosody of speech. Either way, the text it writes at the end comes from your
-chosen chat model. Presets pick a whole setup in one click, including a **fully
-local voice** (Piper, no key, no network, first sample in 0.2 s).
+`F4` is the same conversation with a different reason to talk: it looks at your screen and
+the text you selected, and you discuss it — check an error, get an opinion, understand a
+page. Nothing is written at the end, until you say *"write it"* (or *"écris ça"* in French): the chat
+then turns into a briefing on the spot and the text is generated from everything said so far.
+
+**Speech to speech, two ways** — in Settings → Models, or with one of the presets there
+(*Fast*, *Natural*, *Private*):
+
+| Engine | How | Latency | What you get |
+|:---|:---|:---:|:---|
+| **Cascade** (default) | transcription → turn detection → chat model → voice, four slots, each one local or cloud | ~1.8 s | Your choice of model at every step, including a **fully local voice** (Piper: no key, no network, first sample in 0.2 s) |
+| **Realtime** | one OpenAI Realtime session hears and answers directly | ~1.0 s | The prosody of speech; the server handles turn-taking and interruption. The chat model is OpenAI's for the conversation |
+
+Either way the text written at the end comes from your chosen chat model: the conversation
+half is interchangeable, the writing pass never learns which engine ran.
+
+**It looks things up while it talks.** The conversational models are fast and light, and
+it shows the moment a fact is needed — a price, a date, a version number, who someone is.
+So both engines get one tool, `research(question)`: the assistant says in one sentence that
+it is looking it up and **keeps the conversation going**, while a web-searching model
+(Groq's compound model by default, ~2 s, or OpenAI's Responses API with `web_search`)
+fetches the answer on a thread. The result is handed back **between turns**, never
+mid-sentence, and stays in the brief so the final text has the facts. Pick the provider in
+Settings → Models → Search; `research = false` under `[talk]` turns the tool off.
 
 **You can watch it happen.** A bubble opens on the hotkey, just above the recording
 indicator: your words appear as they are heard, the reply as it is written — sentence by
@@ -178,24 +207,27 @@ actually want — the unstated assumption, the objection your reader will raise.
 | | | |
 |:---|:---|:---|
 | `Enter` | always works, whatever the settings | — |
-| *"j'ai fini"*, *"vas-y"*, *"that's it"* | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
+| *"I'm done"*, *"go ahead"*, *"that's it"* (French phrases work too) | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
 | the assistant decides | it hands itself over once it could write the text well | `finish_by_model` |
 
 The last two are independent toggles — in **Settings → Talk**, or under `[talk]` in
 `config.toml`. Turn both off and nothing writes the text until *you* press the key.
 
-**It can look at your screen, once.** Half of what you're about to dictate is already in
+**It can look at your screen.** Half of what you're about to dictate is already in
 front of you — the error dialog, the thread you're answering, the page you're describing —
 and you won't say it out loud. Tick *Send a screenshot as context* in **Settings → Talk** and
-the screen is captured when the session opens, described once by the vision model, and handed
-to the conversation as context. It runs **in parallel with your first sentence**, so it costs
-no startup delay, and it's one vision call per session — not one per turn.
+the focused window is captured when the session opens, described once by the vision model, and
+handed to the conversation as context. It runs **in parallel with your first sentence**, so it
+costs no startup delay, and it's one vision call per session — not one per turn. Press `S`
+during the conversation to look again when the screen has changed, and `T` to send whatever
+is selected now. `F4` always captures.
 
-Off by default: it sends your screen to the cloud. Capture the whole screen, or just a box
-around the cursor to keep the model on what you're working on (pointer location works under
-X11 and Hyprland; elsewhere Wayland offers no way to ask, so it falls back to the full
-screen). Either way the image is downscaled to `screenshot_max_px` before upload — which is
-what keeps a 4K capture from becoming megabytes of base64.
+Off by default: it sends your window to the cloud. The *focused window* is the default
+region because framing is what makes text legible to a vision model — a whole 4K desktop
+squeezed into the same token budget comes back as confident invention. A box around the
+cursor is available where the compositor can report the pointer (X11, Hyprland), and the
+full screen is the fallback everywhere else. The image is downscaled to `screenshot_max_px`
+before upload.
 
 **Turns end on meaning, not on a stopwatch.** A silence timer can't tell *"…and then, uh…"*
 from a finished sentence. So the pause is only a trigger: when Loquivox hears one, a small
@@ -216,6 +248,8 @@ plain silence detection — nothing breaks. And with the `openai_realtime` backe
 | Key | While talking | On the generated text |
 |:---:|:---|:---|
 | `Space` | End this turn now, don't wait for the pause | — |
+| `S` | Look at the screen again (when the screenshot is enabled) | — |
+| `T` | Send the current selection into the conversation | — |
 | `Enter` | Stop talking, write the text | Accept: typed at the cursor **and** copied |
 | `C` | — | Copy only, nothing typed |
 | `R` | — | Write it again |
@@ -328,8 +362,8 @@ layer-rule {
 
 ## ⚙️ Configuration
 
-Most things are adjustable from the tray icon (**Settings**: Transcription, API Keys, Hotkeys,
-Appearance & comfort). Everything else lives in an optional TOML file:
+Most things are adjustable from the tray icon (**Settings**: Models, Talk, Refinement, Hotkeys,
+Appearance & comfort, API Keys, Support). Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml
@@ -343,15 +377,48 @@ starts. UI-toggled preferences (voice, color scheme, …) are stored separately 
 
 ---
 
+## 🐛 Reporting a bug
+
+Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it would
+have printed to a terminal, timestamped, rotated at 2 MB). To send a report, use either:
+
+- **tray icon → Diagnostic report…**, or **Settings → Support** — shows the report, with
+  **Copy** and **Save…**. The same tab has **View log…** (live, unredacted, for your own
+  eyes) and **Save log…**, which writes the *whole* log with the same redaction — the file
+  to attach when 400 lines are not enough.
+- ```bash
+  loquivox --report            # writes ~/loquivox-report-<date>.txt
+  loquivox --report -          # or prints it
+  loquivox --export-log        # the whole log, redacted → ~/loquivox-log-<date>.txt
+  ```
+
+The report carries the version, distro, session type and compositor, which tools and
+optional packages are installed, the effective config, *whether* each API key is set, the
+last 400 log lines and the matching lines of the user journal. **API keys, your user name,
+home directory, e-mail and IP addresses are removed**, and what you said (transcripts,
+screen descriptions) is replaced by its length — tick the box in the window, or pass
+`--keep-content`, if the bug is about what was heard. Read it over, then attach it to the
+issue. `LOQUIVOX_LOG_FILE=/elsewhere.log` moves the log; an empty value disables it.
+
+---
+
 ## 🧩 How it works
 
 ```
+Dictation (F3, hold the key)
 keyboard.py  ──▶  AudioService  ──▶  transcription backend  ──▶  ModeHandler
- (evdev,          (record while       (groq / whispercpp /      (dictation, chat,
-  own thread)      the key is held)    deepgram / openai)        talk)
+ (evdev,          (record while       (groq / whispercpp /      (refine, then type
+  own thread)      the key is held)    deepgram / openai)        at the cursor)
                                               │                        │
                                         worker thread ──GLib.idle_add──▶ GTK main loop
                                                                         (type / overlay / TTS)
+
+Talk & chat (F6 / F4, a whole session)
+_talk_worker ──▶ cascade:  listen (VAD + Smart Turn) ─▶ STT ─▶ chat model ─▶ TTS ─▶ barge-in
+             └─▶ realtime: one OpenAI Realtime session, speech in / speech out
+                     │                 ▲ research(question) → web-searching model, on a thread
+                     ▼                 │ answer injected between turns
+                TalkSession ──▶ writing pass (chat model) ──▶ review bubble ──▶ type + clipboard
 ```
 
 ```
@@ -361,7 +428,8 @@ src/loquivox/
 ├── state.py          # AppState + SettingsManager (runtime state & user prefs)
 ├── platform/         # X11 vs Wayland backends behind ABCs (clipboard, typing, screenshot)
 ├── transcription/    # Pluggable STT: factory, dispatcher, groq / whispercpp / streaming
-├── services/         # audio, ai, tts, clipboard, image, postprocess, talk, vad, turn_detector
+├── services/         # audio, ai, tts (+ piper), talk, realtime_talk, research, vad,
+│                     # turn_detector, postprocess, clipboard, image, media
 ├── managers/         # history, chat overlay state, recording overlay
 ├── ui/               # recording overlay, WebKit2 chat overlay, settings, tray, hotkey bar
 └── handlers/         # mode.py (route a transcript), keyboard.py (evdev listener)
