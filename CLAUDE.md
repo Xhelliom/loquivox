@@ -250,10 +250,41 @@ message so the writing pass has the facts; the tool call and its stub never do
 — a "tool" role would leak into the F4 history and the generation prompt.
 `AIService.complete` reassembles streamed `tool_calls` for the cascade.
 
+But a `system` message wedged between two turns is, to a chat model, a standing
+instruction it has already absorbed rather than news to be read out — measured
+on `gpt-oss-120b`, one reply in three even mentioned it. So `TalkSession`
+keeps the role and changes only the wire shape: `_spoken_to()` sends those
+turns as `user`, which lands three times in three, while `turns`, the F4
+history and the generation prompt still see `system`. The Realtime engine needs
+no such thing — its `_say_result` system item is acted on as sent.
+
+A plugin may also be a **source** instead of a tool: no `run`, a `watch` that
+runs on its own thread for the length of the session and calls `Desk.put`.
+`Desks` starts those on open and `close()` (the talk worker's `finally`) ends
+them; `is_tool` keeps a source off the tool lists and out of `Desks.get`, so a
+call naming it is a hallucination and is dropped rather than crashing. Nothing
+downstream changes — "an answer arrives between two turns" never depended on
+the model having asked for it.
+
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
 (`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search),
 gated by `CFG.TALK_RESEARCH`.
+
+`board` (`services/board.py`) is the first source, and the first integration
+with another program: Collie Board, the kanban whose cards are started as real
+agents. Its ADR 0013 settles where the code lives — **the bridge never learns
+loquivox exists**, so this is a reader and nothing is added there. It polls
+`GET /api/notifications/log` (whose `id` is a cursor by construction), seeded
+with the log as it stands so a session never opens by reciting the backlog, and
+composes nothing: `marker()` / `content()` are the board's own
+`notify-content.ts`, in Python, over the `status` / `cardTitle` / `cwd` /
+`cardStatus` / `subtitle` the entry already carries. The log deliberately keeps
+the trace of an alert the board has since retracted (its ADR 0011), so
+`still_standing()` re-reads `GET /api/cards/<id>` and drops an entry whose card
+has moved since — a question answered at the keyboard is not asked again out
+loud. Off by default (`CFG.TALK_BOARD`, Settings → Models → Board): it polls a
+local service most installations do not run.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

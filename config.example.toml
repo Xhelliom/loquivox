@@ -197,6 +197,12 @@ finish_by_model = false    # the assistant ends it once it has enough context
 # Let the conversation call the research tool ([models] research). Off = the
 # model answers from what it knows.
 research = true
+
+# Let Collie Board's notifications reach a conversation in progress: the
+# assistant interrupts itself to say which card needs you and asks what to do.
+# Reads the local board (127.0.0.1:8788, COLLIE_BOARD_PORT) and nothing else.
+# Off by default — most installations do not run that service.
+board = false
 # Chat mode (F4) writes nothing — until one of these is said: the conversation
 # then becomes a briefing and the text is generated and reviewed like F6's.
 # write_phrases = ["écris ça", "rédige", "write it"]
