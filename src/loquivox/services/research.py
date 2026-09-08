@@ -206,8 +206,9 @@ PLUGIN = Plugin(
     started=(
         "Research started in the background; it takes 5 to 15 seconds. Tell the "
         "user in one short sentence that you are looking it up, then continue the "
-        "conversation. The result will arrive as a system message: when it does, "
-        "say you have it and give it."
+        "conversation. You do NOT have the answer yet: do not state one, do not "
+        "guess, do not give a figure from memory. The result will arrive as a "
+        "system message: when it does, say you have it and give it."
     ),
     run=_run,
     message=result_message,

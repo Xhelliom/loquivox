@@ -128,6 +128,20 @@ class RealtimeTalk:
         if not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
+    def _quiet(self) -> bool:
+        """
+        True when nothing more of the current reply is on its way to the ears.
+
+        Three things ask it and they must ask the same question: the mic gate
+        (what it hears is still echo), the end of the session (the last
+        sentence has not been heard yet) and ``push_result`` (there is no gap
+        to slip an answer into). ``_audio_done`` alone is the server saying it
+        has finished *sending* — the queue behind it can still hold seconds of
+        speech, which is a sentence in progress by any measure that matters.
+        """
+        return (self._audio_done.is_set() and self._audio.empty()
+                and not self._writing)
+
     def finished_speaking(self) -> bool:
         """
         True once the reply that ended the briefing has actually been heard.
@@ -139,7 +153,7 @@ class RealtimeTalk:
         sentence finishes, and bounded, so a missing end-of-audio event cannot
         hold a session open.
         """
-        if self._audio_done.is_set() and self._audio.empty() and not self._writing:
+        if self._quiet():
             return True
         now = time.monotonic()
         if self._speech_deadline is None:
@@ -214,8 +228,7 @@ class RealtimeTalk:
         """
         cfg = config_module.CFG
         now = time.monotonic()
-        if not (self._audio_done.is_set() and self._audio.empty()
-                and not self._writing):
+        if not self._quiet():
             self._echo_until = now + ECHO_HANGOVER
         if now >= self._echo_until:
             self._echo_report()
@@ -400,7 +413,7 @@ class RealtimeTalk:
         """
         if self._conn is None or self._stop or not self._session.desks.ready():
             return False
-        if not self._audio_done.is_set() or self._user_speaking:
+        if not self._quiet() or self._user_speaking:
             return False
         found = self._session.desks.take()
         if found is None:

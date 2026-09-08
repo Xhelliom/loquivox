@@ -141,11 +141,16 @@ def test_the_realtime_engine_routes_the_same_call():
     assert started, "the Realtime engine dropped a registered tool call"
     assert _wait(session.desks.ready)
 
-    # …and the answer only goes in between turns.
+    # …and the answer only goes in between turns — neither side talking.
     talk._conn = object()
     talk._user_speaking = True
     assert not talk.push_result(), "an answer cut the user off mid-sentence"
     talk._user_speaking = False
+    # The server finishes SENDING a reply seconds before it has been heard:
+    # what is still queued for the sound card is a sentence in progress.
+    talk._audio.put(b"\0" * 4800)
+    assert not talk.push_result(), "an answer landed on a reply still being played"
+    talk._audio.get_nowait()
     talk._say_result = lambda content: None      # no loop running here
     talk._loop.call_soon_threadsafe = lambda *a, **k: None
     import asyncio

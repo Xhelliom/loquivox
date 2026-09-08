@@ -598,7 +598,9 @@ class ModeHandler:
                 if found is None:
                     continue
                 OverlayManager.set_status("Thinking…")
-                _plugin, message = found
+                plugin, message = found
+                if plugin.result_note:
+                    ChatManager.add_message("note", plugin.result_note)
                 reply = session.reply_with_result(
                     message, on_delta=lambda t: ChatManager.stream("assistant", t))
                 if reply is not None and reply.text:
