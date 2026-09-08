@@ -212,23 +212,48 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
 
-### The research tool (`services/research.py`)
+### Plugins (`services/plugins.py`)
 
-Both engines get one function, `research(question)`, when `CFG.TALK_RESEARCH`
-is on. The model calls it, is answered *immediately* with `STARTED` (so it says
-"I'm looking it up" and carries on), and `ResearchDesk.ask` runs the real
-query on a thread: OpenAI Responses + `web_search`, or a Groq compound model
-(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search).
-The answer is handed back *between turns only*, never mid-sentence: the
-cascade's `_talk_listen` breaks with `action="research"` when the desk is
-ready and the VAD has not heard speech, and `_talk_converse` speaks
-`TalkSession.reply_with_research`; the Realtime loop polls
-`RealtimeTalk.push_research`, which waits for the audio queue to drain and
-the server to report speech stopped, then injects a system item and asks for
-a response. The result lives in `session.turns` as a system message so the
-writing pass has the facts; the tool call and its stub never do — a "tool"
-role would leak into the F4 history and the generation prompt.
+The extension surface both engines share, and `services/research.py` is its
+first client. The pattern it generalizes: **one tool** the model may call whose
+answer is too slow to wait for, so it comes back *between two turns* rather
+than mid-sentence.
+
+A plugin is one `Plugin` dataclass in one file — `name`/`description`/
+`parameters` (the chat and Realtime wire shapes are *derived*, never written
+twice), `run` (the background work), `message` (its answer as a system
+message), `started` (the stub the model speaks from meanwhile), `enabled` (the
+config key that gates it), and `settings` (its card in Settings, built with the
+dialog's own `_group`/`_field`/`_actions` so it lines up with the rest).
+Registering it is a `register()` call at import plus a line in `_MODULES` —
+that tuple is the whole "discovery", deliberately: no entry points, no
+scanning, nothing loaded from outside the tree.
+
+`TalkSession.desks` is a `Desks`, one `Desk` per *enabled* plugin, snapshotted
+when the session opens (a tool appearing mid-conversation is one the model was
+never told about). Everything the conversation core does goes through it and
+names no plugin: `desks.chat_tools` / `desks.realtime_tools` compose the tool
+list, `desks.get(name)` routes a call — `TalkSession._answer` in the cascade,
+`RealtimeTalk._handle` on the server event — and `desks.take()` sweeps every
+desk for one answer. Adding a plugin therefore touches `talk.py`,
+`realtime_talk.py` and `handlers/mode.py` not at all;
+`tests/test_plugins.py` pins that by driving a plugin the core has never heard
+of through both engines.
+
+The answer is handed back *between turns only*: the cascade's `_talk_listen`
+breaks with `action="result"` when a desk is ready and the VAD has not heard
+speech, and `_talk_converse` speaks `TalkSession.reply_with_result`; the
+Realtime loop polls `RealtimeTalk.push_result`, which waits for the audio queue
+to drain and the server to report speech stopped, then injects a system item
+and asks for a response. The result lives in `session.turns` as a system
+message so the writing pass has the facts; the tool call and its stub never do
+— a "tool" role would leak into the F4 history and the generation prompt.
 `AIService.complete` reassembles streamed `tool_calls` for the cascade.
+
+`research` itself: the model asks a question, `run_research` answers it on a
+thread with OpenAI Responses + `web_search` or a Groq compound model
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search),
+gated by `CFG.TALK_RESEARCH`.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

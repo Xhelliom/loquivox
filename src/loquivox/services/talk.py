@@ -40,8 +40,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.ai import AIService
-from loquivox.services.research import (CHAT_TOOL, STARTED, ResearchDesk,
-                                        question_of, result_message)
+from loquivox.services.plugins import Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
 FINISH_MARKER: str = "[[WRITE]]"
@@ -215,8 +214,9 @@ class TalkSession:
         self.write = write
         #: the text the user had selected when the session opened (F4 only)
         self.selection: Optional[str] = None
-        #: questions in flight to the research model, answers waiting
-        self.research = ResearchDesk()
+        #: one desk per enabled plugin: calls in flight, answers waiting to
+        #: be slipped in between two turns (see services/plugins.py)
+        self.desks = Desks()
         #: the conversation so far, as API messages (user/assistant turns)
         self.turns: List[Dict[str, Any]] = []
         #: what was on screen when the session started, described once by the
@@ -318,43 +318,51 @@ class TalkSession:
         self.add_user(text)
         return self._answer(on_delta)
 
-    def reply_with_research(self, question: str, result: str,
-                            on_delta: Optional[Callable[[str], None]] = None
-                            ) -> Optional[TalkReply]:
-        """A research result came back: keep it in the turns, and answer it."""
-        self.turns.append(result_message(question, result))
+    def reply_with_result(self, message: Dict[str, Any],
+                          on_delta: Optional[Callable[[str], None]] = None
+                          ) -> Optional[TalkReply]:
+        """
+        A plugin's answer came back: keep it in the turns, and answer it.
+
+        The message is whatever the plugin made of its result — the loops that
+        poll the desks hand it straight over, so a new plugin needs no branch
+        here or in either engine.
+        """
+        self.turns.append(message)
         return self._answer(on_delta)
 
     def _answer(self, on_delta: Optional[Callable[[str], None]]) -> Optional[TalkReply]:
         """
-        One spoken reply for the turns so far, with the ``research`` tool on
-        the table when it is enabled.
+        One spoken reply for the turns so far, with every enabled plugin's
+        tool on the table.
 
-        A tool call is answered on the spot (``STARTED``) and the model is
-        asked again for what it actually says out loud; that round trip is
-        the price of a reply that acknowledges the search instead of going
-        quiet. The call and its stub live only in this request — the turns
-        keep the spoken reply, never the plumbing, so the writing pass and
-        the F4 history never see a "tool" role.
+        A tool call is answered on the spot with the plugin's ``started`` stub
+        and the model is asked again for what it actually says out loud; that
+        round trip is the price of a reply that acknowledges the call instead
+        of going quiet. Routing is by tool name — a call this session has no
+        desk for is ignored rather than special-cased. The call and its stub
+        live only in this request: the turns keep the spoken reply, never the
+        plumbing, so the writing pass and the F4 history never see a "tool" role.
         """
         stream = None if on_delta is None else (lambda t: on_delta(_strip_marker(t)))
         base = ([{"role": "system", "content": self.system_prompt()}]
                 + self._context_messages() + self.turns)
-        tools = [CHAT_TOOL] if config_module.CFG.TALK_RESEARCH else None
         calls: List[Dict[str, str]] = []
-        answer = AIService.complete(base, on_delta=stream, tools=tools,
+        answer = AIService.complete(base, on_delta=stream,
+                                    tools=self.desks.chat_tools or None,
                                     tool_calls_out=calls)
-        research = [c for c in calls if c["name"] == "research"]
-        if research:
-            for call in research:
-                self.research.ask(question_of(call["arguments"]))
+        routed = [(c, desk) for c, desk in
+                  ((c, self.desks.get(c["name"])) for c in calls) if desk]
+        if routed:
+            for call, desk in routed:
+                desk.ask(call["arguments"])
             exchange = [{"role": "assistant", "content": answer or None,
                          "tool_calls": [{"id": c["id"], "type": "function",
                                          "function": {"name": c["name"],
                                                       "arguments": c["arguments"]}}
-                                        for c in research]}]
-            exchange += [{"role": "tool", "tool_call_id": c["id"], "content": STARTED}
-                         for c in research]
+                                        for c, _ in routed]}]
+            exchange += [{"role": "tool", "tool_call_id": c["id"],
+                          "content": desk.plugin.started} for c, desk in routed]
             answer = AIService.complete(base + exchange, on_delta=stream)
         if not answer:
             return None

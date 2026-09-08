@@ -33,7 +33,6 @@ import sounddevice as sd
 import loquivox.config as config_module
 from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
-from loquivox.services.research import REALTIME_TOOL, STARTED, question_of, result_message
 from loquivox.services.talk import (FINISH_MARKER, _strip_marker, echo_note,
                                     user_asked_write, user_said_done)
 from loquivox.services.vad import EchoGate
@@ -129,6 +128,20 @@ class RealtimeTalk:
         if not self._loop.is_closed():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
+    def _quiet(self) -> bool:
+        """
+        True when nothing more of the current reply is on its way to the ears.
+
+        Three things ask it and they must ask the same question: the mic gate
+        (what it hears is still echo), the end of the session (the last
+        sentence has not been heard yet) and ``push_result`` (there is no gap
+        to slip an answer into). ``_audio_done`` alone is the server saying it
+        has finished *sending* — the queue behind it can still hold seconds of
+        speech, which is a sentence in progress by any measure that matters.
+        """
+        return (self._audio_done.is_set() and self._audio.empty()
+                and not self._writing)
+
     def finished_speaking(self) -> bool:
         """
         True once the reply that ended the briefing has actually been heard.
@@ -140,7 +153,7 @@ class RealtimeTalk:
         sentence finishes, and bounded, so a missing end-of-audio event cannot
         hold a session open.
         """
-        if self._audio_done.is_set() and self._audio.empty() and not self._writing:
+        if self._quiet():
             return True
         now = time.monotonic()
         if self._speech_deadline is None:
@@ -215,8 +228,7 @@ class RealtimeTalk:
         """
         cfg = config_module.CFG
         now = time.monotonic()
-        if not (self._audio_done.is_set() and self._audio.empty()
-                and not self._writing):
+        if not self._quiet():
             self._echo_until = now + ECHO_HANGOVER
         if now >= self._echo_until:
             self._echo_report()
@@ -319,7 +331,7 @@ class RealtimeTalk:
                     "type": "realtime",
                     "output_modalities": ["audio"],
                     "instructions": self._instructions,
-                    "tools": [REALTIME_TOOL] if cfg.TALK_RESEARCH else [],
+                    "tools": self._session.desks.realtime_tools,
                     "audio": {
                         "input": {
                             "format": {"type": "audio/pcm", "rate": RATE},
@@ -362,9 +374,13 @@ class RealtimeTalk:
         elif etype == "input_audio_buffer.speech_stopped":
             self._user_speaking = False
         elif etype == "response.function_call_arguments.done":
-            if getattr(event, "name", "") == "research":
-                self._session.research.ask(question_of(getattr(event, "arguments", "")))
-                self._loop.create_task(self._tool_started(event.call_id))
+            # Routed by tool name, like the cascade: the desks are the only
+            # thing here that knows a plugin exists.
+            desk = self._session.desks.get(getattr(event, "name", ""))
+            if desk is not None:
+                desk.ask(getattr(event, "arguments", ""))
+                self._loop.create_task(
+                    self._tool_started(event.call_id, desk.plugin.started))
         elif etype.endswith("input_audio_transcription.delta"):
             self._on_delta("user", getattr(event, "delta", "") or "")
         elif etype.endswith("input_audio_transcription.completed"):
@@ -378,43 +394,44 @@ class RealtimeTalk:
         elif etype == "error":
             self.error = RuntimeError(getattr(event, "error", etype))
 
-    async def _tool_started(self, call_id: str) -> None:
-        """Answer the tool call at once so the model says it is looking."""
+    async def _tool_started(self, call_id: str, started: str) -> None:
+        """Answer the tool call at once so the model says it is working on it."""
         await self._conn.conversation.item.create(item={
-            "type": "function_call_output", "call_id": call_id, "output": STARTED})
+            "type": "function_call_output", "call_id": call_id, "output": started})
         await self._conn.response.create()
 
-    def push_research(self) -> bool:
+    def push_result(self) -> bool:
         """
-        Hand a research result to the model — between turns only.
+        Hand a plugin's answer to the model — between turns only.
 
-        Polled from the conversation loop like ``push_context``. It waits for
-        the moment nobody is talking: the reply queue drained and the server
-        not hearing speech, so the answer never cuts off a sentence on either
-        side. The result is kept in the session's turns too, for the writing
-        pass. True when something was just sent.
+        Polled from the conversation loop like ``push_context``, and it sweeps
+        every desk rather than one plugin's. It waits for the moment nobody is
+        talking: the reply queue drained and the server not hearing speech, so
+        the answer never cuts off a sentence on either side. The result is kept
+        in the session's turns too, for the writing pass. True when something
+        was just sent.
         """
-        if self._conn is None or self._stop or not self._session.research.ready():
+        if self._conn is None or self._stop or not self._session.desks.ready():
             return False
-        if not self._audio_done.is_set() or self._user_speaking:
+        if not self._quiet() or self._user_speaking:
             return False
-        found = self._session.research.take()
+        found = self._session.desks.take()
         if found is None:
             return False
-        question, result = found
-        message = result_message(question, result)
+        plugin, message = found
         self._session.turns.append(message)
-        from loquivox.managers.chat import ChatManager
-        ChatManager.add_message("note", "🔎 Résultat reçu — l'assistant vous le donne")
+        if plugin.result_note:
+            from loquivox.managers.chat import ChatManager
+            ChatManager.add_message("note", plugin.result_note)
         try:
-            asyncio.run_coroutine_threadsafe(self._say_research(message["content"]),
+            asyncio.run_coroutine_threadsafe(self._say_result(message["content"]),
                                              self._loop)
         except Exception as e:
-            print(f"⚠️  Research result not sent to the Realtime session: {e}")
+            print(f"⚠️  {plugin.name} result not sent to the Realtime session: {e}")
             return False
         return True
 
-    async def _say_research(self, content: str) -> None:
+    async def _say_result(self, content: str) -> None:
         await self._conn.conversation.item.create(item={
             "type": "message", "role": "system",
             "content": [{"type": "input_text", "text": content}]})

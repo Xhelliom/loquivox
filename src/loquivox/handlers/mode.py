@@ -529,7 +529,7 @@ class ModeHandler:
                     pressed = keys.poll(mapping, 0.05)
                     if talk.push_context():
                         print("👁️  Screen context handed to the Realtime session")
-                    talk.push_research()
+                    talk.push_result()
                     if pressed == "screen":
                         ModeHandler._talk_look(session)
                         continue  # not a turn boundary — keep listening
@@ -584,7 +584,7 @@ class ModeHandler:
             prefix = None
             if action == "cancel":
                 return True
-            if action == "research":
+            if action == "result":
                 # Nothing was said: drop the (silent) capture without paying
                 # for its transcription. The turn is the assistant's.
                 stream, STATE.stream_session = STATE.stream_session, None
@@ -594,12 +594,15 @@ class ModeHandler:
                     except Exception:
                         pass
                 STATE.audio_buffer = []
-                found = session.research.take()
+                found = session.desks.take()
                 if found is None:
                     continue
                 OverlayManager.set_status("Thinking…")
-                reply = session.reply_with_research(
-                    *found, on_delta=lambda t: ChatManager.stream("assistant", t))
+                plugin, message = found
+                if plugin.result_note:
+                    ChatManager.add_message("note", plugin.result_note)
+                reply = session.reply_with_result(
+                    message, on_delta=lambda t: ChatManager.stream("assistant", t))
                 if reply is not None and reply.text:
                     ChatManager.add_message("assistant", reply.text)
                     OverlayManager.set_status("Speaking…")
@@ -748,10 +751,10 @@ class ModeHandler:
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
                         action = idle_action
                         break
-                    if not vad.speech_started and session.research.ready():
-                        # An answer is back and the user has not started
-                        # talking: the one moment it can be given.
-                        action = "research"
+                    if not vad.speech_started and session.desks.ready():
+                        # A plugin's answer is back and the user has not
+                        # started talking: the one moment it can be given.
+                        action = "result"
                         break
                 if time.monotonic() >= deadline:
                     break
