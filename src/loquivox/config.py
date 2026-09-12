@@ -335,9 +335,12 @@ class Config:
     #                the server owns turn-taking and interruptions and the
     #                reply keeps the prosody of speech, but the conversation
     #                is held by the Realtime model, not by [models] chat.
+    #   "live"     — one OpenAI Live session (gpt-live-1): the voice model
+    #                holds the conversation but *delegates* the thinking, so
+    #                the choice of LLM comes back. See TALK_LIVE_DELEGATION.
     # The writing pass is a text completion either way.
     TALK_ENGINE: str = "cascade"
-    TALK_ENGINES: Tuple[str, ...] = ("cascade", "realtime")
+    TALK_ENGINES: Tuple[str, ...] = ("cascade", "realtime", "live")
     TALK_REALTIME_MODEL: str = "gpt-realtime-2.1"
     TALK_REALTIME_VOICE: str = "marin"
     # The voices gpt-realtime speaks with. Same names as the TTS ones and the
@@ -348,6 +351,40 @@ class Config:
         "shimmer", "verse")
     # Transcription model for the user's side — what lands in the brief.
     TALK_REALTIME_TRANSCRIBE: str = "gpt-4o-mini-transcribe"
+    TALK_LIVE_MODEL: str = "gpt-live-1"
+    TALK_LIVE_VOICE: str = "marin"
+    #: The voices gpt-live-1 speaks with — the Realtime ten plus twelve of its
+    #: own. Only bossa/tempo are not English; the model itself is multilingual
+    #: (it speaks the language its instructions are written in), but the accent
+    #: of a voice is not a setting.
+    TALK_LIVE_VOICES: Tuple[str, ...] = (
+        "marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage",
+        "shimmer", "verse", "beacon", "bossa", "cinder", "delta", "gleam",
+        "meridian", "quartz", "ripple", "stone", "tempo", "vesper", "willow")
+    #: Who does the thinking gpt-live-1 delegates. The choice is made when the
+    #: session opens and cannot change while it runs.
+    #:   "client"    — our own backend: STATE.ai_chat_model through
+    #:                 api.get_ai_client(), with every enabled plugin's tool on
+    #:                 the table. The reason this engine exists: the LLM is ours
+    #:                 again. What is lost is that the voice model no longer
+    #:                 names the tool itself — it asks for help, our model
+    #:                 decides what that means.
+    #:   "responses" — OpenAI's managed backend (TALK_LIVE_BACKEND_MODEL). It
+    #:                 issues real tool calls, but the model is OpenAI's, which
+    #:                 is what the Realtime engine already gives us.
+    #:   "auto"      — "responses" when [models] provider is openai, else
+    #:                 "client". Forcing either is what makes an honest
+    #:                 comparison possible: the same model, the two modes.
+    TALK_LIVE_DELEGATION: str = "auto"
+    TALK_LIVE_DELEGATIONS: Tuple[str, ...] = ("auto", "client", "responses")
+    #: The managed backend, for "responses" delegation only.
+    TALK_LIVE_BACKEND_MODEL: str = "gpt-5.6-luna"
+    #: How long a gap in one speaker's transcript deltas closes their turn
+    #: (seconds). The Live API sends deltas with no turn-completed event at all
+    #: — "transcript deltas have no item ID or authoritative turn-completed
+    #: event" — so this threshold is the turn boundary, and OpenAI is explicit
+    #: that it is the application's to tune.
+    TALK_LIVE_TURN_GAP: float = 1.2
     # A turn stops after this long no matter what (seconds).
     TALK_TURN_TIMEOUT: float = 60.0
     # Silence with nothing said at all for this long ends the conversation and
@@ -488,6 +525,27 @@ class Config:
     #: here. Both engines read it — the cascade through ``system_prompt()``, the
     #: Realtime session through the instructions it opens with.
     TALK_INSTRUCTIONS: str = ""
+    #: The backend prompt for the Live engine's client delegation — the one the
+    #: *thinking* model reads, not the voice model. Shaped the way OpenAI's
+    #: guide shapes it: what a voice transcript is, the task, what to return.
+    #: The voice model paraphrases what comes back, so this asks for facts in
+    #: one or two sentences rather than for something already phrased to speak.
+    TALK_LIVE_BACKEND_PROMPT: str = (
+        "You are the backend of a live voice assistant. The voice model in "
+        "front of you handles the conversation; it has asked you for help, and "
+        "what you return is spoken to the user in the voice model's own "
+        "words.\n\n"
+        "What reaches you is the conversation so far as a speech transcript, so "
+        "it is spoken language: it wanders, it backtracks, and the recognizer "
+        "mishears words. The request is never stated separately — work out what "
+        "the user needs from the most recent turns and from the context above. "
+        "Where the user corrected themselves, only the correction counts.\n\n"
+        "Use your tools when the answer needs facts you do not have. Return the "
+        "relevant facts in at most two short sentences, with no markdown and no "
+        "preamble. Use confirmed values, never invent one, and say plainly when "
+        "you cannot establish something. If the conversation does not yet say "
+        "what is wanted, return the one question that would settle it."
+    )
     TALK_GENERATE_PROMPT: str = (
         "You write the final text the user has just discussed with you by voice. "
         "The conversation is the brief: honour every instruction, fact and "
@@ -815,6 +873,16 @@ def _build_config() -> Config:
         overrides["TALK_REALTIME_VOICE"] = str(talk["realtime_voice"]).strip().lower()
     if str(talk.get("realtime_transcribe", "")).strip():
         overrides["TALK_REALTIME_TRANSCRIBE"] = str(talk["realtime_transcribe"]).strip()
+    if str(talk.get("live_model", "")).strip():
+        overrides["TALK_LIVE_MODEL"] = str(talk["live_model"]).strip()
+    if str(talk.get("live_voice", "")).strip():
+        overrides["TALK_LIVE_VOICE"] = str(talk["live_voice"]).strip().lower()
+    if str(talk.get("live_delegation", "")).strip().lower() in base.TALK_LIVE_DELEGATIONS:
+        overrides["TALK_LIVE_DELEGATION"] = str(talk["live_delegation"]).strip().lower()
+    if str(talk.get("live_backend_model", "")).strip():
+        overrides["TALK_LIVE_BACKEND_MODEL"] = str(talk["live_backend_model"]).strip()
+    if "live_turn_gap" in talk:
+        overrides["TALK_LIVE_TURN_GAP"] = float(talk["live_turn_gap"])
     if "barge_in" in talk:
         overrides["TALK_BARGE_IN"] = bool(talk["barge_in"])
     if "barge_in_ms" in talk:

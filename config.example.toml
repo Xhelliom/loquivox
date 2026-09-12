@@ -221,11 +221,43 @@ review_timeout = 120.0
 #                server owns turn-taking and interruptions, ~1.0s, and the reply
 #                keeps the prosody of speech. The [models] chat model no longer
 #                answers in talk mode (it still writes the final text).
+#   "live"     — one OpenAI Live session (gpt-live-1). The voice model holds the
+#                conversation but DELEGATES the thinking, so the choice of LLM
+#                comes back — see live_delegation. Billed at $0.05/min of voice
+#                on top of whatever the backend costs.
 engine = "cascade"
 # Only read when engine = "realtime".
 realtime_model = "gpt-realtime-2.1"
 realtime_voice = "marin"
 realtime_transcribe = "gpt-4o-mini-transcribe"
+
+# Only read when engine = "live".
+live_model = "gpt-live-1"
+# 22 voices. Only bossa and tempo are not English; the model itself speaks
+# whatever language its instructions are written in, but a voice's accent is
+# not a setting.
+live_voice = "marin"
+# Who does the thinking gpt-live-1 delegates. Fixed when the session opens.
+#   "client"    — ours: the [models] chat model, with every enabled plugin's
+#                 tool on the table. This is why the engine exists. The cost:
+#                 the voice model no longer names a tool itself — it asks for
+#                 help and our model works out what that means from the
+#                 conversation, because the delegation event carries "metadata,
+#                 not task text".
+#   "responses" — OpenAI's managed backend (live_backend_model). It issues real,
+#                 named tool calls, but the model is OpenAI's — which is what
+#                 the realtime engine already gives you.
+#   "auto"      — "responses" when [models] provider is openai, else "client".
+# Forcing either is what makes an honest comparison possible: same model, two
+# modes. "auto" alone can never run OpenAI in client mode.
+live_delegation = "auto"
+# Only read when live_delegation resolves to "responses".
+live_backend_model = "gpt-5.6-luna"
+# The Live API sends transcript deltas and never says a turn is over, so this
+# gap (seconds) is the turn boundary. OpenAI is explicit that the threshold is
+# the application's to tune. Lower it if the assistant waits too long; raise it
+# if it cuts in while you are still thinking mid-sentence.
+live_turn_gap = 1.2
 
 # Read the assistant's spoken replies aloud even when TTS is toggled off.
 speak_replies = true

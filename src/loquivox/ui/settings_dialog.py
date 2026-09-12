@@ -103,6 +103,10 @@ class SettingsDialog:
     _engine_status: Optional[Gtk.Label] = None
     _realtime_model: Optional[Gtk.Entry] = None
     _realtime_voice: Optional[Gtk.ComboBoxText] = None
+    _live_voice: Optional[Gtk.ComboBoxText] = None
+    _live_test: Optional[Gtk.Button] = None
+    _live_delegation: Optional[Gtk.ComboBoxText] = None
+    _live_backend: Optional[Gtk.Entry] = None
     _tts_engine_combo: Optional[Gtk.ComboBoxText] = None
     _realtime_test: Optional[Gtk.Button] = None
 
@@ -570,7 +574,9 @@ class SettingsDialog:
             "transcription, chat model and voice below — each swappable, local "
             "or cloud. Realtime hands the whole conversation to one model that "
             "hears and answers directly: faster and more natural, but the chat "
-            "model no longer answers. The final text is a plain completion "
+            "model no longer answers. Live splits the difference — an OpenAI "
+            "voice holds the conversation and delegates the thinking, which "
+            "can be your own model again. The final text is a plain completion "
             "either way.")
 
         cls._engine_combo = Gtk.ComboBoxText()
@@ -578,6 +584,7 @@ class SettingsDialog:
             cls._engine_combo.append(eid, {
                 "cascade": "Cascade — transcribe, answer, speak",
                 "realtime": "Realtime — speech to speech (OpenAI)",
+                "live": "Live — OpenAI voice, delegated thinking",
             }.get(eid, eid.title()))
         cls._engine_combo.set_active_id(
             config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
@@ -601,9 +608,45 @@ class SettingsDialog:
         cls._realtime_test.connect("clicked", cls._on_test_realtime_voice)
         cls._field(body, "Its voice", cls._realtime_voice, labels, extra=cls._realtime_test)
 
-        # The two fields above only mean anything in realtime mode — greying
-        # them out is the shortest answer to "why are there two voices here".
+        cls._live_voice = Gtk.ComboBoxText()
+        for vid in config_module.CFG.TALK_LIVE_VOICES:
+            cls._live_voice.append(vid, vid.title())
+        cls._live_voice.set_active_id(
+            config_module.CFG.TALK_LIVE_VOICE if config_module.CFG.TALK_LIVE_VOICE
+            in config_module.CFG.TALK_LIVE_VOICES else config_module.CFG.TALK_LIVE_VOICES[0])
+        cls._live_test = Gtk.Button(label="▶ Test")
+        cls._live_test.set_tooltip_text(
+            "Preview this voice (same voice, spoken by the TTS model)")
+        cls._live_test.connect("clicked", cls._on_test_live_voice)
+        cls._field(body, "Live voice", cls._live_voice, labels, extra=cls._live_test)
+
+        # The setting the whole engine turns on: who thinks. Spelled out rather
+        # than left to "auto", because forcing a mode is how the two are
+        # compared on the same model.
+        cls._live_delegation = Gtk.ComboBoxText()
+        for did in config_module.CFG.TALK_LIVE_DELEGATIONS:
+            cls._live_delegation.append(did, {
+                "auto": "Auto — follow the chat provider",
+                "client": "Your backend — the chat model, with plugins",
+                "responses": "OpenAI's backend — named tool calls",
+            }.get(did, did.title()))
+        cls._live_delegation.set_active_id(
+            config_module.CFG.TALK_LIVE_DELEGATION
+            if config_module.CFG.TALK_LIVE_DELEGATION in config_module.CFG.TALK_LIVE_DELEGATIONS
+            else "auto")
+        cls._field(body, "Delegate thinking to", cls._live_delegation, labels)
+
+        cls._live_backend = Gtk.Entry()     # ids change often — free text
+        cls._live_backend.set_text(config_module.CFG.TALK_LIVE_BACKEND_MODEL)
+        cls._live_backend.set_tooltip_text(
+            "Only used when the thinking is delegated to OpenAI's backend")
+        cls._field(body, "OpenAI backend model", cls._live_backend, labels)
+
+        # Each engine's own fields only mean anything when it is the one
+        # running — greying them out is the shortest answer to "why are there
+        # three voices here".
         cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
+        cls._live_delegation.connect("changed", cls._on_talk_engine_changed)
         cls._on_talk_engine_changed(cls._engine_combo)
 
         engine_status = Gtk.Label()
@@ -613,12 +656,36 @@ class SettingsDialog:
         cls._engine_status = engine_status
 
     @classmethod
-    def _on_talk_engine_changed(cls, combo: Gtk.ComboBoxText) -> None:
-        """Only the realtime engine has a model and a voice of its own."""
-        realtime = (combo.get_active_id() or "cascade") == "realtime"
-        for widget in (cls._realtime_model, cls._realtime_voice, cls._realtime_test):
+    def _on_talk_engine_changed(cls, _combo: Gtk.ComboBoxText) -> None:
+        """
+        Show each engine only the fields it reads.
+
+        Driven by the engine combo *and* the delegation one, because the
+        backend model is a field of a field: it only means anything when Live
+        is running and its thinking goes to OpenAI.
+        """
+        # Lazy, like every service import in this file: live_talk pulls numpy
+        # and the sound card, and the dialog opens on machines where talk mode
+        # never runs.
+        from loquivox.services.live_talk import resolve_delegation
+
+        engine = (cls._engine_combo.get_active_id() or "cascade"
+                  if cls._engine_combo is not None else "cascade")
+        live = engine == "live"
+        to_openai = (cls._live_delegation is not None
+                     and resolve_delegation(cls._live_delegation.get_active_id())
+                     == "responses")
+        for widget, on in (
+                (cls._realtime_model, engine == "realtime"),
+                (cls._realtime_voice, engine == "realtime"),
+                (cls._realtime_test, engine == "realtime"),
+                (cls._live_voice, live),
+                (cls._live_test, live),
+                (cls._live_delegation, live),
+                (cls._live_backend, live and to_openai),
+        ):
             if widget is not None:
-                widget.set_sensitive(realtime)
+                widget.set_sensitive(on)
 
     #: a line to try a voice on, per transcription language
     _SAMPLES = {
@@ -659,6 +726,24 @@ class SettingsDialog:
         TTSService.preview(cls._sample_line(), model="gpt-4o-mini-tts", voice=voice)
 
     @classmethod
+    def _on_test_live_voice(cls, _btn: Gtk.Button) -> None:
+        """
+        Preview the Live voice through the TTS model, like the Realtime one.
+
+        Twelve of the twenty-two are new here and the TTS model does not speak
+        them, so those fall back to the default rather than failing silently:
+        no preview is a better answer than another voice's.
+        """
+        from loquivox.services.tts import TTSService
+
+        voice = cls._live_voice.get_active_id() if cls._live_voice else ""
+        if voice not in config_module.CFG.TALK_REALTIME_VOICES:
+            cls._engine_status.set_markup(
+                f"<small>⚠️  No preview for {voice} — it is a Live-only voice.</small>")
+            return
+        TTSService.preview(cls._sample_line(), model="gpt-4o-mini-tts", voice=voice)
+
+    @classmethod
     def _on_apply_engine(cls, _btn: Gtk.Button) -> None:
         """Write [talk] engine/model/voice and reload — talk mode reads CFG live."""
         from loquivox.config_io import ConfigWriteError, update_section
@@ -669,6 +754,9 @@ class SettingsDialog:
                 "engine": engine,
                 "realtime_model": cls._realtime_model.get_text().strip(),
                 "realtime_voice": cls._realtime_voice.get_active_id() or "marin",
+                "live_voice": cls._live_voice.get_active_id() or "marin",
+                "live_delegation": cls._live_delegation.get_active_id() or "auto",
+                "live_backend_model": cls._live_backend.get_text().strip(),
             })
         except ConfigWriteError as e:
             cls._engine_status.set_markup(f"<small>❌ {e}</small>")

@@ -160,6 +160,16 @@ class RealtimeTalk:
             self._speech_deadline = now + SPEECH_TAIL_TIMEOUT
         return now >= self._speech_deadline
 
+    def tick(self) -> None:
+        """
+        Nothing to do: the server closes turns here.
+
+        Part of the interface ``_talk_converse_server`` drives, because the
+        Live engine has no turn-completed event and has to close its own. Said
+        out loud rather than left out, so the shared loop can call it
+        unconditionally.
+        """
+
     def push_context(self) -> bool:
         """
         Hand the model the screen description, whenever a capture comes back.

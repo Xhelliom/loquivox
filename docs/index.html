@@ -480,7 +480,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
 
 <div class="marquee" aria-hidden="true">
   <div class="marquee-track" id="marquee-track">
-    <span>X11</span><span>Wayland</span><span>GNOME</span><span>Niri</span><span>Arch Linux</span><span>Debian</span><span>Ubuntu</span><span>whisper.cpp</span><span>Groq</span><span>Deepgram</span><span>OpenAI Realtime</span><span>Piper TTS</span><span>Smart Turn</span><span>GTK3</span><span>evdev</span>
+    <span>X11</span><span>Wayland</span><span>GNOME</span><span>Niri</span><span>Arch Linux</span><span>Debian</span><span>Ubuntu</span><span>whisper.cpp</span><span>Groq</span><span>Deepgram</span><span>OpenAI Realtime</span><span>GPT-Live</span><span>Piper TTS</span><span>Smart Turn</span><span>GTK3</span><span>evdev</span>
   </div>
 </div>
 
@@ -522,7 +522,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
       <div class="card reveal">
         <div class="icon">🎭</div>
         <h3>Two engines, one promise</h3>
-        <p><strong>Cascade</strong>: transcription → chat model → voice, every slot local or cloud, ~1.8 s. <strong>Realtime</strong>: one OpenAI speech-to-speech session, ~1.0 s, with the prosody of speech. Presets pick a whole setup in one click.</p>
+        <p><strong>Cascade</strong>: transcription → chat model → voice, every slot local or cloud, ~1.8 s. <strong>Realtime</strong>: one OpenAI speech-to-speech session, ~1.0 s, with the prosody of speech. <strong>Live</strong>: an OpenAI voice that delegates the thinking back to your own model. Presets pick a whole setup in one click.</p>
       </div>
       <div class="card reveal">
         <div class="icon">🔊</div>
@@ -567,6 +567,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
           <span class="stage">🔊 Voice<small>OpenAI · Groq · Piper</small></span>
         </div>
         <p class="pipe-alt">or, with the <strong>Realtime</strong> engine: one OpenAI speech-to-speech session holds the whole conversation — ~1.0 s and the prosody of speech, the server handles turn-taking and interruption.</p>
+        <p class="pipe-alt">or, with the <strong>Live</strong> engine: <code>gpt-live-1</code> speaks and listens while <em>delegating</em> the thinking — the same ~1.0 s, and your own chat model answers again.</p>
         <ul class="talk-points">
           <li><strong>It reasons before it writes.</strong> Two sentences, one question at a time — audience, intent, tone, key facts. It never quietly guesses at a misheard name: it quotes it back and asks.</li>
           <li><strong>It searches without stopping.</strong> A <code>research()</code> tool hands the question to a web-searching model on a thread; the reply is spoken between turns, never mid-sentence, and stays in the brief.</li>

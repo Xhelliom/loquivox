@@ -45,7 +45,7 @@ be cut off mid-sentence like a person. At the end it writes the text the convers
 | 🗣️ | **Talk mode** (`F6`) | Discuss what you need out loud, then say the word: the whole conversation becomes one finished text, typed and copied. Select text first and it is the text to rework (*"make it formal"*, *"shorten this"*). Details below. |
 | 💬 | **AI chat** (`F4`) | The same conversation, about what is on your screen — the error, the page, the text you selected. Nothing written at the end, unless you say *"write it"*. Or type into the overlay. |
 | 🔎 | **Web search** | Mid-conversation, the assistant hands a question to a web-searching model, says it is looking it up, and carries on; the answer arrives between turns. |
-| 🎭 | **Two engines** | *Cascade*: transcription → chat model → voice, each slot local or cloud. *Realtime*: one OpenAI speech-to-speech session, faster and with the prosody of speech. |
+| 🎭 | **Three engines** | *Cascade*: transcription → chat model → voice, each slot local or cloud. *Realtime*: one OpenAI speech-to-speech session, faster and with the prosody of speech. *Live*: an OpenAI voice that delegates the thinking back to your own model. |
 | ✋ | **Interruptible** | Start talking over the reply and it stops and listens; your first words are kept. Turns end on *meaning*, thanks to an on-device turn-detection model. |
 | 👁️ | **Screen context** | Optionally, the focused window is captured and described once by a vision model, so you never have to read the error dialog out loud. |
 | 🎙️ | **Dictation** (`F3`) | Speak, and your words are typed at the cursor — in *any* application. |
@@ -157,6 +157,7 @@ then turns into a briefing on the spot and the text is generated from everything
 |:---|:---|:---:|:---|
 | **Cascade** (default) | transcription → turn detection → chat model → voice, four slots, each one local or cloud | ~1.8 s | Your choice of model at every step, including a **fully local voice** (Piper: no key, no network, first sample in 0.2 s) |
 | **Realtime** | one OpenAI Realtime session hears and answers directly | ~1.0 s | The prosody of speech; the server handles turn-taking and interruption. The chat model is OpenAI's for the conversation |
+| **Live** | `gpt-live-1` holds the conversation and **delegates** the thinking | ~1.0 s | The prosody of speech *and* your own chat model back: the voice asks for help, your backend answers. Billed $0.05/min on top of the backend. The voice model no longer names a tool itself |
 
 Either way the text written at the end comes from your chosen chat model: the conversation
 half is interchangeable, the writing pass never learns which engine ran.
@@ -415,7 +416,8 @@ keyboard.py  ──▶  AudioService  ──▶  transcription backend  ──�
 
 Talk & chat (F6 / F4, a whole session)
 _talk_worker ──▶ cascade:  listen (VAD + Smart Turn) ─▶ STT ─▶ chat model ─▶ TTS ─▶ barge-in
-             └─▶ realtime: one OpenAI Realtime session, speech in / speech out
+             ├─▶ realtime: one OpenAI Realtime session, speech in / speech out
+             └─▶ live:     gpt-live-1 speaks, delegates the thinking to your model
                      │                 ▲ research(question) → web-searching model, on a thread
                      ▼                 │ answer injected between turns
                 TalkSession ──▶ writing pass (chat model) ──▶ review bubble ──▶ type + clipboard
@@ -428,7 +430,7 @@ src/loquivox/
 ├── state.py          # AppState + SettingsManager (runtime state & user prefs)
 ├── platform/         # X11 vs Wayland backends behind ABCs (clipboard, typing, screenshot)
 ├── transcription/    # Pluggable STT: factory, dispatcher, groq / whispercpp / streaming
-├── services/         # audio, ai, tts (+ piper), talk, realtime_talk, research, vad,
+├── services/         # audio, ai, tts (+ piper), talk, realtime_talk, live_talk, research, vad,
 │                     # turn_detector, postprocess, clipboard, image, media
 ├── managers/         # history, chat overlay state, recording overlay
 ├── ui/               # recording overlay, WebKit2 chat overlay, settings, tray, hotkey bar

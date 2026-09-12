@@ -487,14 +487,20 @@ class ModeHandler:
         turns land in the same ``TalkSession``, and the writing pass that
         follows is a text completion that never learns which ran.
         """
-        if config_module.CFG.TALK_ENGINE == "realtime":
-            return ModeHandler._talk_converse_realtime(session, keys)
+        engine = config_module.CFG.TALK_ENGINE
+        if engine == "realtime":
+            from loquivox.services.realtime_talk import RealtimeTalk
+            return ModeHandler._talk_converse_server(session, keys, RealtimeTalk,
+                                                     "Realtime")
+        if engine == "live":
+            from loquivox.services.live_talk import LiveTalk
+            return ModeHandler._talk_converse_server(session, keys, LiveTalk, "Live")
         return ModeHandler._talk_converse(session, keys)
 
     @staticmethod
-    def _talk_converse_realtime(session, keys) -> bool:
+    def _talk_converse_server(session, keys, engine, label: str) -> bool:
         """
-        Hold the briefing through one OpenAI Realtime session.
+        Hold the briefing through one server-side session — Realtime or Live.
 
         This loop owns nothing but the keyboard: the model decides when a turn
         ends and stops talking when it is talked over, so there is no VAD to
@@ -503,22 +509,28 @@ class ModeHandler:
         the session does, on its own thread, so a hung request can never freeze
         the keyboard.
 
-        Anything that stops it from opening (no key, no ``openai``, a model the
-        account cannot reach) falls back to the cascade rather than failing:
-        the user asked to talk, not to talk *this way*.
+        One loop for both engines because both answer the same five questions —
+        is there context to hand over, a plugin answer to slip in, a turn to
+        close, an error, is the briefing over and has it been *heard*. What
+        differs is behind those methods, not here: ``tick()`` does nothing on
+        the Realtime session, where the server closes turns, and everything on
+        the Live one, where nothing does.
+
+        Anything that stops a session opening (no key, no ``openai``, a model
+        the account cannot reach) falls back to the cascade rather than
+        failing: the user asked to talk, not to talk *this way*.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
-        from loquivox.services.realtime_talk import RealtimeTalk
 
         cfg = config_module.CFG
         ModeHandler._show_talk_overlay()
         OverlayManager.set_status("Connecting…")
-        talk = RealtimeTalk(session)
+        talk = engine(session)
         try:
             talk.start()
             OverlayManager.set_status("")
         except Exception as e:
-            print(f"⚠️  Realtime talk unavailable ({e}) — using the cascade")
+            print(f"⚠️  {label} talk unavailable ({e}) — using the cascade")
             return ModeHandler._talk_converse(session, keys)
 
         mapping = KeyboardHandler.talk_listen_keys()
@@ -527,8 +539,9 @@ class ModeHandler:
             with keys.exclusive():
                 while True:
                     pressed = keys.poll(mapping, 0.05)
+                    talk.tick()
                     if talk.push_context():
-                        print("👁️  Screen context handed to the Realtime session")
+                        print(f"👁️  Screen context handed to the {label} session")
                     talk.push_result()
                     if pressed == "screen":
                         ModeHandler._talk_look(session)
@@ -557,7 +570,7 @@ class ModeHandler:
         finally:
             talk.close()
         if talk.error is not None:
-            print(f"⚠️  Realtime talk ended: {talk.error}")
+            print(f"⚠️  {label} talk ended: {talk.error}")
         return cancelled
 
     @staticmethod
