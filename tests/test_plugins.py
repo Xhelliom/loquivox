@@ -169,13 +169,18 @@ def test_the_realtime_engine_routes_the_same_call():
     print("✓ the Realtime engine routes and injects the same plugin, between turns")
 
 
-def test_the_live_engine_routes_a_delegated_call():
+def test_the_live_engine_answers_the_backend_with_the_real_result():
     """
-    Responses delegation: the same plugin, reached through the nested envelope.
+    Responses delegation: the same plugin, and the backend reads its answer.
 
     The tool list is the Realtime one — the Responses wire shape for a function
     is the same flat shape, which is why no third definition exists — and the
     call arrives inside ``response.event`` rather than as a top-level event.
+
+    Unlike the other two engines, nothing is stubbed: the backend response is
+    paused until its tool result is submitted, and the voice model carries the
+    conversation meanwhile, so the real answer goes straight back. Nothing is
+    left on a desk for a between-turns sweep to find.
     """
     import asyncio
 
@@ -183,10 +188,14 @@ def test_the_live_engine_routes_a_delegated_call():
 
     session = TalkSession()
     talk = LiveTalk(session)
-    scheduled = []
+    outputs = []
     real_run = asyncio.run_coroutine_threadsafe
-    asyncio.run_coroutine_threadsafe = lambda coro, loop: (coro.close(),
-                                                           scheduled.append(1))
+
+    def _capture(coro, loop):
+        outputs.append(coro.cr_frame.f_locals.get("output"))
+        coro.close()
+
+    asyncio.run_coroutine_threadsafe = _capture
 
     class _Event:
         def __init__(self, **kw):
@@ -200,27 +209,19 @@ def test_the_live_engine_routes_a_delegated_call():
 
     try:
         _call("nothing_here")
-        assert not scheduled, "a tool this session never declared was answered"
+        time.sleep(0.05)
+        assert not outputs, "a tool this session never declared was answered"
         _call("weather")
-        assert scheduled, "the Live engine dropped a registered tool call"
-        assert _wait(session.desks.ready)
-
-        # …and the answer still only goes in between turns.
-        talk._conn = object()
-        sent = []
-        talk._append = lambda kind, content, delegation_id=None: sent.append(kind)
-        talk._live["user"] = "et à Brest"       # the user has the floor
-        assert not talk.push_result(), "an answer cut the user off mid-sentence"
-        talk._live.pop("user")
-        talk._audio.put(b"\0" * 4800)
-        assert not talk.push_result(), "an answer landed on a reply still playing"
-        talk._audio.get_nowait()
-        assert talk.push_result(), "the answer never reached the model"
+        assert _wait(lambda: bool(outputs)), "the Live engine dropped a tool call"
     finally:
         asyncio.run_coroutine_threadsafe = real_run
-    assert sent == ["commentary"], sent   # spoken aloud, not thought silently
-    assert session.turns[-1]["content"].startswith("WEATHER for Brest"), session.turns
-    print("✓ the Live engine routes the same plugin through a Responses delegation")
+
+    assert outputs[0].startswith("WEATHER for Brest"), outputs
+    assert not session.desks.ready(), "the answer was also queued for a sweep"
+    # …and the writing pass still gets the facts, while the call never does.
+    assert session.turns == [{"role": "system",
+                              "content": outputs[0]}], session.turns
+    print("✓ the Live engine answers a Responses delegation with the real result")
 
 
 def test_client_delegation_reaches_the_plugin_through_our_backend():
@@ -267,6 +268,20 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     # words, and that spoken version is what the transcript brings back.
     assert session.turns[-1]["content"] == "quel temps fait-il à Lyon", session.turns
     assert _wait(session.desks.ready), "the plugin our backend called never ran"
+
+    # This is the path that still hands a plugin's answer back between turns —
+    # nobody is holding the line here — so the gating is checked on it.
+    sent.clear()
+    talk._conn = object()
+    talk._live["user"] = "et à Brest"             # the user has the floor
+    assert not talk.push_result(), "an answer cut the user off mid-sentence"
+    talk._live.pop("user")
+    talk._audio.put(b"\0" * 4800)
+    assert not talk.push_result(), "an answer landed on a reply still playing"
+    talk._audio.get_nowait()
+    assert talk.push_result(), "the answer never reached the model"
+    assert sent[0][0] == "commentary", sent   # spoken aloud, not thought silently
+    assert session.turns[-1]["content"].startswith("WEATHER for Lyon"), session.turns
     print("✓ client delegation reaches the plugin with no tool name on the wire")
 
 
@@ -304,7 +319,7 @@ if __name__ == "__main__":
     test_the_config_key_is_the_only_gate()
     test_the_cascade_routes_by_tool_name()
     test_the_realtime_engine_routes_the_same_call()
-    test_the_live_engine_routes_a_delegated_call()
+    test_the_live_engine_answers_the_backend_with_the_real_result()
     test_client_delegation_reaches_the_plugin_through_our_backend()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")

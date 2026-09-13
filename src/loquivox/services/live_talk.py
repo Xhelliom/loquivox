@@ -139,9 +139,12 @@ class LiveTalk:
         #: the screen description already handed over, kept as the text rather
         #: than a flag: S starts a fresh capture and a flag would swallow it
         self._context_pushed = ""
-        #: client delegations being worked on, so a second event for one in
-        #: flight does not start the backend twice
-        self._working: set = set()
+        #: every client delegation this session has taken on. Kept for the
+        #: whole session, not just while the work runs: a delegation ID is one
+        #: request, so a repeated event for one already answered must not
+        #: consult again — and an in-flight-only guard would let a fast
+        #: backend be asked twice for the same thing.
+        self._seen: set = set()
         self._lock = threading.Lock()
         #: set once the briefing is over — a finish phrase or the model's marker
         self.done = False
@@ -357,6 +360,10 @@ class LiveTalk:
         the writing pass. Through ``commentary.append``, which is the event for
         something the model should say out loud, in its own words.
 
+        Client delegation only, in practice. Under ``responses`` the backend is
+        holding the line for its tool result, so ``_answer_call`` replies to the
+        call directly and nothing is ever put on a desk for this to find.
+
         "Nobody is talking" is one condition short of the Realtime engine's
         here: there is no ``speech_started`` to tell us the user has the floor,
         so an open user turn stands in for it — the transcript is the only
@@ -400,9 +407,9 @@ class LiveTalk:
         if target != "client" or not did:
             return          # a "responses" delegation runs on OpenAI's side
         with self._lock:
-            if did in self._working:
+            if did in self._seen:
                 return
-            self._working.add(did)
+            self._seen.add(did)
         threading.Thread(target=self._consult, args=(did,), daemon=True).start()
 
     def _consult(self, delegation_id: str) -> None:
@@ -422,9 +429,6 @@ class LiveTalk:
             self._append("commentary", answer, delegation_id=delegation_id)
         except Exception as e:
             print(f"⚠️  Delegation failed: {e}")
-        finally:
-            with self._lock:
-                self._working.discard(delegation_id)
 
     def _on_response_event(self, event) -> None:
         """
@@ -440,8 +444,7 @@ class LiveTalk:
 
         Only completed function calls matter here — "an arguments-done event
         alone is not sufficient to identify the call" — and each is answered
-        with the plugin's stub so the model acknowledges instead of going
-        quiet, then the response is continued explicitly.
+        with the plugin's *real* result, on a thread. See ``_answer_call``.
         """
         inner = getattr(event, "event", None)
         if not isinstance(inner, dict):
@@ -454,15 +457,65 @@ class LiveTalk:
         desk = self._session.desks.get(str(item.get("name") or ""))
         if desk is None:
             return
-        desk.ask(str(item.get("arguments") or ""))
-        call_id = str(item.get("call_id") or "")
-        asyncio.run_coroutine_threadsafe(
-            self._tool_started(call_id, desk.plugin.started), self._loop)
+        threading.Thread(target=self._answer_call, daemon=True,
+                         args=(desk, str(item.get("call_id") or ""),
+                               str(item.get("arguments") or ""))).start()
 
-    async def _tool_started(self, call_id: str, started: str) -> None:
-        """Answer the call with its stub, then continue the backend response."""
+    def _answer_call(self, desk, call_id: str, arguments: str) -> None:
+        """
+        Run one plugin and give the backend its actual answer.
+
+        The other two engines hand back the ``started`` stub here and deliver
+        the real answer later, between turns — because there the conversation
+        loop is *blocked* while a plugin works, and a stub is what keeps the
+        assistant from going silent for five seconds.
+
+        Live is the one place that does not apply. "Live speech and delegated
+        work continue independently": the voice model keeps the conversation
+        going on its own while the backend waits, so waiting costs nothing
+        anyone can hear. And it buys the thing the stub route loses — the
+        backend model actually *reads* the result and reasons from it, instead
+        of being told "I'm looking into it" and then overhearing the answer
+        secondhand through what the voice said out loud.
+
+        So this blocks on purpose, on its own thread. The call is kept out of
+        ``session.turns`` like everywhere else (a "tool" role would leak into
+        the F4 history and the generation prompt) but the answer goes in, so
+        the writing pass has the facts whichever engine ran.
+
+        A plugin that never returns leaves this response pending for good.
+        That is the honest cost of the trade and it is bounded: the voice model
+        is unaffected and the session ends normally. A deadline here would only
+        answer "gave up" to a backend that may still be handed the real result
+        moments later, which is worse than one dangling call.
+        """
+        from loquivox.managers.chat import ChatManager
+
+        message = desk.run_now(arguments)
+        if message is not None:
+            self._session.turns.append(message)
+            if desk.plugin.result_note:
+                ChatManager.add_message("note", desk.plugin.result_note)
+        # Something must go back either way: the backend response is paused
+        # until this call is answered, so an unusable result is still an answer.
+        output = message["content"] if message is not None else "No result."
+        try:
+            asyncio.run_coroutine_threadsafe(self._tool_result(call_id, output),
+                                             self._loop)
+        except Exception as e:
+            print(f"⚠️  {desk.plugin.name} result not sent to the backend: {e}")
+
+    async def _tool_result(self, call_id: str, output: str) -> None:
+        """
+        Submit one tool result, then continue the backend response.
+
+        Both halves are required: "appending a function result does not
+        automatically continue the response", and ``response.item.create`` has
+        no acknowledgment of its own, so there is nothing to wait for between
+        them.
+        """
         await self._conn.response.item.create(item={
-            "type": "function_call_output", "call_id": call_id, "output": started})
+            "type": "function_call_output", "call_id": call_id, "output": output})
         await self._conn.response.create()
 
     # --- microphone → session ---------------------------------------------
@@ -691,6 +744,15 @@ if __name__ == "__main__":
         def __init__(self, **kw) -> None:
             self.__dict__.update(kw)
 
+    def _wait_for(predicate, timeout: float = 3.0) -> bool:
+        """Give a worker thread a moment to get there."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.01)
+        return False
+
     from loquivox.services.talk import FINISH_MARKER, TalkSession
 
     import loquivox.managers.chat as chat_module
@@ -763,11 +825,11 @@ if __name__ == "__main__":
     event = _Event(type="session.delegation.created",
                    delegation=_Event(id="item_1", type="delegation", target="client"))
     deleg._on_delegation(event)
-    deleg._on_delegation(event)          # a repeat must not start it twice
-    for _ in range(200):
-        if sent:
-            break
-        time.sleep(0.01)
+    assert _wait_for(lambda: bool(sent))
+    # A repeat must not consult again — including after the first one finished,
+    # which an in-flight-only guard would wave through.
+    deleg._on_delegation(event)
+    time.sleep(0.05)
     assert sent == [("commentary", "il fait 12 degrés", "item_1")], sent
     assert len(consulted) == 1, consulted
     # A "responses" delegation is OpenAI's to run: nothing happens on this side.
@@ -777,47 +839,74 @@ if __name__ == "__main__":
     time.sleep(0.05)
     assert not sent, sent
 
-    # The nested Responses envelope routes by the INNER type, and only a
-    # completed function call starts a desk.
+    # The nested Responses envelope routes by the INNER type, and the backend
+    # gets the plugin's REAL answer back — it is holding the line for it.
     class _Desk:
-        def __init__(self) -> None:
-            self.asked: list = []
-            self.plugin = _Event(started="je regarde")
+        """Stands in for a desk whose plugin answers instantly."""
 
-        def ask(self, arguments: str) -> None:
-            self.asked.append(arguments)
+        def __init__(self, answer: str) -> None:
+            self.seen: list = []
+            self._answer = answer
+            self.plugin = _Event(name="lookup", started="je regarde",
+                                 result_note="")
 
-    desk = _Desk()
+        def run_now(self, arguments: str):
+            self.seen.append(arguments)
+            return ({"role": "system", "content": self._answer} if self._answer
+                    else None)
+
+    desk = _Desk("il fait 12 degrés")
     resp = LiveTalk(TalkSession())
     resp._session.desks.get = lambda name: desk if name == "lookup" else None
-    # The stub reply is scheduled on the session's loop, which is not running
-    # here: capture the coroutine instead of awaiting it, so what is checked is
-    # the real ``_tool_started`` being built for the real call.
-    scheduled: list = []
+    # The reply is scheduled on the session's loop, which is not running here:
+    # capture the coroutine instead of awaiting it, so what is checked is the
+    # real ``_tool_result`` being built with the real output.
+    outputs: list = []
     real_schedule = asyncio.run_coroutine_threadsafe
 
     def _capture(coro, loop):
+        outputs.append((coro.__qualname__, coro.cr_frame.f_locals.get("output")))
         coro.close()
-        scheduled.append(coro.__qualname__)
 
     asyncio.run_coroutine_threadsafe = _capture
-    # …and the SDK hands the nested event over as a plain dict, not a model.
-    resp._handle(_Event(type="response.event", delegation_id="item_3",
-                        event={"type": "response.output_text.delta",
-                               "delta": "ignored"}))
-    assert not desk.asked, "an outer-type dispatch leaked through"
-    resp._handle(_Event(type="response.event", delegation_id="item_3",
-                        event={"type": "response.completed",
-                               "response": {"output": []}}))
-    assert not desk.asked, "an empty terminal output started something"
-    resp._handle(_Event(type="response.event", delegation_id="item_3",
-                        event={"type": "response.output_item.done",
-                               "item": {"type": "function_call",
-                                        "name": "lookup", "call_id": "call_1",
-                                        "arguments": '{"question": "x"}'}}))
-    asyncio.run_coroutine_threadsafe = real_schedule
-    assert desk.asked == ['{"question": "x"}'], desk.asked
-    assert scheduled == ["LiveTalk._tool_started"], scheduled
+    try:
+        # …and the SDK hands the nested event over as a plain dict, not a model.
+        resp._handle(_Event(type="response.event", delegation_id="item_3",
+                            event={"type": "response.output_text.delta",
+                                   "delta": "ignored"}))
+        assert not desk.seen, "an outer-type dispatch leaked through"
+        resp._handle(_Event(type="response.event", delegation_id="item_3",
+                            event={"type": "response.completed",
+                                   "response": {"output": []}}))
+        assert not desk.seen, "an empty terminal output started something"
+        resp._handle(_Event(type="response.event", delegation_id="item_3",
+                            event={"type": "response.output_item.done",
+                                   "item": {"type": "function_call",
+                                            "name": "lookup", "call_id": "call_1",
+                                            "arguments": '{"question": "x"}'}}))
+        assert _wait_for(lambda: bool(outputs))
+        assert desk.seen == ['{"question": "x"}'], desk.seen
+        # The backend reads the answer itself — not the "working on it" stub.
+        assert outputs == [("LiveTalk._tool_result", "il fait 12 degrés")], outputs
+        # …and the writing pass gets it too, while the call itself never does.
+        assert resp._session.turns == [{"role": "system",
+                                        "content": "il fait 12 degrés"}], \
+            resp._session.turns
+
+        # A plugin with nothing to say must still answer: the backend response
+        # stays paused until this call is replied to.
+        outputs.clear()
+        empty = _Desk("")
+        resp._session.desks.get = lambda name: empty
+        resp._handle(_Event(type="response.event", delegation_id="item_4",
+                            event={"type": "response.output_item.done",
+                                   "item": {"type": "function_call",
+                                            "name": "lookup", "call_id": "call_2",
+                                            "arguments": "{}"}}))
+        assert _wait_for(lambda: bool(outputs))
+        assert outputs[0][1], "the backend was left waiting for ever"
+    finally:
+        asyncio.run_coroutine_threadsafe = real_schedule
 
     # "auto" follows the configured provider; forcing either overrides it.
     cfg = config_module.CFG

@@ -249,6 +249,36 @@ So in client mode the voice model no longer picks a tool: ours does, one level
 down. `tests/test_plugins.py` drives both routes with a plugin the core has
 never heard of.
 
+**What each mode costs a plugin.** Both run the plugin's *code* here — "your
+application still executes its custom functions" — so neither mode limits what
+a plugin may do; only OpenAI's *description* of it ever crosses the wire. What
+differs is who decides to call it and who waits:
+
+| | `responses` | `client` |
+|---|---|---|
+| decides to call | OpenAI's backend model | ours |
+| the arguments | structured, from a real tool call | inferred from the transcript |
+| a slow plugin | the backend waits (see below) | nothing waits |
+| the answer reaches the backend | directly, as its tool result | through `session.turns`, next turn |
+
+The `responses` waiting is the one place Loquivox deliberately does the
+*opposite* of the other two engines, and `_answer_call` is where. Cascade and
+Realtime answer a tool call with the plugin's `started` stub because their
+conversation loop is blocked meanwhile, and a stub is what stops the assistant
+going silent for five seconds. Live is the one place that does not apply —
+"Live speech and delegated work continue independently", so the voice model
+keeps talking while the backend waits, and waiting costs nothing anyone can
+hear. Blocking buys what the stub route loses: the backend model *reads* the
+result instead of being told "I'm looking into it" and then overhearing the
+answer through what the voice said out loud. `Desk.run_now` is `ask` without
+the queue, for exactly this.
+
+For `research` specifically, `responses` has a third route that skips our
+plugin entirely: `delegation.responses.tools` accepts `{"type": "web_search"}`
+natively. Mechanically the cleanest of the three — but the search is then
+OpenAI's, and `RESEARCH_PROVIDER` / `MODEL_RESEARCH` stop meaning anything.
+Not wired up; noted so it is not rediscovered as a missing feature.
+
 Three things the Live API does not give us, each answered rather than worked
 around:
 
@@ -298,7 +328,10 @@ never told about). Everything the conversation core does goes through it and
 names no plugin: `desks.chat_tools` / `desks.realtime_tools` compose the tool
 list, `desks.get(name)` routes a call — `TalkSession._answer` in the cascade,
 `RealtimeTalk._handle` on the server event — and `desks.take()` sweeps every
-desk for one answer. Adding a plugin therefore touches `talk.py`,
+desk for one answer. A desk has two ways in: `ask` (work on a thread, answer
+onto the queue, swept between turns) and `run_now` (work on the caller's
+thread, answer handed straight back) — for the one protocol that is already
+holding the line, the Live engine's Responses delegation. Adding a plugin therefore touches `talk.py`,
 `realtime_talk.py`, `live_talk.py` and `handlers/mode.py` not at all;
 `tests/test_plugins.py` pins that by driving a plugin the core has never heard
 of through all three engines — including both of the Live engine's delegation

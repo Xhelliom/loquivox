@@ -124,9 +124,11 @@ class Desk:
     """
     One plugin's calls in flight and answers waiting, for one session.
 
-    ``ask`` returns at once; ``take`` never blocks — the conversation loops
-    poll it between two turns, at the one moment a reply can be slipped in
-    without cutting anyone off.
+    Two ways in, because the protocols differ on who waits. ``ask`` returns at
+    once and ``take`` never blocks — the conversation loops poll it between two
+    turns, at the one moment a reply can be slipped in without cutting anyone
+    off. ``run_now`` hands the answer straight back to a caller that is already
+    holding the line.
     """
 
     def __init__(self, plugin: Plugin) -> None:
@@ -137,21 +139,48 @@ class Desk:
     def ask(self, arguments: str) -> None:
         """Start the work for one tool call. Never blocks, never raises."""
         args = _arguments(arguments)
+        self._note(args)
+        self.pending += 1
+        threading.Thread(target=self._work, args=(args,), daemon=True).start()
+
+    def run_now(self, arguments: str) -> Optional[Dict[str, str]]:
+        """
+        Do the work on *this* thread and return the answer, queueing nothing.
+
+        For a protocol that is waiting on it. The Live engine's Responses
+        delegation pauses the backend response until the tool result is
+        submitted — "submit every required result for the pending tool calls
+        before continuing" — so there is no gap to slip an answer into and
+        nothing to sweep: the answer *is* the reply to the call.
+
+        Same work, same message, same never-raises contract as ``ask``. What
+        changes is who holds the wait, and therefore who must not be called
+        from the main thread.
+        """
+        args = _arguments(arguments)
+        self._note(args)
+        return self._answer(args)
+
+    def _note(self, args: Dict[str, Any]) -> None:
+        """Say in the bubble that the call has started, if the plugin wants to."""
         note = self.plugin.note(args) if self.plugin.note else ""
         if note:
             from loquivox.managers.chat import ChatManager
             ChatManager.add_message("note", note)
-        self.pending += 1
-        threading.Thread(target=self._work, args=(args,), daemon=True).start()
 
-    def _work(self, args: Dict[str, Any]) -> None:
+    def _answer(self, args: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """The plugin's answer as a message, or None for an unusable call."""
         try:
             result = self.plugin.run(args)
         except Exception as e:
             print(f"⚠️  Plugin {self.plugin.name} failed: {e}")
             result = ""
-        if result:
-            self._results.put(self.plugin.message(args, result))
+        return self.plugin.message(args, result) if result else None
+
+    def _work(self, args: Dict[str, Any]) -> None:
+        message = self._answer(args)
+        if message is not None:
+            self._results.put(message)
         self.pending -= 1
 
     def ready(self) -> bool:
@@ -236,6 +265,14 @@ if __name__ == "__main__":
     bad.ask("{}")
     time.sleep(0.1)
     assert not bad.ready(), "a raising plugin queued something"
+
+    # run_now: the same work and the same message, handed back instead of
+    # queued — and nothing lands on the desk for a sweep to find later.
+    direct = Desk(p)
+    assert direct.run_now('{"say": "hello"}') == {"role": "system", "content": "hello"}
+    assert not direct.ready(), "run_now also queued its answer"
+    assert direct.run_now('{"say": ""}') is None      # unusable call, no message
+    assert Desk(boom).run_now("{}") is None           # and it still never raises
 
     # The registry sweeps whatever is enabled, and only that.
     saved = dict(_REGISTRY)
