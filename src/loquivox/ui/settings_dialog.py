@@ -107,7 +107,7 @@ class SettingsDialog:
     _live_test: Optional[Gtk.Button] = None
     _live_delegation: Optional[Gtk.ComboBoxText] = None
     _live_backend: Optional[Gtk.Entry] = None
-    _live_web_search: Optional[Gtk.CheckButton] = None
+    _live_web_search: Optional[Gtk.ComboBoxText] = None
     _tts_engine_combo: Optional[Gtk.ComboBoxText] = None
     _realtime_test: Optional[Gtk.Button] = None
 
@@ -643,14 +643,25 @@ class SettingsDialog:
             "Only used when the thinking is delegated to OpenAI's backend")
         cls._field(body, "OpenAI backend model", cls._live_backend, labels)
 
-        cls._live_web_search = Gtk.CheckButton(label="Let the OpenAI backend search the web")
-        cls._live_web_search.set_active(bool(config_module.CFG.TALK_LIVE_WEB_SEARCH))
+        # One or the other, never both: two searches on the same table is a
+        # coin toss between tools that answer to different settings, and makes
+        # the two impossible to compare.
+        cls._live_web_search = Gtk.ComboBoxText()
+        for wid in config_module.CFG.TALK_LIVE_WEB_SEARCHES:
+            cls._live_web_search.append(wid, {
+                "plugin": "Yours — the search plugin, your provider",
+                "native": "OpenAI's — their search, run on their side",
+            }.get(wid, wid.title()))
+        cls._live_web_search.set_active_id(
+            config_module.CFG.TALK_LIVE_WEB_SEARCH
+            if config_module.CFG.TALK_LIVE_WEB_SEARCH in config_module.CFG.TALK_LIVE_WEB_SEARCHES
+            else "plugin")
         cls._live_web_search.set_tooltip_text(
-            "Adds OpenAI's own search to the backend's tools. Your plugins stay "
-            "on the table — this is one more tool, not a replacement. If the "
-            "research plugin is also on, the backend has two ways to search, "
-            "and only this one ignores your search provider.")
-        cls._field(body, "Native web search", cls._live_web_search, labels)
+            "Which web search the OpenAI backend uses. Choosing theirs stands "
+            "down the search plugin so the two never compete — and only that "
+            "one: every other plugin stays on the table either way. Their "
+            "search ignores your search provider and model.")
+        cls._field(body, "Web search", cls._live_web_search, labels)
 
         # Each engine's own fields only mean anything when it is the one
         # running — greying them out is the shortest answer to "why are there
@@ -768,7 +779,7 @@ class SettingsDialog:
                 "live_voice": cls._live_voice.get_active_id() or "marin",
                 "live_delegation": cls._live_delegation.get_active_id() or "auto",
                 "live_backend_model": cls._live_backend.get_text().strip(),
-                "live_web_search": cls._live_web_search.get_active(),
+                "live_web_search": cls._live_web_search.get_active_id() or "plugin",
             })
         except ConfigWriteError as e:
             cls._engine_status.set_markup(f"<small>❌ {e}</small>")

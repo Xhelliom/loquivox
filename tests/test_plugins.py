@@ -294,6 +294,38 @@ class _Event_delegation:
                                          "type": "delegation"})()
 
 
+def test_a_native_tool_stands_down_only_what_it_replaces():
+    """
+    Choosing OpenAI's own search must not cost the user their other plugins.
+
+    The rule is a capability, not a list of names: a plugin steps aside only
+    when it declares (``Plugin.provides``) the very thing the backend has been
+    given natively. WEATHER declares nothing, so no native tool can ever
+    displace it — which is the promise for every plugin written later.
+    """
+    import loquivox.config as config_module
+
+    from loquivox.services.live_talk import LiveTalk
+
+    session = TalkSession()
+    names = lambda tools: [t.get("name") for t in tools if t.get("type") == "function"]
+    assert "weather" in names(session.desks.realtime_tools)
+
+    cfg = config_module.CFG
+    try:
+        for choice, search_offered in (("plugin", True), ("native", False)):
+            config_module.CFG = cfg.__class__(**{
+                **cfg.__dict__, "TALK_LIVE_DELEGATION": "responses",
+                "TALK_LIVE_WEB_SEARCH": choice, "TALK_RESEARCH": True})
+            tools = LiveTalk(session)._config()["delegation"]["responses"]["tools"]
+            assert "weather" in names(tools), (choice, tools)
+            assert ("research" in names(tools)) is search_offered, (choice, tools)
+            assert ({"type": "web_search"} in tools) is not search_offered, tools
+    finally:
+        config_module.CFG = cfg
+    print("✓ a native tool stands down only the plugin that declares it")
+
+
 def test_the_conversation_core_names_no_plugin():
     """
     The point of the whole thing: adding a plugin edits no core file.
@@ -321,5 +353,6 @@ if __name__ == "__main__":
     test_the_realtime_engine_routes_the_same_call()
     test_the_live_engine_answers_the_backend_with_the_real_result()
     test_client_delegation_reaches_the_plugin_through_our_backend()
+    test_a_native_tool_stands_down_only_what_it_replaces()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")

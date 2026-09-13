@@ -253,14 +253,17 @@ live_voice = "marin"
 live_delegation = "auto"
 # Only read when live_delegation resolves to "responses".
 live_backend_model = "gpt-5.6-luna"
-# Put OpenAI's own web search on the backend's table. "responses" only — it is
-# their tool, run on their side, and client delegation has no table for it.
-# ADDITIVE: your plugins stay on the table, this is one more tool beside them,
-# never instead of them. Off by default because a search that runs over there
-# answers to neither [models] research_provider nor research — so if the
-# research plugin is also on, the backend has two ways to search and only one
-# of them is yours.
-live_web_search = false
+# Who searches the web for the "responses" backend — the one place the choice
+# exists, since OpenAI's search is their tool, run on their side, and client
+# delegation has no table to put it on.
+#   "plugin" — yours: the search plugin, under [models] research_provider
+#   "native" — theirs: `{"type": "web_search"}`, which ignores those settings
+# One or the other, never both: two searches on the same table is a coin toss
+# between tools that answer to different settings. Only that one capability is
+# affected — every other plugin stays on the table either way. A plugin opts
+# into this by declaring `provides="web_search"`; one that declares nothing can
+# never be stood down.
+live_web_search = "plugin"
 # The Live API sends transcript deltas and never says a turn is over, so this
 # gap (seconds) is the turn boundary. OpenAI is explicit that the threshold is
 # the application's to tune. Lower it if the assistant waits too long; raise it

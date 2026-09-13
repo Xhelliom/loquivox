@@ -649,17 +649,19 @@ class LiveTalk:
                 "model": cfg.TALK_LIVE_BACKEND_MODEL,
                 "instructions": cfg.TALK_LIVE_BACKEND_PROMPT,
             }
+            # Native tools this backend is being given, as capability names.
+            # The only one today, but the shape is what keeps the rule general:
+            # a plugin steps aside for a native tool by *declaring the same
+            # capability*, never by being named here.
+            native = (("web_search",) if cfg.TALK_LIVE_WEB_SEARCH == "native"
+                      else ())
             # The Responses wire shape for a function is the flat one the
             # Realtime sessions use, so the plugin's existing definition serves
             # both and nothing is written a third time.
-            tools = list(self._session.desks.realtime_tools)
-            if cfg.TALK_LIVE_WEB_SEARCH:
-                # One more tool on the same table, never instead of them: the
-                # plugins a user has enabled stay enabled, and tomorrow's are
-                # unaffected by a switch that is about this one capability.
-                # Nothing here executes it — it runs on OpenAI's side and never
-                # comes back as a function call to answer.
-                tools.append({"type": "web_search"})
+            tools = self._session.desks.realtime_tools_except(native)
+            # Nothing here executes a native tool: it runs on OpenAI's side and
+            # never comes back as a function call to answer.
+            tools += [{"type": name} for name in native]
             if tools:
                 responses["tools"] = tools
                 responses["tool_choice"] = "auto"
@@ -915,29 +917,39 @@ if __name__ == "__main__":
     finally:
         asyncio.run_coroutine_threadsafe = real_schedule
 
-    # The native web search is one more tool on the table, never instead of
-    # the plugins — a user who enables it keeps every plugin they had, and the
-    # ones they write later are unaffected.
+    # Choosing OpenAI's search stands down the plugin that says it provides
+    # one — and nothing else. Every plugin that duplicates no native tool is
+    # on the table either way, which is the whole point of the capability
+    # rather than a list of names.
     cfg = config_module.CFG
 
     def _with(**overrides):
         config_module.CFG = cfg.__class__(**{**cfg.__dict__, **overrides})
 
+    def _tools(session):
+        return LiveTalk(session)._config()["delegation"]["responses"]["tools"]
+
+    searcher = {"type": "function", "name": "searcher"}
+    other = {"type": "function", "name": "other"}
     tooled = TalkSession()
-    # A stand-in for the desks: `realtime_tools` is a property on the real one.
-    tooled.desks = _Event(realtime_tools=[{"type": "function", "name": "lookup"}])
+    # A stand-in for the desks: `realtime_tools` is a property on the real one,
+    # and the exclusion it applies is checked in services/plugins.py itself.
+    tooled.desks = _Event(
+        realtime_tools=[searcher, other],
+        realtime_tools_except=lambda native: (
+            [other] if "web_search" in native else [searcher, other]))
     try:
-        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH=False)
-        plain = LiveTalk(tooled)._config()["delegation"]["responses"]["tools"]
-        assert [t.get("name") for t in plain] == ["lookup"], plain
+        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH="plugin")
+        assert _tools(tooled) == [searcher, other], _tools(tooled)
 
-        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH=True)
-        both = LiveTalk(tooled)._config()["delegation"]["responses"]["tools"]
-        assert both[:1] == plain, "the toggle displaced a plugin"
-        assert both[-1] == {"type": "web_search"}, both
+        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH="native")
+        picked = _tools(tooled)
+        assert picked == [other, {"type": "web_search"}], picked
+        assert searcher not in picked, "two searches were offered at once"
 
-        # …and it means nothing in client mode, where there is no table for it.
-        _with(TALK_LIVE_DELEGATION="client", TALK_LIVE_WEB_SEARCH=True)
+        # …and the setting means nothing in client mode, where there is no
+        # native table to put anything on and the plugin is all there is.
+        _with(TALK_LIVE_DELEGATION="client", TALK_LIVE_WEB_SEARCH="native")
         assert LiveTalk(tooled)._config()["delegation"] == {"type": "client"}
     finally:
         config_module.CFG = cfg

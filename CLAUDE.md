@@ -273,21 +273,23 @@ result instead of being told "I'm looking into it" and then overhearing the
 answer through what the voice said out loud. `Desk.run_now` is `ask` without
 the queue, for exactly this.
 
-`TALK_LIVE_WEB_SEARCH` puts OpenAI's own search on that same table
-(`{"type": "web_search"}`, which `delegation.responses.tools` accepts
-natively). Mechanically the cleanest route to a web search — it runs on their
-side and never comes back as a function call to answer — but the search is then
-theirs, and `RESEARCH_PROVIDER` / `MODEL_RESEARCH` stop meaning anything, which
-is why it is off by default.
+`TALK_LIVE_WEB_SEARCH` picks **who searches the web** for that backend:
+`"plugin"` (ours, under `RESEARCH_PROVIDER` / `MODEL_RESEARCH`) or `"native"`
+(`{"type": "web_search"}`, which `delegation.responses.tools` accepts and which
+runs on OpenAI's side, never coming back as a function call to answer).
 
-**It is additive, and that is load-bearing.** It appends one tool; every
-enabled plugin stays on the table beside it, and a plugin written next year is
-unaffected by a switch that is about this one capability. Nothing in `_config`
-knows that `research` exists or overlaps with it — if both are on, the backend
-simply has two ways to search, which is the user's call to make through each
-one's own key and is said in the Settings tooltip. A core that switched
-`research` off here would be exactly the hard-wiring `tests/test_plugins.py`
-forbids.
+Exclusive on purpose. Offering the backend both does not add a capability, it
+adds a coin toss between two tools answering the same question under different
+settings — and makes the two impossible to compare, which is the whole reason
+for having the choice.
+
+**And exclusive to that one capability**, which is the load-bearing part: a
+plugin steps aside by *declaring what it replaces* (`Plugin.provides`, matched
+in `Desks.realtime_tools_except`), never by being named. `research` declares
+`provides="web_search"`; a plugin that declares nothing — nearly all of them,
+now and later — can never be stood down by any native tool. `_config` still
+does not know that `research` exists, and `tests/test_plugins.py` pins both
+halves: the declaring plugin goes, its neighbour stays.
 
 Three things the Live API does not give us, each answered rather than worked
 around:
@@ -326,8 +328,11 @@ A plugin is one `Plugin` dataclass in one file — `name`/`description`/
 `parameters` (the chat and Realtime wire shapes are *derived*, never written
 twice), `run` (the background work), `message` (its answer as a system
 message), `started` (the stub the model speaks from meanwhile), `enabled` (the
-config key that gates it), and `settings` (its card in Settings, built with the
-dialog's own `_group`/`_field`/`_actions` so it lines up with the rest).
+config key that gates it), `provides` (the *native* capability it stands in
+for, if any — how a plugin steps aside for a backend that can do the same
+thing itself, without any core naming it), and `settings` (its card in
+Settings, built with the dialog's own `_group`/`_field`/`_actions` so it lines
+up with the rest).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.

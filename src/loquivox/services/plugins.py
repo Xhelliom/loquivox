@@ -65,6 +65,13 @@ class Plugin:
     message: Callable[[Dict[str, Any], str], Dict[str, str]]
     #: whether the tool is on the table at all, read from CFG at session start
     enabled: Callable[[], bool] = lambda: True
+    #: the *native* capability this plugin stands in for, if any — a backend
+    #: that can already do this itself makes the plugin a second, competing
+    #: answer to the same question rather than an addition. Naming it here is
+    #: what lets a conversation core step the plugin aside without knowing
+    #: which plugin it is (see ``Desks.realtime_tools_except``). "" for a
+    #: plugin that duplicates nothing, which is almost all of them.
+    provides: str = ""
     #: one line for the bubble when the call starts, "" for none
     note: Optional[Callable[[Dict[str, Any]], str]] = None
     #: one line for the bubble when the answer is handed back
@@ -214,6 +221,23 @@ class Desks:
     def realtime_tools(self) -> List[Dict[str, Any]]:
         return [d.plugin.realtime_tool for d in self._desks.values()]
 
+    def realtime_tools_except(self, native: Tuple[str, ...]) -> List[Dict[str, Any]]:
+        """
+        The same list, minus the plugins a native tool now covers.
+
+        For a backend that can do something itself: offering it both its own
+        tool and a plugin answering the same question does not add a
+        capability, it adds a coin toss, and the two do not answer to the same
+        settings. So the plugin steps aside.
+
+        The core still names no plugin. It matches on the capability a plugin
+        *declares* (``Plugin.provides``) against the native tools actually
+        switched on, so every plugin that duplicates nothing — which is nearly
+        all of them, now and later — is untouched by any of this.
+        """
+        return [d.plugin.realtime_tool for d in self._desks.values()
+                if not d.plugin.provides or d.plugin.provides not in native]
+
     def get(self, name: str) -> Optional[Desk]:
         """The desk for a tool call's name, or None if it is not ours."""
         return self._desks.get(name)
@@ -282,9 +306,18 @@ if __name__ == "__main__":
         register(Plugin(name="off", description="", parameters={}, started="",
                         run=lambda a: "x", message=lambda a, r: {},
                         enabled=lambda: False))
+        register(Plugin(name="seeker", description="", parameters={}, started="",
+                        run=lambda a: "x", message=lambda a, r: {},
+                        provides="web_search"))
         desks = Desks()
-        assert [t["function"]["name"] for t in desks.chat_tools] == ["echo"]
-        assert [t["name"] for t in desks.realtime_tools] == ["echo"]
+        assert [t["function"]["name"] for t in desks.chat_tools] == ["echo", "seeker"]
+        assert [t["name"] for t in desks.realtime_tools] == ["echo", "seeker"]
+        # A native tool stands a declaring plugin down, and only that one.
+        assert [t["name"] for t in desks.realtime_tools_except(("web_search",))] \
+            == ["echo"]
+        assert [t["name"] for t in desks.realtime_tools_except(())] == ["echo", "seeker"]
+        assert [t["name"] for t in desks.realtime_tools_except(("other",))] \
+            == ["echo", "seeker"]
         assert desks.get("off") is None and desks.get("echo") is not None
         assert not desks.ready() and desks.take() is None
         desks.get("echo").ask('{"say": "hi"}')
