@@ -379,6 +379,14 @@ class Config:
     TALK_LIVE_DELEGATIONS: Tuple[str, ...] = ("auto", "client", "responses")
     #: The managed backend, for "responses" delegation only.
     TALK_LIVE_BACKEND_MODEL: str = "gpt-5.6-luna"
+    #: Put OpenAI's own web search on the backend's table, alongside whatever
+    #: plugins are enabled. "responses" delegation only — it is a tool of
+    #: theirs, run on their side, and client delegation has no table to put it
+    #: on. Purely additive: the plugins are still offered, so this is "one more
+    #: tool", never "instead of". Off by default, because a search that runs
+    #: there answers to neither RESEARCH_PROVIDER nor MODEL_RESEARCH, and
+    #: silently taking those over is not a default's call to make.
+    TALK_LIVE_WEB_SEARCH: bool = False
     #: How long a gap in one speaker's transcript deltas closes their turn
     #: (seconds). The Live API sends deltas with no turn-completed event at all
     #: — "transcript deltas have no item ID or authoritative turn-completed
@@ -883,6 +891,8 @@ def _build_config() -> Config:
         overrides["TALK_LIVE_BACKEND_MODEL"] = str(talk["live_backend_model"]).strip()
     if "live_turn_gap" in talk:
         overrides["TALK_LIVE_TURN_GAP"] = float(talk["live_turn_gap"])
+    if "live_web_search" in talk:
+        overrides["TALK_LIVE_WEB_SEARCH"] = bool(talk["live_web_search"])
     if "barge_in" in talk:
         overrides["TALK_BARGE_IN"] = bool(talk["barge_in"])
     if "barge_in_ms" in talk:

@@ -253,6 +253,14 @@ live_voice = "marin"
 live_delegation = "auto"
 # Only read when live_delegation resolves to "responses".
 live_backend_model = "gpt-5.6-luna"
+# Put OpenAI's own web search on the backend's table. "responses" only — it is
+# their tool, run on their side, and client delegation has no table for it.
+# ADDITIVE: your plugins stay on the table, this is one more tool beside them,
+# never instead of them. Off by default because a search that runs over there
+# answers to neither [models] research_provider nor research — so if the
+# research plugin is also on, the backend has two ways to search and only one
+# of them is yours.
+live_web_search = false
 # The Live API sends transcript deltas and never says a turn is over, so this
 # gap (seconds) is the turn boundary. OpenAI is explicit that the threshold is
 # the application's to tune. Lower it if the assistant waits too long; raise it

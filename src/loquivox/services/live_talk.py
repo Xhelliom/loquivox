@@ -649,11 +649,18 @@ class LiveTalk:
                 "model": cfg.TALK_LIVE_BACKEND_MODEL,
                 "instructions": cfg.TALK_LIVE_BACKEND_PROMPT,
             }
-            tools = self._session.desks.realtime_tools
+            # The Responses wire shape for a function is the flat one the
+            # Realtime sessions use, so the plugin's existing definition serves
+            # both and nothing is written a third time.
+            tools = list(self._session.desks.realtime_tools)
+            if cfg.TALK_LIVE_WEB_SEARCH:
+                # One more tool on the same table, never instead of them: the
+                # plugins a user has enabled stay enabled, and tomorrow's are
+                # unaffected by a switch that is about this one capability.
+                # Nothing here executes it — it runs on OpenAI's side and never
+                # comes back as a function call to answer.
+                tools.append({"type": "web_search"})
             if tools:
-                # The Responses wire shape for a function is the flat one the
-                # Realtime sessions use, so the plugin's existing definition
-                # serves both and nothing is written a third time.
                 responses["tools"] = tools
                 responses["tool_choice"] = "auto"
             session["delegation"] = {"type": "responses", "responses": responses}
@@ -908,8 +915,34 @@ if __name__ == "__main__":
     finally:
         asyncio.run_coroutine_threadsafe = real_schedule
 
-    # "auto" follows the configured provider; forcing either overrides it.
+    # The native web search is one more tool on the table, never instead of
+    # the plugins — a user who enables it keeps every plugin they had, and the
+    # ones they write later are unaffected.
     cfg = config_module.CFG
+
+    def _with(**overrides):
+        config_module.CFG = cfg.__class__(**{**cfg.__dict__, **overrides})
+
+    tooled = TalkSession()
+    # A stand-in for the desks: `realtime_tools` is a property on the real one.
+    tooled.desks = _Event(realtime_tools=[{"type": "function", "name": "lookup"}])
+    try:
+        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH=False)
+        plain = LiveTalk(tooled)._config()["delegation"]["responses"]["tools"]
+        assert [t.get("name") for t in plain] == ["lookup"], plain
+
+        _with(TALK_LIVE_DELEGATION="responses", TALK_LIVE_WEB_SEARCH=True)
+        both = LiveTalk(tooled)._config()["delegation"]["responses"]["tools"]
+        assert both[:1] == plain, "the toggle displaced a plugin"
+        assert both[-1] == {"type": "web_search"}, both
+
+        # …and it means nothing in client mode, where there is no table for it.
+        _with(TALK_LIVE_DELEGATION="client", TALK_LIVE_WEB_SEARCH=True)
+        assert LiveTalk(tooled)._config()["delegation"] == {"type": "client"}
+    finally:
+        config_module.CFG = cfg
+
+    # "auto" follows the configured provider; forcing either overrides it.
     for provider, choice, expected in (("groq", "auto", "client"),
                                        ("openai", "auto", "responses"),
                                        ("openai", "client", "client"),

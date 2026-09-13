@@ -273,11 +273,21 @@ result instead of being told "I'm looking into it" and then overhearing the
 answer through what the voice said out loud. `Desk.run_now` is `ask` without
 the queue, for exactly this.
 
-For `research` specifically, `responses` has a third route that skips our
-plugin entirely: `delegation.responses.tools` accepts `{"type": "web_search"}`
-natively. Mechanically the cleanest of the three — but the search is then
-OpenAI's, and `RESEARCH_PROVIDER` / `MODEL_RESEARCH` stop meaning anything.
-Not wired up; noted so it is not rediscovered as a missing feature.
+`TALK_LIVE_WEB_SEARCH` puts OpenAI's own search on that same table
+(`{"type": "web_search"}`, which `delegation.responses.tools` accepts
+natively). Mechanically the cleanest route to a web search — it runs on their
+side and never comes back as a function call to answer — but the search is then
+theirs, and `RESEARCH_PROVIDER` / `MODEL_RESEARCH` stop meaning anything, which
+is why it is off by default.
+
+**It is additive, and that is load-bearing.** It appends one tool; every
+enabled plugin stays on the table beside it, and a plugin written next year is
+unaffected by a switch that is about this one capability. Nothing in `_config`
+knows that `research` exists or overlaps with it — if both are on, the backend
+simply has two ways to search, which is the user's call to make through each
+one's own key and is said in the Settings tooltip. A core that switched
+`research` off here would be exactly the hard-wiring `tests/test_plugins.py`
+forbids.
 
 Three things the Live API does not give us, each answered rather than worked
 around:
