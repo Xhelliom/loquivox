@@ -65,6 +65,13 @@ class Plugin:
     message: Callable[[Dict[str, Any], str], Dict[str, str]]
     #: whether the tool is on the table at all, read from CFG at session start
     enabled: Callable[[], bool] = lambda: True
+    #: the *native* capability this plugin stands in for, if any — a backend
+    #: that can already do this itself makes the plugin a second, competing
+    #: answer to the same question rather than an addition. Naming it here is
+    #: what lets a conversation core step the plugin aside without knowing
+    #: which plugin it is (see ``Desks.realtime_tools_except``). "" for a
+    #: plugin that duplicates nothing, which is almost all of them.
+    provides: str = ""
     #: one line for the bubble when the call starts, "" for none
     note: Optional[Callable[[Dict[str, Any]], str]] = None
     #: one line for the bubble when the answer is handed back
@@ -124,9 +131,11 @@ class Desk:
     """
     One plugin's calls in flight and answers waiting, for one session.
 
-    ``ask`` returns at once; ``take`` never blocks — the conversation loops
-    poll it between two turns, at the one moment a reply can be slipped in
-    without cutting anyone off.
+    Two ways in, because the protocols differ on who waits. ``ask`` returns at
+    once and ``take`` never blocks — the conversation loops poll it between two
+    turns, at the one moment a reply can be slipped in without cutting anyone
+    off. ``run_now`` hands the answer straight back to a caller that is already
+    holding the line.
     """
 
     def __init__(self, plugin: Plugin) -> None:
@@ -137,21 +146,54 @@ class Desk:
     def ask(self, arguments: str) -> None:
         """Start the work for one tool call. Never blocks, never raises."""
         args = _arguments(arguments)
+        self._note(args)
+        self.pending += 1
+        threading.Thread(target=self._work, args=(args,), daemon=True).start()
+
+    def run_now(self, arguments: str) -> Optional[Dict[str, str]]:
+        """
+        Do the work on *this* thread and return the answer, queueing nothing.
+
+        For a protocol that is waiting on it. The Live engine's Responses
+        delegation pauses the backend response until the tool result is
+        submitted — "submit every required result for the pending tool calls
+        before continuing" — so there is no gap to slip an answer into and
+        nothing to sweep: the answer *is* the reply to the call.
+
+        Same work, same message, same never-raises contract as ``ask``. What
+        changes is who holds the wait, and therefore who must not be called
+        from the main thread.
+        """
+        args = _arguments(arguments)
+        self._note(args)
+        return self._answer(args)
+
+    def _note(self, args: Dict[str, Any]) -> None:
+        """Say in the bubble that the call has started, if the plugin wants to."""
         note = self.plugin.note(args) if self.plugin.note else ""
         if note:
             from loquivox.managers.chat import ChatManager
             ChatManager.add_message("note", note)
-        self.pending += 1
-        threading.Thread(target=self._work, args=(args,), daemon=True).start()
 
-    def _work(self, args: Dict[str, Any]) -> None:
+    def _answer(self, args: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """
+        The plugin's answer as a message, or None for an unusable call.
+
+        ``message`` is inside the guard with ``run``, not after it: it is the
+        plugin's code too, it reads the same arguments, and a caller told this
+        never raises may be holding something open until it returns.
+        """
         try:
             result = self.plugin.run(args)
+            return self.plugin.message(args, result) if result else None
         except Exception as e:
             print(f"⚠️  Plugin {self.plugin.name} failed: {e}")
-            result = ""
-        if result:
-            self._results.put(self.plugin.message(args, result))
+            return None
+
+    def _work(self, args: Dict[str, Any]) -> None:
+        message = self._answer(args)
+        if message is not None:
+            self._results.put(message)
         self.pending -= 1
 
     def ready(self) -> bool:
@@ -184,6 +226,23 @@ class Desks:
     @property
     def realtime_tools(self) -> List[Dict[str, Any]]:
         return [d.plugin.realtime_tool for d in self._desks.values()]
+
+    def realtime_tools_except(self, native: Tuple[str, ...]) -> List[Dict[str, Any]]:
+        """
+        The same list, minus the plugins a native tool now covers.
+
+        For a backend that can do something itself: offering it both its own
+        tool and a plugin answering the same question does not add a
+        capability, it adds a coin toss, and the two do not answer to the same
+        settings. So the plugin steps aside.
+
+        The core still names no plugin. It matches on the capability a plugin
+        *declares* (``Plugin.provides``) against the native tools actually
+        switched on, so every plugin that duplicates nothing — which is nearly
+        all of them, now and later — is untouched by any of this.
+        """
+        return [d.plugin.realtime_tool for d in self._desks.values()
+                if not d.plugin.provides or d.plugin.provides not in native]
 
     def get(self, name: str) -> Optional[Desk]:
         """The desk for a tool call's name, or None if it is not ours."""
@@ -236,6 +295,26 @@ if __name__ == "__main__":
     bad.ask("{}")
     time.sleep(0.1)
     assert not bad.ready(), "a raising plugin queued something"
+    assert bad.pending == 0, "a raising plugin was left counted as in flight"
+
+    # A plugin that raises while *shaping* its answer is no different: both
+    # halves are its code, and a caller holding a backend open on the promise
+    # that this never raises must not be hung by either.
+    shaper = Plugin(name="shaper", description="", parameters={}, started="",
+                    run=lambda a: "fine", message=lambda a, r: 1 / 0)
+    rude = Desk(shaper)
+    rude.ask("{}")
+    time.sleep(0.1)
+    assert not rude.ready() and rude.pending == 0
+    assert rude.run_now("{}") is None, "run_now raised despite its contract"
+
+    # run_now: the same work and the same message, handed back instead of
+    # queued — and nothing lands on the desk for a sweep to find later.
+    direct = Desk(p)
+    assert direct.run_now('{"say": "hello"}') == {"role": "system", "content": "hello"}
+    assert not direct.ready(), "run_now also queued its answer"
+    assert direct.run_now('{"say": ""}') is None      # unusable call, no message
+    assert Desk(boom).run_now("{}") is None           # and it still never raises
 
     # The registry sweeps whatever is enabled, and only that.
     saved = dict(_REGISTRY)
@@ -245,9 +324,18 @@ if __name__ == "__main__":
         register(Plugin(name="off", description="", parameters={}, started="",
                         run=lambda a: "x", message=lambda a, r: {},
                         enabled=lambda: False))
+        register(Plugin(name="seeker", description="", parameters={}, started="",
+                        run=lambda a: "x", message=lambda a, r: {},
+                        provides="web_search"))
         desks = Desks()
-        assert [t["function"]["name"] for t in desks.chat_tools] == ["echo"]
-        assert [t["name"] for t in desks.realtime_tools] == ["echo"]
+        assert [t["function"]["name"] for t in desks.chat_tools] == ["echo", "seeker"]
+        assert [t["name"] for t in desks.realtime_tools] == ["echo", "seeker"]
+        # A native tool stands a declaring plugin down, and only that one.
+        assert [t["name"] for t in desks.realtime_tools_except(("web_search",))] \
+            == ["echo"]
+        assert [t["name"] for t in desks.realtime_tools_except(())] == ["echo", "seeker"]
+        assert [t["name"] for t in desks.realtime_tools_except(("other",))] \
+            == ["echo", "seeker"]
         assert desks.get("off") is None and desks.get("echo") is not None
         assert not desks.ready() and desks.take() is None
         desks.get("echo").ask('{"say": "hi"}')

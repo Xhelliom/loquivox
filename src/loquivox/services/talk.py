@@ -347,6 +347,23 @@ class TalkSession:
         stream = None if on_delta is None else (lambda t: on_delta(_strip_marker(t)))
         base = ([{"role": "system", "content": self.system_prompt()}]
                 + self._context_messages() + self.turns)
+        answer = self._with_tools(base, stream)
+        if not answer:
+            return None
+        return self.add_assistant(answer)
+
+    def _with_tools(self, base: List[Dict[str, Any]],
+                    stream: Optional[Callable[[str], None]]) -> Optional[str]:
+        """
+        One completion over ``base``, with every enabled plugin's tool on the
+        table and any call it makes started on its desk.
+
+        Split out of ``_answer`` because the Live engine's client delegation
+        needs exactly this and nothing else around it: our model, our tools,
+        text back. There the answer is not a turn — the voice model paraphrases
+        it and what it *says* is what lands in the conversation — so the caller
+        decides what becomes of the text rather than this deciding for it.
+        """
         calls: List[Dict[str, str]] = []
         answer = AIService.complete(base, on_delta=stream,
                                     tools=self.desks.chat_tools or None,
@@ -364,9 +381,29 @@ class TalkSession:
             exchange += [{"role": "tool", "tool_call_id": c["id"],
                           "content": desk.plugin.started} for c, desk in routed]
             answer = AIService.complete(base + exchange, on_delta=stream)
-        if not answer:
-            return None
-        return self.add_assistant(answer)
+        return answer
+
+    def consult(self) -> Optional[str]:
+        """
+        Answer the Live voice model's request for help. Client delegation only.
+
+        ``session.delegation.created`` says that the voice model wants
+        something, and deliberately nothing more: "metadata, not task text",
+        no tool name and no arguments. So the request is the conversation —
+        this reasons over the same turns the cascade would, with the same
+        plugins on the table, and hands back a short result for the voice model
+        to paraphrase aloud.
+
+        This is where the choice of LLM comes back: the voice is OpenAI's, the
+        thinking is whatever ``[models] chat`` points at. The answer is not
+        appended to ``turns``: the voice model says it in its own words, and
+        that spoken version arrives on the output transcript like any other
+        reply. Recording both would brief the writing pass twice.
+        """
+        cfg = config_module.CFG
+        base = ([{"role": "system", "content": cfg.TALK_LIVE_BACKEND_PROMPT}]
+                + self._context_messages() + self.turns)
+        return self._with_tools(base, None)
 
     def add_assistant(self, answer: str) -> TalkReply:
         """
