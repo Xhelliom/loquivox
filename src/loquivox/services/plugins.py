@@ -176,13 +176,19 @@ class Desk:
             ChatManager.add_message("note", note)
 
     def _answer(self, args: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        """The plugin's answer as a message, or None for an unusable call."""
+        """
+        The plugin's answer as a message, or None for an unusable call.
+
+        ``message`` is inside the guard with ``run``, not after it: it is the
+        plugin's code too, it reads the same arguments, and a caller told this
+        never raises may be holding something open until it returns.
+        """
         try:
             result = self.plugin.run(args)
+            return self.plugin.message(args, result) if result else None
         except Exception as e:
             print(f"⚠️  Plugin {self.plugin.name} failed: {e}")
-            result = ""
-        return self.plugin.message(args, result) if result else None
+            return None
 
     def _work(self, args: Dict[str, Any]) -> None:
         message = self._answer(args)
@@ -289,6 +295,18 @@ if __name__ == "__main__":
     bad.ask("{}")
     time.sleep(0.1)
     assert not bad.ready(), "a raising plugin queued something"
+    assert bad.pending == 0, "a raising plugin was left counted as in flight"
+
+    # A plugin that raises while *shaping* its answer is no different: both
+    # halves are its code, and a caller holding a backend open on the promise
+    # that this never raises must not be hung by either.
+    shaper = Plugin(name="shaper", description="", parameters={}, started="",
+                    run=lambda a: "fine", message=lambda a, r: 1 / 0)
+    rude = Desk(shaper)
+    rude.ask("{}")
+    time.sleep(0.1)
+    assert not rude.ready() and rude.pending == 0
+    assert rude.run_now("{}") is None, "run_now raised despite its contract"
 
     # run_now: the same work and the same message, handed back instead of
     # queued — and nothing lands on the desk for a sweep to find later.

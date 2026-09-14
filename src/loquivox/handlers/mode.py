@@ -531,6 +531,11 @@ class ModeHandler:
             OverlayManager.set_status("")
         except Exception as e:
             print(f"⚠️  {label} talk unavailable ({e}) — using the cascade")
+            # A session that failed to *open* has still opened things: the
+            # asyncio loop is running on its thread and the socket may be up.
+            # Falling straight through to the cascade would leave both behind,
+            # and the cascade is about to want the microphone.
+            talk.close()
             return ModeHandler._talk_converse(session, keys)
 
         mapping = KeyboardHandler.talk_listen_keys()

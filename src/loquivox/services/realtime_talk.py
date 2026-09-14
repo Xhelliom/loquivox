@@ -125,8 +125,10 @@ class RealtimeTalk:
             self._mic = None
             media.mic_closed()
         self._audio.put(None)  # wake the player so it can exit
-        if not self._loop.is_closed():
+        try:
             self._loop.call_soon_threadsafe(self._loop.stop)
+        except RuntimeError:
+            pass   # already closed, or closed between the check and the call
 
     def _quiet(self) -> bool:
         """

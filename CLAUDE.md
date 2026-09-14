@@ -304,6 +304,17 @@ around:
   `EchoGate` in `_mic_chunks` is both halves of a barge-in: it decides it *and*
   flushes the speakers. `push_result` reads an open user turn as "someone has
   the floor", the transcript being the only evidence available.
+- **No end-of-output-audio event either**, so a reply ends the same way a turn
+  does: by silence. `_quiet()` reads a *timestamp* (`_last_audio`, `AUDIO_IDLE`)
+  where the Realtime engine reads an event-driven flag. Getting this wrong is
+  not subtle but it is invisible: a flag cleared on every delta and set by an
+  event that never comes leaves `_quiet()` false for ever, and then the
+  microphone stays echo-gated after the assistant's first word, `push_result`
+  never fires, and `finished_speaking()` only ever expires on its timeout.
+  `session.started` is the mirror image — it is the *only* thing that may
+  release `start()`, since the API rejects anything sent before it, and
+  releasing on our own send would hand back an unusable session. Both are
+  pinned in the module's self-check.
 - **Instructions are frozen** after `session.started` (16,384 tokens) and every
   append is capped at 500. So the Realtime engine's `session.update` trick has
   no equivalent: `push_context()` goes through `session.thinking.append`

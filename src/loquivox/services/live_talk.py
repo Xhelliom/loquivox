@@ -66,6 +66,13 @@ BLOCK: int = 1024
 SPEECH_TAIL_TIMEOUT: float = 15.0
 #: how long the microphone stays gated after the last block was written
 ECHO_HANGOVER: float = 0.25
+#: A gap this long (seconds) with no output-audio delta means the reply is over.
+#: The Live API emits no end-of-output-audio event of any kind, so there is
+#: nothing to wait for and the silence itself is the signal — the same problem
+#: ``tick()`` solves for turns, and the same answer. Deltas inside one reply
+#: arrive far closer together than this (the server sends ahead of playback),
+#: so the only thing it delays is noticing the end.
+AUDIO_IDLE: float = 0.2
 #: Every append (instructions, thinking, commentary) is capped at 500 tokens by
 #: the API. Counting them properly would mean a tokenizer for a model we do not
 #: have one for, so this is a deliberately pessimistic character budget — ~3.2
@@ -123,9 +130,10 @@ class LiveTalk:
         self._live: Dict[str, str] = {}
         self._last_delta: Dict[str, float] = {}
         self._audio: "queue.Queue" = queue.Queue()
-        #: set while nothing more is coming for the reply being played
-        self._audio_done = threading.Event()
-        self._audio_done.set()
+        #: when the last output-audio delta arrived. There is no event saying a
+        #: reply is finished, so this timestamp is what ``_quiet`` reads. Starts
+        #: in the past: a session that has said nothing is not mid-sentence.
+        self._last_audio: float = 0.0
         self._writing = False
         self._gate: Optional[EchoGate] = None
         self._held: List[np.ndarray] = []
@@ -160,9 +168,13 @@ class LiveTalk:
         Open the session, the microphone and the speakers. Raises on failure,
         which the caller reads as "fall back to the cascade".
 
-        Longer default than the Realtime engine's: this waits for the socket
-        *and* for ``session.started``, which the API requires before any audio
-        or command is sent.
+        Longer default than the Realtime engine's, and waiting on a different
+        thing. There the session is usable as soon as our ``session.update``
+        has gone out; here ``session.start`` is a *request* — "wait for
+        `session.started` before sending audio or application commands" — so
+        what is waited on is the server's answer, a round trip later. Releasing
+        on the send instead would hand back a session that rejects everything
+        put to it.
         """
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -194,8 +206,10 @@ class LiveTalk:
             self._mic = None
             media.mic_closed()
         self._audio.put(None)
-        if not self._loop.is_closed():
+        try:
             self._loop.call_soon_threadsafe(self._loop.stop)
+        except RuntimeError:
+            pass   # already closed, or closed between the check and the call
 
     def _quiet(self) -> bool:
         """
@@ -205,18 +219,24 @@ class LiveTalk:
         the microphone gate (what it hears is still echo), the end of the
         session (the last sentence has not been heard yet) and ``push_result``
         (there is no gap to slip an answer into).
+
+        Asked differently, though. The Realtime engine has an event for "the
+        server has finished sending"; here there is none, so the absence of
+        deltas for ``AUDIO_IDLE`` stands in for it — and the queue and the
+        sound card still have to agree, since "finished sending" was never the
+        same question as "finished being heard".
         """
-        return (self._audio_done.is_set() and self._audio.empty()
-                and not self._writing)
+        return (self._audio.empty() and not self._writing
+                and time.monotonic() - self._last_audio >= AUDIO_IDLE)
 
     def finished_speaking(self) -> bool:
         """
         True once the reply that ended the briefing has actually been heard.
 
         The Live API emits no end-of-output-audio event at all — "GPT-Live does
-        not emit an output-audio-done event", the playback queue is the only
-        thing that knows — so this leans entirely on ``_quiet()``, bounded so a
-        session can never be held open by audio that stopped arriving.
+        not emit an output-audio-done event" — so this leans entirely on
+        ``_quiet()``, and is bounded so a session can never be held open by
+        audio that stopped arriving.
         """
         if self._quiet():
             return True
@@ -423,7 +443,16 @@ class LiveTalk:
             answer = self._session.consult()
             took = time.time() - started
             if not answer:
+                # Never just return: the voice model asked for help and is
+                # waiting, `_seen` means it will not ask again for this one,
+                # and the bubble is showing "Thinking…". Silence would be
+                # permanent. Quietly, through `thinking`, so the model knows
+                # the lookup failed and can say so in its own words — or not.
                 print(f"⚠️  Backend returned nothing for {delegation_id}")
+                self._append("thinking",
+                             "The backend could not answer that request. Say so "
+                             "plainly rather than guessing, and carry on.",
+                             delegation_id=delegation_id)
                 return
             print(f"🧠 Delegation ({took:.1f}s): '{answer}'")
             self._append("commentary", answer, delegation_id=delegation_id)
@@ -491,7 +520,15 @@ class LiveTalk:
         """
         from loquivox.managers.chat import ChatManager
 
-        message = desk.run_now(arguments)
+        try:
+            message = desk.run_now(arguments)
+        except Exception as e:
+            # `run_now` is documented never to raise, and the belt here is not
+            # redundant: the backend response stays paused until this call is
+            # answered, so a plugin that broke the contract would hang it for
+            # the rest of the session.
+            print(f"⚠️  Plugin {desk.plugin.name} broke its contract: {e}")
+            message = None
         if message is not None:
             self._session.turns.append(message)
             if desk.plugin.result_note:
@@ -611,7 +648,7 @@ class LiveTalk:
                 self._audio.get_nowait()
         except queue.Empty:
             pass
-        self._audio_done.set()
+        self._last_audio = 0.0   # this reply is over; nothing more is coming
 
     # --- the session itself ------------------------------------------------
 
@@ -681,7 +718,6 @@ class LiveTalk:
                 # the first message and nothing may be sent until the server
                 # answers session.started.
                 await conn.session.start(session=self._config())
-                self._ready.set()
                 async for event in conn:
                     self._handle(event)
                     if self._stop or self.done:
@@ -697,7 +733,7 @@ class LiveTalk:
         if etype == "session.output_audio.delta":
             delta = getattr(event, "delta", "") or ""
             if delta:
-                self._audio_done.clear()
+                self._last_audio = time.monotonic()
                 self._audio.put(base64.b64decode(delta))
         elif etype == "session.input_transcript.delta":
             self._on_delta("user", getattr(event, "delta", "") or "")
@@ -708,7 +744,10 @@ class LiveTalk:
         elif etype == "response.event":
             self._on_response_event(event)
         elif etype == "session.started":
+            # The session is open for business only now, and this is the only
+            # thing that says so — hence it, not the send, releases start().
             self._started.set()
+            self._ready.set()
         elif etype == "session.closed":
             self._stop = True
             usage = getattr(event, "usage", None)
@@ -783,9 +822,33 @@ if __name__ == "__main__":
     assert all(len(p) <= APPEND_CHARS for p in _chunks("a" * (APPEND_CHARS * 3)))
 
     talk = LiveTalk(TalkSession())
+
+    # `start()` releases on `session.started` and on nothing else: the API
+    # rejects everything sent before it, so releasing on our own send would
+    # hand back a session that cannot be used.
+    assert not talk._ready.is_set() and not talk._started.is_set()
+    talk._handle(_Event(type="session.started"))
+    assert talk._started.is_set() and talk._ready.is_set(), \
+        "start() would not have been released by the server"
+
     talk._handle(_Event(type="session.output_audio.delta",
                         delta=base64.b64encode(b"\x01\x02").decode()))
     assert talk._audio.qsize() == 1
+
+    # A reply ends with no event to say so, so silence has to end it. Nothing
+    # resets a flag here: `_quiet` reads the clock, and if it did not, the
+    # microphone would stay gated for the rest of the session after the
+    # assistant's first word.
+    assert not talk._quiet(), "a queued reply read as silence"
+    talk._audio.get_nowait()
+    assert not talk._quiet(), "the reply was over the instant a delta landed"
+    talk._last_audio = time.monotonic() - (AUDIO_IDLE + 0.1)
+    assert talk._quiet(), "the reply never ended — the microphone stays shut"
+    # …and a barge-in ends it at once rather than after the idle window.
+    talk._handle(_Event(type="session.output_audio.delta",
+                        delta=base64.b64encode(b"\x01\x02").decode()))
+    talk._flush_audio()
+    assert talk._quiet(), "the assistant kept talking over the user"
 
     # Deltas reach the bubble live and are concatenated exactly as received.
     talk._handle(_Event(type="session.input_transcript.delta", delta="je voudrais"))
@@ -841,6 +904,19 @@ if __name__ == "__main__":
     time.sleep(0.05)
     assert sent == [("commentary", "il fait 12 degrés", "item_1")], sent
     assert len(consulted) == 1, consulted
+    # A backend with nothing to say must still answer: the voice model asked
+    # for help, `_seen` means it will not ask twice, and silence is for ever.
+    sent.clear()
+    mute = LiveTalk(TalkSession())
+    mute._session.consult = lambda: ""
+    mute._append = lambda kind, content, delegation_id=None: sent.append(
+        (kind, delegation_id))
+    mute._on_delegation(_Event(type="session.delegation.created",
+                               delegation=_Event(id="item_9", target="client")))
+    assert _wait_for(lambda: bool(sent)), "a failed lookup left the model waiting"
+    # Quietly, though: the model decides whether that is worth saying aloud.
+    assert sent == [("thinking", "item_9")], sent
+
     # A "responses" delegation is OpenAI's to run: nothing happens on this side.
     sent.clear()
     deleg._on_delegation(_Event(type="session.delegation.created",
