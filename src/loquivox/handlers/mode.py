@@ -368,6 +368,7 @@ class ModeHandler:
                         return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
+            session.desks.close()        # stop the plugins watching for this session
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()
             GLib.idle_add(ModeHandler._talk_finished)

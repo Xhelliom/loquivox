@@ -304,6 +304,16 @@ around:
   `EchoGate` in `_mic_chunks` is both halves of a barge-in: it decides it *and*
   flushes the speakers. `push_result` reads an open user turn as "someone has
   the floor", the transcript being the only evidence available.
+  **Rule: a gated microphone sends zeros, never nothing — `gpt-live-1`
+  requires it.** It needs a continuous input stream and paces its speech on
+  it. Same spoken question, three real sessions: microphone flowing, an 18 s
+  reply with no pause; gated blocks not sent at all, six stalls, five of them
+  1.9 s — the voice waits for input, the gate reopens on its pause, it
+  resumes, the gate shuts again, which a user hears as "five words, cut,
+  carry on"; gated blocks sent as zeros of the same length, one 0.7 s pause.
+  So `_mic_chunks` sends a held block as `np.zeros_like` of it. This had been
+  found once already and was lost; the module's self-check now fails on
+  `return []`.
 - **No end-of-output-audio event either**, so a reply ends the same way a turn
   does: by silence. `_quiet()` reads a *timestamp* (`_last_audio`, `AUDIO_IDLE`)
   where the Realtime engine reads an event-driven flag. Getting this wrong is
@@ -311,6 +321,16 @@ around:
   event that never comes leaves `_quiet()` false for ever, and then the
   microphone stays echo-gated after the assistant's first word, `push_result`
   never fires, and `finished_speaking()` only ever expires on its timeout.
+  The timestamp fell into the same hole a second way: **the server never stops
+  sending**. Between replies `gpt-live-1` streams a 100 ms frame every 100 ms,
+  measured at a peak of 0–7 (int16) in both delegation modes, so a clock moved
+  by every delta never aged past `AUDIO_IDLE` either — a plugin's answer came
+  back only when the stream happened to stall. Only an *audible* frame
+  (`SILENT_PEAK`) moves `_last_audio` now; silence under `AUDIO_IDLE` (1 s) is
+  a pause in the reply and is played, silence past it is the idle stream and is
+  dropped. The window has to outlast a pause between sentences, or a reply
+  reads as over halfway through: `push_result` would cut in and
+  `finished_speaking()` would clip the last sentence.
   `session.started` is the mirror image — it is the *only* thing that may
   release `start()`, since the API rejects anything sent before it, and
   releasing on our own send would hand back an unusable session. Both are
@@ -343,7 +363,7 @@ config key that gates it), `provides` (the *native* capability it stands in
 for, if any — how a plugin steps aside for a backend that can do the same
 thing itself, without any core naming it), and `settings` (its card in
 Settings, built with the dialog's own `_group`/`_field`/`_actions` so it lines
-up with the rest).
+up with the rest, on the Settings → Plugins page they share).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.
@@ -373,10 +393,53 @@ message so the writing pass has the facts; the tool call and its stub never do
 — a "tool" role would leak into the F4 history and the generation prompt.
 `AIService.complete` reassembles streamed `tool_calls` for the cascade.
 
+But a `system` message wedged between two turns is, to a chat model, a standing
+instruction it has already absorbed rather than news to be read out — measured
+on `gpt-oss-120b`, one reply in three even mentioned it. So `TalkSession`
+keeps the role and changes only the wire shape: `_spoken_to()` sends those
+turns as `user`, which lands three times in three, while `turns`, the F4
+history and the generation prompt still see `system`. `consult()`, the Live
+engine's client delegation, reads the turns the same way for the same reason.
+The server engines need no such thing — Realtime's `_say_result` system item
+and Live's `commentary.append` are both acted on as sent.
+
+A plugin may also be a **source** instead of a tool: no `run`, a `watch` that
+runs on its own thread for the length of the session and calls `Desk.put`.
+`Desks` starts those on open and `close()` (the talk worker's `finally`) ends
+them; `is_tool` keeps a source off the tool lists and out of `Desks.get`, so a
+call naming it is a hallucination and is dropped rather than crashing. Nothing
+downstream changes — "an answer arrives between two turns" never depended on
+the model having asked for it.
+
+Under Live, a source costs two things the tool route never needed.
+`realtime_tools_except` checks `is_tool` like the other lists — without it a
+function with no `run` is declared to OpenAI's backend. And `push_result`
+sweeps the desks in *both* delegation modes: under `responses` a tool's answer
+goes back on its own call, but a source has no call to answer. Measured on
+`gpt-live-1`, both modes: the notification is said aloud, in the voice's own
+words, about 1.5 s after the last word of the reply before it — once `_quiet()`
+can tell that reply is over, which it could not before (see the Live engine's
+"no end-of-output-audio event" below).
+
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
-(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Models → Search),
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Plugins → Search),
 gated by `CFG.TALK_RESEARCH`.
+
+`board` (`services/board.py`) is the first source, and the first integration
+with another program: Collie Board, the kanban whose cards are started as real
+agents. Its ADR 0013 settles where the code lives — **the bridge never learns
+loquivox exists**, so this is a reader and nothing is added there. It polls
+`GET /api/notifications/log` (whose `id` is a cursor by construction), seeded
+with the log as it stands so a session never opens by reciting the backlog, and
+composes nothing: `marker()` / `content()` are the board's own
+`notify-content.ts`, in Python, over the `status` / `cardTitle` / `cwd` /
+`cardStatus` / `subtitle` the entry already carries. The log deliberately keeps
+the trace of an alert the board has since retracted (its ADR 0011), so
+`still_standing()` re-reads `GET /api/cards/<id>` and drops an entry whose card
+has moved since — a question answered at the keyboard is not asked again out
+loud. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
+local service most installations do not run.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
@@ -489,7 +552,10 @@ told what is echo, so it reads the assistant's own voice as an interruption and
 stops the reply dead. `RealtimeTalk._mic_chunks` therefore holds the captured
 audio back while a reply plays and forwards it only once the gate has heard
 `TALK_BARGE_IN_MS`, with `TALK_BARGE_IN_KEEP` seconds of held audio going out
-ahead of it — the window `snapshot_tail` replays in the cascade.
+ahead of it — the window `snapshot_tail` replays in the cascade. Sending
+*nothing* while it holds is right here and **wrong in `LiveTalk._mic_chunks`**,
+which looks like a copy of this one: `gpt-live-1` must receive zeros in place
+of every held block (see the Live engine section). Never "align" the two.
 
 The margin is the room and the volume, not the software, so it is a setting
 (Settings → Talk) and every reply prints the two numbers it is set from

@@ -261,6 +261,24 @@ class TalkSession:
             )
         return "\n\n".join(parts)
 
+    def _spoken_to(self) -> List[Dict[str, Any]]:
+        """
+        The turns as the API has to receive them: a plugin's answer as a *user*
+        message, whatever role it is kept under here.
+
+        A ``system`` message wedged between two turns is, to a chat model, a
+        standing instruction it has already taken in — not something that just
+        arrived and has to be said out loud. Measured on ``gpt-oss-120b`` with
+        two different plugins' answers: one reply in three even mentioned it,
+        against three in three for the same text sent as ``user``. The
+        Realtime engine needs none of this; its own system item is acted on as
+        sent. The turns keep the ``system`` role because the
+        writing pass and the F4 history must not read a plugin's answer as
+        something the user said; only the wire shape changes.
+        """
+        return [dict(turn, role="user") if turn["role"] == "system" else turn
+                for turn in self.turns]
+
     def _context_messages(self) -> List[Dict[str, Any]]:
         """The screen context as a system message, or nothing at all."""
         clause = self.context_clause()
@@ -346,7 +364,7 @@ class TalkSession:
         """
         stream = None if on_delta is None else (lambda t: on_delta(_strip_marker(t)))
         base = ([{"role": "system", "content": self.system_prompt()}]
-                + self._context_messages() + self.turns)
+                + self._context_messages() + self._spoken_to())
         answer = self._with_tools(base, stream)
         if not answer:
             return None
@@ -402,7 +420,7 @@ class TalkSession:
         """
         cfg = config_module.CFG
         base = ([{"role": "system", "content": cfg.TALK_LIVE_BACKEND_PROMPT}]
-                + self._context_messages() + self.turns)
+                + self._context_messages() + self._spoken_to())
         return self._with_tools(base, None)
 
     def add_assistant(self, answer: str) -> TalkReply:
@@ -470,6 +488,16 @@ if __name__ == "__main__":
     # A sentence ABOUT the text is not an order to write it.
     assert not user_said_done("quand j'ai fini le rapport je te l'envoie, c'est bon")
     assert not user_said_done("")
+
+    # A plugin's answer is kept as `system` and sent as `user`: the writing
+    # pass must not read it as a turn, and the model must not read it as a
+    # standing instruction it has already absorbed.
+    _s = TalkSession()
+    _s.turns = [{"role": "user", "content": "a"},
+                {"role": "system", "content": "RESULT"}]
+    assert [t["role"] for t in _s._spoken_to()] == ["user", "user"]
+    assert [t["role"] for t in _s.turns] == ["user", "system"], "the turns were rewritten"
+    assert _s._spoken_to()[1]["content"] == "RESULT"
 
     # The marker only ends the briefing when the reply is not still asking.
     assert ends_briefing("D'accord, je rédige. [[WRITE]]")

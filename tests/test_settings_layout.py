@@ -29,8 +29,8 @@ from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 #: what _create_dialog asks for; nothing may make the window wider than this
 DEFAULT_WIDTH = 640
 
-TABS = ["Models", "Talk", "Refinement", "Hotkeys", "Appearance & comfort",
-        "API Keys", "Support"]
+TABS = ["Models", "Talk", "Plugins", "Refinement", "Hotkeys",
+        "Appearance & comfort", "API Keys", "Support"]
 
 
 def _notebook(win: Gtk.Window) -> Gtk.Notebook:
@@ -38,7 +38,7 @@ def _notebook(win: Gtk.Window) -> Gtk.Notebook:
 
 
 def test_every_tab_builds():
-    """All seven pages construct, in the documented order."""
+    """Every page constructs, in the documented order."""
     SettingsDialog.show()
     win = SettingsDialog._instance
     nb = _notebook(win)

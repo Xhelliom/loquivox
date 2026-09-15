@@ -152,9 +152,9 @@ class SettingsDialog:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         # Group the (now numerous) settings into tabs instead of one long scroll.
-        # Order: what the app does (Models → Talk → Refinement), then how you
-        # drive it (Hotkeys, Appearance & comfort), then one-time setup (API
-        # Keys), then where to look when something breaks (Support).
+        # Order: what the app does (Models → Talk → Plugins → Refinement), then
+        # how you drive it (Hotkeys, Appearance & comfort), then one-time setup
+        # (API Keys), then where to look when something breaks (Support).
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
         for m in ("top", "start", "end"):
@@ -164,6 +164,7 @@ class SettingsDialog:
         for label, build in (
             ("Models", cls._build_models_section),
             ("Talk", cls._build_talk_section),
+            ("Plugins", cls._build_plugin_sections),
             ("Refinement", cls._build_postprocess_section),
             ("Hotkeys", cls._build_hotkeys_section),
             ("Appearance & comfort", cls._build_appearance_page),
@@ -440,21 +441,29 @@ class SettingsDialog:
         cls._build_engine_section(vbox, labels)
         cls._build_transcription_section(vbox, labels)   # slot 1 — the ears
         cls._build_chat_section(vbox, labels)            # slot 2 — the brain
-        cls._build_plugin_sections(vbox, labels)         # slot 2b — the tools
         cls._build_voice_section(vbox, labels)           # slot 3 — the mouth
 
+    # -----------------------------------------------------------------
+    # Plugins tab: what the conversation can reach beyond the models
+    # -----------------------------------------------------------------
     @classmethod
-    def _build_plugin_sections(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+    def _build_plugin_sections(cls, vbox: Gtk.Box) -> None:
         """
-        One card per plugin that wants one — the tools the conversation can call.
+        One card per plugin that wants one — a page nothing here writes.
 
         The dialog knows none of them by name: a plugin hands over a builder
         (see ``services/plugins.py``) and gets the page's helpers and its label
-        size group, so its card lines up with the ones written here. Every
-        plugin is offered a card, enabled or not: a card is how you turn one on.
+        size group, so its card lines up with the ones written by hand
+        elsewhere. Every plugin is offered a card, enabled or not: a card is
+        how you turn one on.
+
+        A page of its own rather than a corner of Models: a plugin is a tool
+        the conversation can call or a source that speaks to it, not one more
+        answer to "who does the work".
         """
         from loquivox.services import plugins
 
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         for plugin in plugins.all_plugins():
             if plugin.settings is None:
                 continue

@@ -66,13 +66,16 @@ BLOCK: int = 1024
 SPEECH_TAIL_TIMEOUT: float = 15.0
 #: how long the microphone stays gated after the last block was written
 ECHO_HANGOVER: float = 0.25
-#: A gap this long (seconds) with no output-audio delta means the reply is over.
-#: The Live API emits no end-of-output-audio event of any kind, so there is
-#: nothing to wait for and the silence itself is the signal — the same problem
-#: ``tick()`` solves for turns, and the same answer. Deltas inside one reply
-#: arrive far closer together than this (the server sends ahead of playback),
-#: so the only thing it delays is noticing the end.
-AUDIO_IDLE: float = 0.2
+#: silence this long ends a reply; shorter silence is a pause in it, and reaches
+#: the speakers like the rest. Silence, not an absence of deltas — the server
+#: never stops sending (see ``SILENT_PEAK``). Longer than the pause between two
+#: sentences, short enough that a plugin's answer does not feel late.
+AUDIO_IDLE: float = 1.0
+#: loudest sample (int16) a delta may hold and still be silence. gpt-live-1
+#: streams a 100 ms frame every 100 ms between replies, measured at a peak of 0
+#: to 7 against 13-16k for speech; counted as a reply, it kept ``_quiet()`` false
+#: for the whole session.
+SILENT_PEAK: int = 64
 #: Every append (instructions, thinking, commentary) is capped at 500 tokens by
 #: the API. Counting them properly would mean a tokenizer for a model we do not
 #: have one for, so this is a deliberately pessimistic character budget — ~3.2
@@ -80,6 +83,12 @@ AUDIO_IDLE: float = 0.2
 #: French does. Overshooting costs a second append; undershooting costs the
 #: whole message.
 APPEND_CHARS: int = 1500
+
+
+def _audible(pcm: bytes) -> bool:
+    """Whether a PCM16 frame holds anything louder than ``SILENT_PEAK``."""
+    samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
+    return samples.size > 0 and int(np.abs(samples.astype(np.int32)).max()) > SILENT_PEAK
 
 
 def _chunks(text: str, limit: int = APPEND_CHARS) -> List[str]:
@@ -222,7 +231,8 @@ class LiveTalk:
 
         Asked differently, though. The Realtime engine has an event for "the
         server has finished sending"; here there is none, so the absence of
-        deltas for ``AUDIO_IDLE`` stands in for it — and the queue and the
+        *audible* deltas for ``AUDIO_IDLE`` stands in for it (the server itself
+        never stops sending — see ``SILENT_PEAK``) — and the queue and the
         sound card still have to agree, since "finished sending" was never the
         same question as "finished being heard".
         """
@@ -380,9 +390,11 @@ class LiveTalk:
         the writing pass. Through ``commentary.append``, which is the event for
         something the model should say out loud, in its own words.
 
-        Client delegation only, in practice. Under ``responses`` the backend is
-        holding the line for its tool result, so ``_answer_call`` replies to the
-        call directly and nothing is ever put on a desk for this to find.
+        Under ``responses`` a tool's answer never comes this way: the backend
+        is holding the line for its result, so ``_answer_call`` replies to the
+        call directly. A *source* is the exception in both modes — nothing
+        called it, so it has no call to reply to, and its desk is swept here
+        whichever side does the thinking.
 
         "Nobody is talking" is one condition short of the Realtime engine's
         here: there is no ``speech_started`` to tell us the user has the floor,
@@ -576,6 +588,16 @@ class LiveTalk:
         cannot have: when the gate opens, this also flushes the speakers.
         There is no ``speech_started`` here to do it, so the gate is both
         halves of a barge-in, deciding it and acting on it.
+
+        And one difference it cannot do without — **send zeros, never
+        nothing**. gpt-live-1 requires a continuous input stream and paces its
+        speech on it. Measured on the same spoken question: microphone flowing,
+        an 18 s reply with no pause; gated blocks not sent at all, a stall every
+        few words (five of 1.9 s) — it waits for input, the gate reopens on its
+        pause, it resumes, the gate shuts; gated blocks sent as zeros of the
+        same length, one 0.7 s pause. This had been found once already and
+        never written down. The Realtime engine's copy of this gate rightly
+        sends nothing — never align the two; the self-check pins it.
         """
         cfg = config_module.CFG
         now = time.monotonic()
@@ -585,7 +607,7 @@ class LiveTalk:
             self._echo_report()
             return [mono]
         if not cfg.TALK_BARGE_IN:
-            return []
+            return [np.zeros_like(mono)]
         if self._gate is None:
             self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
                                   margin=cfg.TALK_BARGE_IN_MARGIN)
@@ -595,7 +617,7 @@ class LiveTalk:
             kept = sum(len(c) for c in self._held) / RATE
             while len(self._held) > 1 and kept > cfg.TALK_BARGE_IN_KEEP:
                 kept -= len(self._held.pop(0)) / RATE
-            return []
+            return [np.zeros_like(mono)]
         chunks = self._held + [mono]
         if self._held:
             print(f"✋ Cut off — {self._gate.loudest:.3f} over an echo peaking "
@@ -733,8 +755,14 @@ class LiveTalk:
         if etype == "session.output_audio.delta":
             delta = getattr(event, "delta", "") or ""
             if delta:
-                self._last_audio = time.monotonic()
-                self._audio.put(base64.b64decode(delta))
+                pcm = base64.b64decode(delta)
+                now = time.monotonic()
+                if _audible(pcm):
+                    self._last_audio = now
+                # Silence just after speech is a pause in the reply; silence
+                # long after it is the idle stream, and neither queued nor heard.
+                if now - self._last_audio < AUDIO_IDLE:
+                    self._audio.put(pcm)
         elif etype == "session.input_transcript.delta":
             self._on_delta("user", getattr(event, "delta", "") or "")
         elif etype == "session.output_transcript.delta":
@@ -849,6 +877,35 @@ if __name__ == "__main__":
                         delta=base64.b64encode(b"\x01\x02").decode()))
     talk._flush_audio()
     assert talk._quiet(), "the assistant kept talking over the user"
+
+    # Between replies the server streams digital silence, a frame every 100 ms.
+    # It is not a reply: counted as one, nothing is ever handed back and the
+    # microphone stays behind the echo gate for the rest of the session.
+    silence = base64.b64encode(bytes(4800)).decode()
+    talk._last_audio = time.monotonic() - (AUDIO_IDLE + 0.1)
+    talk._handle(_Event(type="session.output_audio.delta", delta=silence))
+    assert talk._audio.empty() and talk._quiet(), \
+        "the idle stream read as a reply"
+    # …while a pause inside a reply still reaches the speakers.
+    talk._handle(_Event(type="session.output_audio.delta",
+                        delta=base64.b64encode(b"\x01\x02").decode()))
+    talk._handle(_Event(type="session.output_audio.delta", delta=silence))
+    assert talk._audio.qsize() == 2, "a pause between two sentences was dropped"
+    # …and is not the end of that reply, played out or not.
+    talk._audio.get_nowait(); talk._audio.get_nowait()
+    talk._last_audio = time.monotonic() - 0.5
+    assert not talk._quiet(), "a half-second pause read as the end of the reply"
+    talk._flush_audio()
+    assert not _audible(bytes(4800)) and not _audible(b"") and _audible(b"\x00\x80")
+
+    # A gated microphone still keeps time. With no frames at all during a
+    # reply, gpt-live-1 stalls every few words; the block goes out as silence.
+    talk._last_audio = time.monotonic()               # a reply is playing
+    echo = np.full(480, 0.3, dtype=np.float32)
+    out = talk._mic_chunks(echo)
+    assert len(out) == 1 and len(out[0]) == len(echo) and not out[0].any(), \
+        "a gated block was dropped: gpt-live-1 needs zeros, never nothing"
+    talk._held.clear(); talk._gate = None; talk._flush_audio()
 
     # Deltas reach the bubble live and are concatenated exactly as received.
     talk._handle(_Event(type="session.input_transcript.delta", delta="je voudrais"))

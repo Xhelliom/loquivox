@@ -495,6 +495,10 @@ class Config:
     TALK_SPEAK_REPLIES: bool = True
     #: let the conversation call ``research`` (services/research.py)
     TALK_RESEARCH: bool = True
+    #: let Collie Board's notifications reach a conversation in progress
+    #: (services/board.py). Off by default: it polls a local service most
+    #: installations do not run.
+    TALK_BOARD: bool = False
 
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
@@ -936,6 +940,8 @@ def _build_config() -> Config:
         overrides["MODEL_RESEARCH"] = str(models["research"]).strip()
     if "research" in talk:
         overrides["TALK_RESEARCH"] = bool(talk["research"])
+    if "board" in talk:
+        overrides["TALK_BOARD"] = bool(talk["board"])
     if "tts" in models:
         overrides["MODEL_TTS"] = str(models["tts"])
 

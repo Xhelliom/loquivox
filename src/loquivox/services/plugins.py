@@ -25,13 +25,14 @@ import importlib
 import json
 import queue
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 #: the in-tree plugin modules, imported once on first use. Each one calls
 #: ``register()`` at import. This tuple is the whole "discovery".
 _MODULES: Tuple[str, ...] = (
     "loquivox.services.research",
+    "loquivox.services.board",
 )
 
 _REGISTRY: Dict[str, "Plugin"] = {}
@@ -47,22 +48,30 @@ class Plugin:
     returns the answer as text; returning "" drops the job silently (an
     unusable call, an empty result). It must not raise — the desk catches, but
     a plugin that swallows its own errors can say something useful instead.
+
+    A plugin may instead be a **source**: no tool at all, a ``watch`` that runs
+    for the whole session and puts its own messages on the desk (see
+    ``services/board.py``). Everything downstream is unchanged — the desk, the
+    sweep between two turns, both engines — because a plugin's answer was never
+    tied to the model having asked for it.
     """
 
-    #: the tool's name — what the model calls and what dispatch routes on
+    #: the tool's name — what the model calls and what dispatch routes on.
+    #: A source has no call to route; the name is still its key everywhere else.
     name: str
     #: what the model is told the tool is for
-    description: str
+    description: str = ""
     #: JSON-Schema for the call's arguments
-    parameters: Dict[str, Any]
+    parameters: Dict[str, Any] = field(default_factory=dict)
     #: the tool's immediate return value: the model speaks from this while the
     #: real answer is on its way, so it acknowledges instead of going quiet
-    started: str
+    started: str = ""
     #: the work itself, on a thread. Arguments in, spoken-ready text out.
-    run: Callable[[Dict[str, Any]], str]
+    #: ``None`` for a source: nothing to call, so nothing is put on the table.
+    run: Optional[Callable[[Dict[str, Any]], str]] = None
     #: the answer as a system message for either engine — it lands in the
     #: session's turns, so the writing pass has the facts too
-    message: Callable[[Dict[str, Any], str], Dict[str, str]]
+    message: Optional[Callable[[Dict[str, Any], str], Dict[str, str]]] = None
     #: whether the tool is on the table at all, read from CFG at session start
     enabled: Callable[[], bool] = lambda: True
     #: the *native* capability this plugin stands in for, if any — a backend
@@ -80,6 +89,15 @@ class Plugin:
     #: class (for ``_group``/``_field``/``_actions``), the page box and its
     #: label size group.
     settings: Optional[Callable[..., None]] = None
+    #: a source's own loop, run on a daemon thread for the length of the
+    #: session. Called with the desk's ``put`` and the event ``Desks.close()``
+    #: sets; it must return once that event is set, and must not raise.
+    watch: Optional[Callable[[Callable[[Dict[str, str]], None], threading.Event], None]] = None
+
+    @property
+    def is_tool(self) -> bool:
+        """Whether the model is offered this at all — a source is not."""
+        return self.run is not None
 
     @property
     def chat_tool(self) -> Dict[str, Any]:
@@ -142,6 +160,10 @@ class Desk:
         self.plugin = plugin
         self._results: "queue.Queue[Dict[str, str]]" = queue.Queue()
         self.pending: int = 0
+
+    def put(self, message: Dict[str, str]) -> None:
+        """Queue an answer nobody asked for — a source's way in."""
+        self._results.put(message)
 
     def ask(self, arguments: str) -> None:
         """Start the work for one tool call. Never blocks, never raises."""
@@ -218,14 +240,29 @@ class Desks:
 
     def __init__(self) -> None:
         self._desks: Dict[str, Desk] = {p.name: Desk(p) for p in enabled_plugins()}
+        #: set when the session ends — the one thing a source watches for
+        self.closed = threading.Event()
+        for desk in self._desks.values():
+            if desk.plugin.watch is not None:
+                threading.Thread(target=self._watch, args=(desk,), daemon=True).start()
+
+    def _watch(self, desk: Desk) -> None:
+        try:
+            desk.plugin.watch(desk.put, self.closed)
+        except Exception as e:      # a source must not take the session with it
+            print(f"⚠️  Plugin {desk.plugin.name} stopped watching: {e}")
+
+    def close(self) -> None:
+        """End the session's sources. Idempotent; called from the talk worker."""
+        self.closed.set()
 
     @property
     def chat_tools(self) -> List[Dict[str, Any]]:
-        return [d.plugin.chat_tool for d in self._desks.values()]
+        return [d.plugin.chat_tool for d in self._desks.values() if d.plugin.is_tool]
 
     @property
     def realtime_tools(self) -> List[Dict[str, Any]]:
-        return [d.plugin.realtime_tool for d in self._desks.values()]
+        return [d.plugin.realtime_tool for d in self._desks.values() if d.plugin.is_tool]
 
     def realtime_tools_except(self, native: Tuple[str, ...]) -> List[Dict[str, Any]]:
         """
@@ -242,11 +279,19 @@ class Desks:
         all of them, now and later — is untouched by any of this.
         """
         return [d.plugin.realtime_tool for d in self._desks.values()
-                if not d.plugin.provides or d.plugin.provides not in native]
+                if d.plugin.is_tool
+                and (not d.plugin.provides or d.plugin.provides not in native)]
 
     def get(self, name: str) -> Optional[Desk]:
-        """The desk for a tool call's name, or None if it is not ours."""
-        return self._desks.get(name)
+        """
+        The desk for a tool call's name, or None if it is not ours.
+
+        A source's desk answers None here even though it exists: it was never
+        on the table, so a call naming it is a hallucination, and routing one
+        into a plugin with no ``run`` is how that becomes a crash.
+        """
+        desk = self._desks.get(name)
+        return desk if desk is not None and desk.plugin.is_tool else None
 
     def ready(self) -> bool:
         return any(desk.ready() for desk in self._desks.values())
@@ -289,6 +334,17 @@ if __name__ == "__main__":
     time.sleep(0.1)
     assert not desk.ready(), "an empty result reached the conversation"
 
+    # A source: no tool, its own loop, and the same desk downstream.
+    seen = threading.Event()
+
+    def _source(put, stop):
+        put({"role": "system", "content": "ping"})
+        seen.set()
+        stop.wait(30)
+
+    src = Plugin(name="src", watch=_source)
+    assert not src.is_tool and p.is_tool
+
     boom = Plugin(name="boom", description="", parameters={}, started="",
                   run=lambda a: 1 / 0, message=lambda a, r: {})
     bad = Desk(boom)
@@ -321,6 +377,7 @@ if __name__ == "__main__":
     try:
         _REGISTRY.clear()
         register(p)
+        register(src)
         register(Plugin(name="off", description="", parameters={}, started="",
                         run=lambda a: "x", message=lambda a, r: {},
                         enabled=lambda: False))
@@ -336,7 +393,18 @@ if __name__ == "__main__":
         assert [t["name"] for t in desks.realtime_tools_except(())] == ["echo", "seeker"]
         assert [t["name"] for t in desks.realtime_tools_except(("other",))] \
             == ["echo", "seeker"]
+        assert "src" not in [t["name"] for t in desks.realtime_tools_except(())], \
+            "a source was declared to a backend as a tool it cannot run"
         assert desks.get("off") is None and desks.get("echo") is not None
+        # A source is never routed to, and never offered to the model.
+        assert desks.get("src") is None
+        assert "src" not in [t["name"] for t in desks.realtime_tools]
+        assert seen.wait(2), "the source's watch never ran"
+        found = desks.take()
+        assert found is not None and found[1]["content"] == "ping"
+        desks.close()
+        assert desks.closed.is_set()
+
         assert not desks.ready() and desks.take() is None
         desks.get("echo").ask('{"say": "hi"}')
         for _ in range(100):
