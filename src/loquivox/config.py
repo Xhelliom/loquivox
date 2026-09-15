@@ -405,6 +405,11 @@ class Config:
     TALK_IDLE_TIMEOUT: float = 15.0
     # Hard stop on the conversation length (user turns).
     TALK_MAX_TURNS: int = 30
+    #: Leave the keyboard to the user during a conversation: no exclusive grab,
+    #: so typing and shortcuts keep working in other apps. Every key then also
+    #: lands in whatever is being typed into, so the session answers to its own
+    #: hotkeys only — pressed again, they end it. The F6 review keeps its grab.
+    TALK_FREE_KEYBOARD: bool = False
     # How much the assistant digs before writing:
     #   "minimal" — only asks when something is genuinely unclear
     #   "normal"  — asks about what would change the text (default)
@@ -826,6 +831,8 @@ def _build_config() -> Config:
         overrides["TALK_VAD_MIN_SPEECH_MS"] = int(talk["min_speech_ms"])
     if "turn_timeout" in talk:
         overrides["TALK_TURN_TIMEOUT"] = float(talk["turn_timeout"])
+    if "free_keyboard" in talk:
+        overrides["TALK_FREE_KEYBOARD"] = bool(talk["free_keyboard"])
     if "idle_timeout" in talk:
         overrides["TALK_IDLE_TIMEOUT"] = float(talk["idle_timeout"])
     if "max_turns" in talk:
