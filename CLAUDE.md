@@ -304,6 +304,16 @@ around:
   `EchoGate` in `_mic_chunks` is both halves of a barge-in: it decides it *and*
   flushes the speakers. `push_result` reads an open user turn as "someone has
   the floor", the transcript being the only evidence available.
+  **Rule: a gated microphone sends zeros, never nothing — `gpt-live-1`
+  requires it.** It needs a continuous input stream and paces its speech on
+  it. Same spoken question, three real sessions: microphone flowing, an 18 s
+  reply with no pause; gated blocks not sent at all, six stalls, five of them
+  1.9 s — the voice waits for input, the gate reopens on its pause, it
+  resumes, the gate shuts again, which a user hears as "five words, cut,
+  carry on"; gated blocks sent as zeros of the same length, one 0.7 s pause.
+  So `_mic_chunks` sends a held block as `np.zeros_like` of it. This had been
+  found once already and was lost; the module's self-check now fails on
+  `return []`.
 - **No end-of-output-audio event either**, so a reply ends the same way a turn
   does: by silence. `_quiet()` reads a *timestamp* (`_last_audio`, `AUDIO_IDLE`)
   where the Realtime engine reads an event-driven flag. Getting this wrong is
@@ -542,7 +552,10 @@ told what is echo, so it reads the assistant's own voice as an interruption and
 stops the reply dead. `RealtimeTalk._mic_chunks` therefore holds the captured
 audio back while a reply plays and forwards it only once the gate has heard
 `TALK_BARGE_IN_MS`, with `TALK_BARGE_IN_KEEP` seconds of held audio going out
-ahead of it — the window `snapshot_tail` replays in the cascade.
+ahead of it — the window `snapshot_tail` replays in the cascade. Sending
+*nothing* while it holds is right here and **wrong in `LiveTalk._mic_chunks`**,
+which looks like a copy of this one: `gpt-live-1` must receive zeros in place
+of every held block (see the Live engine section). Never "align" the two.
 
 The margin is the room and the volume, not the software, so it is a setting
 (Settings → Talk) and every reply prints the two numbers it is set from

@@ -588,6 +588,16 @@ class LiveTalk:
         cannot have: when the gate opens, this also flushes the speakers.
         There is no ``speech_started`` here to do it, so the gate is both
         halves of a barge-in, deciding it and acting on it.
+
+        And one difference it cannot do without — **send zeros, never
+        nothing**. gpt-live-1 requires a continuous input stream and paces its
+        speech on it. Measured on the same spoken question: microphone flowing,
+        an 18 s reply with no pause; gated blocks not sent at all, a stall every
+        few words (five of 1.9 s) — it waits for input, the gate reopens on its
+        pause, it resumes, the gate shuts; gated blocks sent as zeros of the
+        same length, one 0.7 s pause. This had been found once already and
+        never written down. The Realtime engine's copy of this gate rightly
+        sends nothing — never align the two; the self-check pins it.
         """
         cfg = config_module.CFG
         now = time.monotonic()
@@ -597,7 +607,7 @@ class LiveTalk:
             self._echo_report()
             return [mono]
         if not cfg.TALK_BARGE_IN:
-            return []
+            return [np.zeros_like(mono)]
         if self._gate is None:
             self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
                                   margin=cfg.TALK_BARGE_IN_MARGIN)
@@ -607,7 +617,7 @@ class LiveTalk:
             kept = sum(len(c) for c in self._held) / RATE
             while len(self._held) > 1 and kept > cfg.TALK_BARGE_IN_KEEP:
                 kept -= len(self._held.pop(0)) / RATE
-            return []
+            return [np.zeros_like(mono)]
         chunks = self._held + [mono]
         if self._held:
             print(f"✋ Cut off — {self._gate.loudest:.3f} over an echo peaking "
@@ -887,6 +897,15 @@ if __name__ == "__main__":
     assert not talk._quiet(), "a half-second pause read as the end of the reply"
     talk._flush_audio()
     assert not _audible(bytes(4800)) and not _audible(b"") and _audible(b"\x00\x80")
+
+    # A gated microphone still keeps time. With no frames at all during a
+    # reply, gpt-live-1 stalls every few words; the block goes out as silence.
+    talk._last_audio = time.monotonic()               # a reply is playing
+    echo = np.full(480, 0.3, dtype=np.float32)
+    out = talk._mic_chunks(echo)
+    assert len(out) == 1 and len(out[0]) == len(echo) and not out[0].any(), \
+        "a gated block was dropped: gpt-live-1 needs zeros, never nothing"
+    talk._held.clear(); talk._gate = None; talk._flush_audio()
 
     # Deltas reach the bubble live and are concatenated exactly as received.
     talk._handle(_Event(type="session.input_transcript.delta", delta="je voudrais"))
