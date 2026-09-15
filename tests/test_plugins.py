@@ -276,9 +276,9 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     talk._live["user"] = "et à Brest"             # the user has the floor
     assert not talk.push_result(), "an answer cut the user off mid-sentence"
     talk._live.pop("user")
-    talk._audio.put(b"\0" * 4800)
+    talk._audible = 1                             # a reply still in the sound card
     assert not talk.push_result(), "an answer landed on a reply still playing"
-    talk._audio.get_nowait()
+    talk._audible = 0
     assert talk.push_result(), "the answer never reached the model"
     assert sent[0][0] == "commentary", sent   # spoken aloud, not thought silently
     assert session.turns[-1]["content"].startswith("WEATHER for Lyon"), session.turns
