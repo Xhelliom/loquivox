@@ -74,14 +74,37 @@ def mic_closed() -> None:
         _timer.start()
 
 
+def _pactl(*args: str) -> str:
+    try:
+        return subprocess.run(["pactl", *args], capture_output=True, text=True,
+                              timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
 def _headset_profile_active() -> bool:
     """A Bluetooth card still on HFP: its A2DP sink is not back yet."""
-    try:
-        out = subprocess.run(["pactl", "list", "cards"], capture_output=True,
-                             text=True, timeout=2).stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return "Active Profile: headset-head-unit" in out
+    return "Active Profile: headset-head-unit" in _pactl("list", "cards")
+
+
+def await_headset_mic(timeout: float = 3.0) -> None:
+    """
+    Call AFTER the input stream opens and BEFORE any output stream: wait for a
+    Bluetooth headset to leave A2DP for the profile that carries its microphone.
+
+    Opening the microphone is what triggers that switch, and the switch tears
+    down the A2DP sink — a speaker stream opened before it has finished sits on
+    a sink that is gone, and the transport errors out. Returns at once when the
+    microphone is not a headset's, or the headset needs no switch (LE Audio).
+    """
+    # ponytail: the default source only — an input_device naming a headset
+    # explicitly skips the wait; resolve that name through pactl if it matters
+    if not _pactl("get-default-source").startswith("bluez_input"):
+        return
+    deadline = time.monotonic() + timeout
+    while ("Active Profile: a2dp-sink" in _pactl("list", "cards")
+           and time.monotonic() < deadline):
+        time.sleep(0.1)
 
 
 def _restore() -> None:

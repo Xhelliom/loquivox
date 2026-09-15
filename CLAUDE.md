@@ -123,6 +123,12 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends.
   still queued, so `done` lands mid-sentence: the loop breaks on
   `finished_speaking()`, never on `done` alone, or the assistant is cut off in
   the middle of "Parfait, je vais rédiger…".
+  Both server engines open the microphone *before* the speakers and wait in
+  between (`media.await_headset_mic`): on a Bluetooth headset the microphone
+  is what switches A2DP → HFP, and a speaker stream opened first sits on the
+  sink that switch tears down. Realtime's `close()` closes the socket rather
+  than stopping the loop under it; Live's sends `session.close` and reads on
+  until `session.closed`, as its guide asks (bounded by `CLOSE_TIMEOUT`).
 - `live` — `services/live_talk.py`: one `gpt-live-1` session, which *splits*
   the job rather than holding it. See the Live engine section below.
 
@@ -314,23 +320,34 @@ around:
   So `_mic_chunks` sends a held block as `np.zeros_like` of it. This had been
   found once already and was lost; the module's self-check now fails on
   `return []`.
+- **The voice runs on the microphone's clock.** Output audio arrives as 100 ms
+  frames at real time, in step with the input audio the server receives —
+  send none and the voice stalls (the rule above), send it late and the voice
+  drifts late with it. And since it streams at real time rather than ahead —
+  the Realtime server sends a reply faster than it speaks it, which is why
+  that engine never stuttered — playback is a PortAudio callback pulling
+  through a jitter buffer (`_on_play`, `PREBUFFER`): a thread writing into the
+  stream cannot tell a late frame from a full sound card.
 - **No end-of-output-audio event either**, so a reply ends the same way a turn
-  does: by silence. `_quiet()` reads a *timestamp* (`_last_audio`, `AUDIO_IDLE`)
-  where the Realtime engine reads an event-driven flag. Getting this wrong is
-  not subtle but it is invisible: a flag cleared on every delta and set by an
-  event that never comes leaves `_quiet()` false for ever, and then the
-  microphone stays echo-gated after the assistant's first word, `push_result`
-  never fires, and `finished_speaking()` only ever expires on its timeout.
-  The timestamp fell into the same hole a second way: **the server never stops
-  sending**. Between replies `gpt-live-1` streams a 100 ms frame every 100 ms,
-  measured at a peak of 0–7 (int16) in both delegation modes, so a clock moved
-  by every delta never aged past `AUDIO_IDLE` either — a plugin's answer came
-  back only when the stream happened to stall. Only an *audible* frame
-  (`SILENT_PEAK`) moves `_last_audio` now; silence under `AUDIO_IDLE` (1 s) is
-  a pause in the reply and is played, silence past it is the idle stream and is
-  dropped. The window has to outlast a pause between sentences, or a reply
-  reads as over halfway through: `push_result` would cut in and
-  `finished_speaking()` would clip the last sentence.
+  does: by silence. `_quiet()` reads a *timestamp* of the last audible delta
+  (`_last_audio`, `AUDIO_IDLE`) and the count of audible frames still waiting
+  in the jitter buffer (`_audible`), where the Realtime engine reads an
+  event-driven flag. Getting this wrong is not subtle but it is invisible: a
+  flag cleared on every delta and set by an event that never comes leaves
+  `_quiet()` false for ever, and then the microphone stays echo-gated after
+  the assistant's first word, `push_result` never fires, and
+  `finished_speaking()` only ever expires on its timeout. The timestamp fell
+  into the same hole a second way: **the server never stops sending** —
+  between replies it streams silent frames for as long as it hears the
+  microphone, so a clock moved by every delta never ages. Only an *audible*
+  frame moves it, and audible is a threshold, not a non-zero byte
+  (`SILENT_PEAK`): the idle frames are mostly exact zeros, but about four a
+  minute carry a peak of 1–7, seconds away from any speech. `AUDIO_IDLE` is
+  1 s because it must outlast a pause *inside* a reply — measured up to 0.7 s
+  over five real sessions — or the reply reads as over halfway through:
+  `push_result` would cut in and `finished_speaking()` would clip the last
+  sentence. Silent frames stay in the jitter buffer and play like the rest;
+  they just never count.
   `session.started` is the mirror image — it is the *only* thing that may
   release `start()`, since the API rejects anything sent before it, and
   releasing on our own send would hand back an unusable session. Both are
@@ -341,7 +358,10 @@ around:
   instead — the screen description is something to *know*, and an appended
   *instruction* "can interrupt the model's current speech", which is precisely
   what a capture landing mid-sentence must not do. `_chunks()` splits anything
-  longer on sentence boundaries; nothing is truncated.
+  longer on sentence boundaries; nothing is truncated. Quiet is not enough on
+  its own, though: a description landing a second into the call was answered
+  out loud as if the user had read it, so the frozen instructions end with
+  `QUIET_CONTEXT`, which says where that thinking comes from.
 
 Cost is two meters, not one: $0.05/min of voice **plus** whatever the backend
 spends. Sessions have a duration limit (`session.closed` with

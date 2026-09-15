@@ -39,9 +39,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import queue
 import threading
 import time
+from collections import deque
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -66,16 +66,29 @@ BLOCK: int = 1024
 SPEECH_TAIL_TIMEOUT: float = 15.0
 #: how long the microphone stays gated after the last block was written
 ECHO_HANGOVER: float = 0.25
-#: silence this long ends a reply; shorter silence is a pause in it, and reaches
-#: the speakers like the rest. Silence, not an absence of deltas — the server
-#: never stops sending (see ``SILENT_PEAK``). Longer than the pause between two
-#: sentences, short enough that a plugin's answer does not feel late.
+#: silence this long ends a reply; shorter silence is a pause in it and plays
+#: like the rest. Silence rather than an absence of deltas: gpt-live-1 never
+#: stops sending, it streams 100 ms frames at real time for as long as it hears
+#: the microphone. Longer than a pause inside a reply — measured up to 0.7 s over
+#: five real sessions — so a plugin's answer never lands in one, and validated
+#: at this value in real use.
 AUDIO_IDLE: float = 1.0
-#: loudest sample (int16) a delta may hold and still be silence. gpt-live-1
-#: streams a 100 ms frame every 100 ms between replies, measured at a peak of 0
-#: to 7 against 13-16k for speech; counted as a reply, it kept ``_quiet()`` false
-#: for the whole session.
+#: loudest sample (int16) a delta may hold and still be silence. Between replies
+#: the frames are mostly exact zeros, but not always: measured, about four a
+#: minute carry a peak of 1–7, seconds away from any speech (13–16k). Counted as
+#: audio, those would hold a reply open at random.
 SILENT_PEAK: int = 64
+#: Audio in hand before playback starts, and again after the buffer ran dry.
+#: This server streams at real time rather than ahead of it (measured: 100 ms
+#: frames, up to ~230 ms between two), so a player with nothing in hand clicks
+#: on every late frame — which the Realtime engine never has to care about, its
+#: server sending a reply faster than it is spoken. The frames make this a step,
+#: not a dial: up to 100 ms is met by the first frame alone and plays like no
+#: buffer at all (measured on one 25 s stream: 42 gaps from 0 to 100 ms), while
+#: 101–200 ms waits for a second frame (4 gaps) — adding ~100 ms, not 200.
+PREBUFFER: float = 0.2
+#: longest the reader waits for ``session.closed`` once ``close()`` asked
+CLOSE_TIMEOUT: float = 5.0
 #: Every append (instructions, thinking, commentary) is capped at 500 tokens by
 #: the API. Counting them properly would mean a tokenizer for a model we do not
 #: have one for, so this is a deliberately pessimistic character budget — ~3.2
@@ -83,9 +96,20 @@ SILENT_PEAK: int = 64
 #: French does. Overshooting costs a second append; undershooting costs the
 #: whole message.
 APPEND_CHARS: int = 1500
+#: Appended to the session's instructions, so the voice model knows where the
+#: thinking ``push_context`` sends comes from. Without it, a screen description
+#: landing a second into the call was answered out loud as though the user had
+#: read it: the model is full duplex, so nothing makes it wait for the user.
+QUIET_CONTEXT: str = (
+    "During the call, background may reach you silently in your thinking: a "
+    "description of the user's screen, or the text they had selected. The "
+    "application captured it on its own — the user has not said it, read it "
+    "aloud or asked about it. Never speak because it arrived and never describe "
+    "it unprompted: wait for the user to speak, then use it to understand them."
+)
 
 
-def _audible(pcm: bytes) -> bool:
+def _is_audible(pcm: bytes) -> bool:
     """Whether a PCM16 frame holds anything louder than ``SILENT_PEAK``."""
     samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
     return samples.size > 0 and int(np.abs(samples.astype(np.int32)).max()) > SILENT_PEAK
@@ -131,19 +155,30 @@ class LiveTalk:
         self._session = session
         self._model = model or cfg.TALK_LIVE_MODEL
         self._voice = voice or cfg.TALK_LIVE_VOICE
-        self._instructions = instructions or session.system_prompt()
+        self._instructions = ((instructions or session.system_prompt())
+                              + "\n\n" + QUIET_CONTEXT)
         self._delegation = resolve_delegation()
         #: turn being transcribed right now, per role: text and when the last
         #: delta for it arrived. There is no end-of-turn event, so this pair is
         #: the whole turn machinery (see ``tick``).
         self._live: Dict[str, str] = {}
         self._last_delta: Dict[str, float] = {}
-        self._audio: "queue.Queue" = queue.Queue()
-        #: when the last output-audio delta arrived. There is no event saying a
-        #: reply is finished, so this timestamp is what ``_quiet`` reads. Starts
-        #: in the past: a session that has said nothing is not mid-sentence.
+        #: the jitter buffer, all under ``_audio_lock``: output chunks as
+        #: (PCM, audible), how far into the first one playback is, the bytes in
+        #: hand, and whether playback is running or refilling
+        self._audio_lock = threading.Lock()
+        self._chunks: "deque" = deque()
+        self._offset = 0
+        self._queued = 0
+        self._primed = False
+        #: audible chunks not yet fully played. The buffer itself is no answer:
+        #: streamed silence keeps it busy.
+        self._audible = 0
+        #: when the last audible output-audio delta arrived. There is no event
+        #: saying a reply is finished, so this timestamp is what ``_quiet``
+        #: reads. Starts in the past: a session that has said nothing is not
+        #: mid-sentence.
         self._last_audio: float = 0.0
-        self._writing = False
         self._gate: Optional[EchoGate] = None
         self._held: List[np.ndarray] = []
         self._echo_until: float = 0.0
@@ -167,8 +202,12 @@ class LiveTalk:
         self.done = False
         self.error: Optional[Exception] = None
         self._thread: Optional[threading.Thread] = None
-        self._player: Optional[threading.Thread] = None
+        self._out: Optional[sd.RawOutputStream] = None
         self._mic: Optional[sd.InputStream] = None
+        #: ``session.closed`` has arrived, and how long the reader waits for it
+        #: once ``close()`` has asked
+        self._closed = False
+        self._close_deadline: Optional[float] = None
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -192,13 +231,18 @@ class LiveTalk:
             raise self.error
         if self._conn is None or not self._started.is_set():
             raise RuntimeError("Live session did not start in time")
-        self._player = threading.Thread(target=self._play, daemon=True)
-        self._player.start()
         media.mic_opened()
         self._mic = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
                                    device=resolve_input_device(),
                                    callback=self._on_audio)
         self._mic.start()
+        # The speakers after the microphone, never before: on a Bluetooth
+        # headset the microphone is what switches it to HFP, and a speaker
+        # stream opened first sits on the A2DP sink that switch tears down.
+        media.await_headset_mic()
+        self._out = sd.RawOutputStream(samplerate=RATE, channels=1, dtype="int16",
+                                       blocksize=BLOCK, callback=self._on_play)
+        self._out.start()
         print(f"🔊 Live talk — {self._model} / {self._voice} · "
               f"delegation: {self._delegation}"
               + (f" ({config_module.CFG.TALK_LIVE_BACKEND_MODEL})"
@@ -214,11 +258,24 @@ class LiveTalk:
             self._mic.close()
             self._mic = None
             media.mic_closed()
-        self._audio.put(None)
+        if self._out is not None:
+            self._out.close()      # discards whatever is still buffered
+            self._out = None
+        if self._loop.is_closed() or self._close_deadline is not None:
+            return   # already over, or already closing
         try:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            if self._conn is not None:
+                # The documented close: ask with session.close, and let the
+                # reader carry on until session.closed, which brings the final
+                # usage — the transport goes when the session task leaves its
+                # `async with`. Bounded, so a server that never answers cannot
+                # hold the socket open.
+                self._close_deadline = time.monotonic() + CLOSE_TIMEOUT
+                asyncio.run_coroutine_threadsafe(self._conn.session.close(), self._loop)
+            else:
+                self._loop.call_soon_threadsafe(self._loop.stop)
         except RuntimeError:
-            pass   # already closed, or closed between the check and the call
+            pass   # closed between the check and the call
 
     def _quiet(self) -> bool:
         """
@@ -232,11 +289,11 @@ class LiveTalk:
         Asked differently, though. The Realtime engine has an event for "the
         server has finished sending"; here there is none, so the absence of
         *audible* deltas for ``AUDIO_IDLE`` stands in for it (the server itself
-        never stops sending — see ``SILENT_PEAK``) — and the queue and the
-        sound card still have to agree, since "finished sending" was never the
-        same question as "finished being heard".
+        never stops sending — see ``SILENT_PEAK``) — and no audible frame may
+        still wait in the jitter buffer (``_audible``), since "finished
+        sending" was never the same question as "finished being heard".
         """
-        return (self._audio.empty() and not self._writing
+        return (self._audible == 0
                 and time.monotonic() - self._last_audio >= AUDIO_IDLE)
 
     def finished_speaking(self) -> bool:
@@ -636,6 +693,9 @@ class LiveTalk:
                 STATE.viz_queue.put_nowait(mono)
         except Exception:
             pass
+        # Never empty: a held block comes back as zeros (see _mic_chunks), and
+        # a barge-in replays the held audio on top, a moment ahead of real time
+        # — the model catches up.
         for chunk in self._mic_chunks(mono):
             pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
             try:
@@ -646,30 +706,42 @@ class LiveTalk:
 
     # --- session → speakers ------------------------------------------------
 
-    def _play(self) -> None:
-        """Drain the audio queue into the sound card until the session ends."""
-        try:
-            with sd.RawOutputStream(samplerate=RATE, channels=1, dtype="int16",
-                                    blocksize=BLOCK) as out:
-                while not self._stop:
-                    chunk = self._audio.get()
-                    if chunk is None:
-                        break
-                    self._writing = True
-                    try:
-                        out.write(chunk)
-                    finally:
-                        self._writing = False
-        except Exception as e:
-            print(f"❌ Live playback error: {e}")
+    def _on_play(self, outdata, frames: int, time_info, status) -> None:
+        """
+        PortAudio callback: hand the sound card exactly what it asks for.
+
+        A jitter buffer, and a pull rather than a push: a thread writing into
+        the stream cannot tell how much the sound card already holds, so it
+        cannot tell a late frame from a full buffer. Here nothing plays until
+        ``PREBUFFER`` is in hand, and running dry means refilling that much
+        before going on — one short pause instead of a click per late frame.
+        """
+        need, done = len(outdata), 0
+        with self._audio_lock:
+            if not self._primed and self._queued >= int(PREBUFFER * RATE) * 2:
+                self._primed = True
+            while self._primed and done < need and self._chunks:
+                chunk, audible = self._chunks[0]
+                take = min(need - done, len(chunk) - self._offset)
+                outdata[done:done + take] = chunk[self._offset:self._offset + take]
+                done += take
+                self._offset += take
+                self._queued -= take
+                if self._offset == len(chunk):
+                    self._chunks.popleft()
+                    self._offset = 0
+                    if audible:
+                        self._audible -= 1
+            if done < need:
+                outdata[done:] = bytes(need - done)
+                self._primed = False
 
     def _flush_audio(self) -> None:
         """Drop everything not yet played — the user has started speaking."""
-        try:
-            while True:
-                self._audio.get_nowait()
-        except queue.Empty:
-            pass
+        with self._audio_lock:
+            self._chunks.clear()
+            self._offset = self._queued = self._audible = 0
+            self._primed = False
         self._last_audio = 0.0   # this reply is over; nothing more is coming
 
     # --- the session itself ------------------------------------------------
@@ -740,9 +812,13 @@ class LiveTalk:
                 # the first message and nothing may be sent until the server
                 # answers session.started.
                 await conn.session.start(session=self._config())
+                # Read until session.closed rather than until close() is
+                # called: the documented close is a request, answered with the
+                # final usage.
                 async for event in conn:
                     self._handle(event)
-                    if self._stop or self.done:
+                    if self._closed or (self._close_deadline is not None and
+                                        time.monotonic() >= self._close_deadline):
                         break
         except Exception as e:
             if not self._stop:
@@ -755,14 +831,14 @@ class LiveTalk:
         if etype == "session.output_audio.delta":
             delta = getattr(event, "delta", "") or ""
             if delta:
-                pcm = base64.b64decode(delta)
-                now = time.monotonic()
-                if _audible(pcm):
-                    self._last_audio = now
-                # Silence just after speech is a pause in the reply; silence
-                # long after it is the idle stream, and neither queued nor heard.
-                if now - self._last_audio < AUDIO_IDLE:
-                    self._audio.put(pcm)
+                chunk = base64.b64decode(delta)
+                audible = _is_audible(chunk)
+                with self._audio_lock:
+                    if audible:
+                        self._audible += 1
+                        self._last_audio = time.monotonic()
+                    self._chunks.append((chunk, audible))
+                    self._queued += len(chunk)
         elif etype == "session.input_transcript.delta":
             self._on_delta("user", getattr(event, "delta", "") or "")
         elif etype == "session.output_transcript.delta":
@@ -778,6 +854,7 @@ class LiveTalk:
             self._ready.set()
         elif etype == "session.closed":
             self._stop = True
+            self._closed = True
             usage = getattr(event, "usage", None)
             seconds = getattr(usage, "seconds", None)
             reason = getattr(event, "reason", "") or "?"
@@ -861,45 +938,83 @@ if __name__ == "__main__":
 
     talk._handle(_Event(type="session.output_audio.delta",
                         delta=base64.b64encode(b"\x01\x02").decode()))
-    assert talk._audio.qsize() == 1
+    assert len(talk._chunks) == 1
 
     # A reply ends with no event to say so, so silence has to end it. Nothing
     # resets a flag here: `_quiet` reads the clock, and if it did not, the
     # microphone would stay gated for the rest of the session after the
     # assistant's first word.
     assert not talk._quiet(), "a queued reply read as silence"
-    talk._audio.get_nowait()
+    talk._primed = True         # …and the sound card takes it
+    talk._on_play(bytearray(2), 1, None, None)
     assert not talk._quiet(), "the reply was over the instant a delta landed"
     talk._last_audio = time.monotonic() - (AUDIO_IDLE + 0.1)
     assert talk._quiet(), "the reply never ended — the microphone stays shut"
+    # The server streams exact-zero frames between replies for as long as it
+    # hears the microphone: played, but not a reply.
+    talk._handle(_Event(type="session.output_audio.delta",
+                        delta=base64.b64encode(bytes(4800)).decode()))
+    assert len(talk._chunks) == 1 and talk._quiet(), "streamed silence kept the reply open"
+    talk._flush_audio()
     # …and a barge-in ends it at once rather than after the idle window.
     talk._handle(_Event(type="session.output_audio.delta",
                         delta=base64.b64encode(b"\x01\x02").decode()))
     talk._flush_audio()
     assert talk._quiet(), "the assistant kept talking over the user"
+    assert talk._audible == 0 and not talk._chunks and talk._queued == 0
 
-    # Between replies the server streams digital silence, a frame every 100 ms.
-    # It is not a reply: counted as one, nothing is ever handed back and the
-    # microphone stays behind the echo gate for the rest of the session.
-    silence = base64.b64encode(bytes(4800)).decode()
+    # The jitter buffer: nothing plays before PREBUFFER is in hand, then the
+    # sound card gets exactly what it asks for, and running dry refills first.
+    # half the prebuffer, loud enough to count as audio (SILENT_PEAK)
+    frame = (1000).to_bytes(2, "little") * (int(PREBUFFER * RATE) // 2)
+    out = bytearray(len(frame))
+    delta = base64.b64encode(frame).decode()
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._on_play(out, len(out) // 2, None, None)
+    assert not any(out) and talk._queued == len(frame), "played before the buffer filled"
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._on_play(out, len(out) // 2, None, None)
+    assert bytes(out) == frame and talk._audible == 1, "a full buffer did not play"
+    talk._on_play(out, len(out) // 2, None, None)
+    talk._on_play(out, len(out) // 2, None, None)
+    assert not any(out) and not talk._primed and talk._audible == 0, \
+        "ran dry and kept going instead of refilling"
+    talk._last_audio = 0.0
+
+    # While a reply plays the gate holds the microphone back — and the model
+    # must still hear something: gpt-live-1 speaks in step with its input, so
+    # sending nothing stalls its voice after a few words.
+    sent: list = []
+
+    class _Input:
+        def append(self, audio: str) -> None:
+            sent.append(audio)
+
+    talk._conn = _Event(session=_Event(input_audio=_Input()))
+    real_rct = asyncio.run_coroutine_threadsafe
+    asyncio.run_coroutine_threadsafe = lambda coro, loop: None
+    talk._last_audio = time.monotonic()      # a reply is playing
+    talk._on_audio(np.full((480, 1), 0.001, dtype=np.float32), 480, None, None)
+    asyncio.run_coroutine_threadsafe = real_rct
+    assert len(sent) == 1 and not base64.b64decode(sent[0]).strip(b"\0"), \
+        "the held microphone went out as nothing — the voice stalls"
+    talk._conn, talk._gate, talk._held, talk._echo_until = None, None, [], 0.0
+    talk._last_audio = 0.0
+
+    # Between replies the frames are silence — mostly exact zeros, sometimes a
+    # peak of a few units. Neither is a reply: counted as one, nothing is ever
+    # handed back and the microphone stays behind the echo gate.
+    faint = base64.b64encode(np.full(2400, 7, dtype=np.int16).tobytes()).decode()
     talk._last_audio = time.monotonic() - (AUDIO_IDLE + 0.1)
-    talk._handle(_Event(type="session.output_audio.delta", delta=silence))
-    assert talk._audio.empty() and talk._quiet(), \
-        "the idle stream read as a reply"
-    # …while a pause inside a reply still reaches the speakers.
-    talk._handle(_Event(type="session.output_audio.delta",
-                        delta=base64.b64encode(b"\x01\x02").decode()))
-    talk._handle(_Event(type="session.output_audio.delta", delta=silence))
-    assert talk._audio.qsize() == 2, "a pause between two sentences was dropped"
-    # …and is not the end of that reply, played out or not.
-    talk._audio.get_nowait(); talk._audio.get_nowait()
+    talk._handle(_Event(type="session.output_audio.delta", delta=faint))
+    assert talk._audible == 0 and talk._quiet(), "a faint idle frame read as a reply"
+    # A pause inside a reply is not its end, played out or not.
     talk._last_audio = time.monotonic() - 0.5
     assert not talk._quiet(), "a half-second pause read as the end of the reply"
     talk._flush_audio()
-    assert not _audible(bytes(4800)) and not _audible(b"") and _audible(b"\x00\x80")
+    assert not _is_audible(bytes(4800)) and not _is_audible(b"") and _is_audible(b"\x00\x80")
 
-    # A gated microphone still keeps time. With no frames at all during a
-    # reply, gpt-live-1 stalls every few words; the block goes out as silence.
+    # A gated microphone still keeps time: gpt-live-1 needs zeros, never nothing.
     talk._last_audio = time.monotonic()               # a reply is playing
     echo = np.full(480, 0.3, dtype=np.float32)
     out = talk._mic_chunks(echo)

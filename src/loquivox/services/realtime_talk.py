@@ -106,13 +106,17 @@ class RealtimeTalk:
             raise self.error
         if self._conn is None:
             raise RuntimeError("Realtime session did not open in time")
-        self._player = threading.Thread(target=self._play, daemon=True)
-        self._player.start()
         media.mic_opened()
         self._mic = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
                                    device=resolve_input_device(),
                                    callback=self._on_audio)
         self._mic.start()
+        # The speakers after the microphone, never before: on a Bluetooth
+        # headset the microphone is what switches it to HFP, and a speaker
+        # stream opened first sits on the A2DP sink that switch tears down.
+        media.await_headset_mic()
+        self._player = threading.Thread(target=self._play, daemon=True)
+        self._player.start()
         print(f"🔊 Realtime talk — {self._model} / {self._voice}")
 
     def close(self) -> None:
@@ -125,10 +129,16 @@ class RealtimeTalk:
             self._mic = None
             media.mic_closed()
         self._audio.put(None)  # wake the player so it can exit
+        if self._loop.is_closed():
+            return   # the session task already ran to its end
         try:
-            self._loop.call_soon_threadsafe(self._loop.stop)
+            if self._conn is not None:
+                # Close the socket, not just the loop — see LiveTalk.close.
+                asyncio.run_coroutine_threadsafe(self._conn.close(), self._loop)
+            else:
+                self._loop.call_soon_threadsafe(self._loop.stop)
         except RuntimeError:
-            pass   # already closed, or closed between the check and the call
+            pass   # closed between the check and the call
 
     def _quiet(self) -> bool:
         """
