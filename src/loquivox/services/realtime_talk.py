@@ -125,8 +125,10 @@ class RealtimeTalk:
             self._mic = None
             media.mic_closed()
         self._audio.put(None)  # wake the player so it can exit
-        if not self._loop.is_closed():
+        try:
             self._loop.call_soon_threadsafe(self._loop.stop)
+        except RuntimeError:
+            pass   # already closed, or closed between the check and the call
 
     def _quiet(self) -> bool:
         """
@@ -159,6 +161,16 @@ class RealtimeTalk:
         if self._speech_deadline is None:
             self._speech_deadline = now + SPEECH_TAIL_TIMEOUT
         return now >= self._speech_deadline
+
+    def tick(self) -> None:
+        """
+        Nothing to do: the server closes turns here.
+
+        Part of the interface ``_talk_converse_server`` drives, because the
+        Live engine has no turn-completed event and has to close its own. Said
+        out loud rather than left out, so the shared loop can call it
+        unconditionally.
+        """
 
     def push_context(self) -> bool:
         """

@@ -81,7 +81,8 @@ transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
 services/         audio (record+transcribe), ai (chat+vision), tts (engine per
                   CFG.TTS_ENGINES: Groq Orpheus EN / OpenAI multilingual /
                   Piper local via tts_piper.py), realtime_talk (speech-to-speech
-                  talk mode),
+                  talk mode), live_talk (gpt-live-1: speech in/out, thinking
+                  delegated back to our own model),
                   clipboard, image, postprocess (LLM refinement of dictation),
                   talk (conversation → one text), vad (energy trigger),
                   turn_detector (Smart Turn v3 semantic end-of-turn)
@@ -108,7 +109,7 @@ A whole conversation, not a single utterance — so it does NOT use the
 `process_audio_async` → `process()` path. `KeyboardHandler._on_press("talk")`
 spawns `ModeHandler._talk_worker`, which owns everything until the session ends.
 
-**Two engines, one promise** (`CFG.TALK_ENGINE`, dispatched in
+**Three engines, one promise** (`CFG.TALK_ENGINE`, dispatched in
 `_talk_conversation`): a conversation you can interrupt.
 - `cascade` (default) — STT → LLM → TTS, described below. Four slots, each
   local or cloud: transcription (`transcription/`), turn detection
@@ -122,11 +123,16 @@ spawns `ModeHandler._talk_worker`, which owns everything until the session ends.
   still queued, so `done` lands mid-sentence: the loop breaks on
   `finished_speaking()`, never on `done` alone, or the assistant is cut off in
   the middle of "Parfait, je vais rédiger…".
+- `live` — `services/live_talk.py`: one `gpt-live-1` session, which *splits*
+  the job rather than holding it. See the Live engine section below.
 
-Either way the turns land in the same `TalkSession`, because the writing pass
-is a text completion that never learns which engine ran. That is the whole
-reason the split works: Loquivox produces a *text*, so only the conversation
-half is interchangeable.
+The last two share one loop, `_talk_converse_server`, because both answer the
+same five questions per tick — context to hand over, plugin answer to slip in,
+turn to close, error, and is the briefing over *and heard*. Either way the
+turns land in the same `TalkSession`, because the writing pass is a text
+completion that never learns which engine ran. That is the whole reason the
+split works: Loquivox produces a *text*, so only the conversation half is
+interchangeable.
 
 The cascade, step by step:
 
@@ -212,6 +218,116 @@ The conversation lives in the `TalkSession`, never in `STATE.conversation_histor
 detector the audio callback feeds while a turn is being recorded; `STATE.talk_active`
 guards against a second session. Knobs live under `[talk]` in config.toml.
 
+### The Live engine (`services/live_talk.py`)
+
+`gpt-live-1` is not another Realtime. The voice model hears, speaks and owns
+the rhythm of the exchange, and **delegates** anything that needs reasoning.
+Which is the point: with `delegation: {"type": "client"}` the thing it
+delegates to is ours, so the choice of LLM comes back — the voice is OpenAI's,
+the thinking is whatever `[models] chat` points at, plugins included.
+
+`CFG.TALK_LIVE_DELEGATION` (`resolve_delegation()`, shared with the Settings
+dialog so a greyed field can never disagree with the session) picks the side,
+once, when the session opens — `delegation.type` is immutable and changing it
+means a new session:
+
+- `client` — `TalkSession.consult()`: our model, `desks.chat_tools` on the
+  table, answer back through `session.commentary.append`.
+- `responses` — OpenAI's managed backend (`TALK_LIVE_BACKEND_MODEL`). Real,
+  named tool calls arrive inside a `response.event` envelope; **dispatch on the
+  nested type**, which the SDK hands over as a plain `dict`, never on the outer
+  one, and only `response.output_item.done` identifies a call.
+- `auto` — `responses` when the provider is openai, else `client`. Both values
+  can be forced, and that is why they exist: comparing the two modes honestly
+  means holding the model constant, which `auto` alone cannot do.
+
+**The trade, stated once so it is not rediscovered.**
+`session.delegation.created` carries "metadata, not task text" — no tool name,
+no arguments, not even the utterance that caused it, and it can arrive *before*
+that sentence finishes transcribing (hence `_flush_turns()` before consulting).
+So in client mode the voice model no longer picks a tool: ours does, one level
+down. `tests/test_plugins.py` drives both routes with a plugin the core has
+never heard of.
+
+**What each mode costs a plugin.** Both run the plugin's *code* here — "your
+application still executes its custom functions" — so neither mode limits what
+a plugin may do; only OpenAI's *description* of it ever crosses the wire. What
+differs is who decides to call it and who waits:
+
+| | `responses` | `client` |
+|---|---|---|
+| decides to call | OpenAI's backend model | ours |
+| the arguments | structured, from a real tool call | inferred from the transcript |
+| a slow plugin | the backend waits (see below) | nothing waits |
+| the answer reaches the backend | directly, as its tool result | through `session.turns`, next turn |
+
+The `responses` waiting is the one place Loquivox deliberately does the
+*opposite* of the other two engines, and `_answer_call` is where. Cascade and
+Realtime answer a tool call with the plugin's `started` stub because their
+conversation loop is blocked meanwhile, and a stub is what stops the assistant
+going silent for five seconds. Live is the one place that does not apply —
+"Live speech and delegated work continue independently", so the voice model
+keeps talking while the backend waits, and waiting costs nothing anyone can
+hear. Blocking buys what the stub route loses: the backend model *reads* the
+result instead of being told "I'm looking into it" and then overhearing the
+answer through what the voice said out loud. `Desk.run_now` is `ask` without
+the queue, for exactly this.
+
+`TALK_LIVE_WEB_SEARCH` picks **who searches the web** for that backend:
+`"plugin"` (ours, under `RESEARCH_PROVIDER` / `MODEL_RESEARCH`) or `"native"`
+(`{"type": "web_search"}`, which `delegation.responses.tools` accepts and which
+runs on OpenAI's side, never coming back as a function call to answer).
+
+Exclusive on purpose. Offering the backend both does not add a capability, it
+adds a coin toss between two tools answering the same question under different
+settings — and makes the two impossible to compare, which is the whole reason
+for having the choice.
+
+**And exclusive to that one capability**, which is the load-bearing part: a
+plugin steps aside by *declaring what it replaces* (`Plugin.provides`, matched
+in `Desks.realtime_tools_except`), never by being named. `research` declares
+`provides="web_search"`; a plugin that declares nothing — nearly all of them,
+now and later — can never be stood down by any native tool. `_config` still
+does not know that `research` exists, and `tests/test_plugins.py` pins both
+halves: the declaring plugin goes, its neighbour stays.
+
+Three things the Live API does not give us, each answered rather than worked
+around:
+
+- **No turn-completed event at all.** "Transcript deltas have no item ID or
+  authoritative turn-completed event." `tick()` closes a turn on a gap of
+  `TALK_LIVE_TURN_GAP`, per role — the two speakers may legitimately overlap,
+  so a role is only ever closed by *its own* silence. Deltas are concatenated
+  exactly as received; trimming them or inserting spaces is documented as
+  wrong, not merely unidiomatic.
+- **No `speech_started`.** The server never says the user cut in, so the
+  `EchoGate` in `_mic_chunks` is both halves of a barge-in: it decides it *and*
+  flushes the speakers. `push_result` reads an open user turn as "someone has
+  the floor", the transcript being the only evidence available.
+- **No end-of-output-audio event either**, so a reply ends the same way a turn
+  does: by silence. `_quiet()` reads a *timestamp* (`_last_audio`, `AUDIO_IDLE`)
+  where the Realtime engine reads an event-driven flag. Getting this wrong is
+  not subtle but it is invisible: a flag cleared on every delta and set by an
+  event that never comes leaves `_quiet()` false for ever, and then the
+  microphone stays echo-gated after the assistant's first word, `push_result`
+  never fires, and `finished_speaking()` only ever expires on its timeout.
+  `session.started` is the mirror image — it is the *only* thing that may
+  release `start()`, since the API rejects anything sent before it, and
+  releasing on our own send would hand back an unusable session. Both are
+  pinned in the module's self-check.
+- **Instructions are frozen** after `session.started` (16,384 tokens) and every
+  append is capped at 500. So the Realtime engine's `session.update` trick has
+  no equivalent: `push_context()` goes through `session.thinking.append`
+  instead — the screen description is something to *know*, and an appended
+  *instruction* "can interrupt the model's current speech", which is precisely
+  what a capture landing mid-sentence must not do. `_chunks()` splits anything
+  longer on sentence boundaries; nothing is truncated.
+
+Cost is two meters, not one: $0.05/min of voice **plus** whatever the backend
+spends. Sessions have a duration limit (`session.closed` with
+`reason: "expired"`) and there is no resumption — a replacement session must be
+given its context back.
+
 ### Plugins (`services/plugins.py`)
 
 The extension surface both engines share, and `services/research.py` is its
@@ -223,9 +339,11 @@ A plugin is one `Plugin` dataclass in one file — `name`/`description`/
 `parameters` (the chat and Realtime wire shapes are *derived*, never written
 twice), `run` (the background work), `message` (its answer as a system
 message), `started` (the stub the model speaks from meanwhile), `enabled` (the
-config key that gates it), and `settings` (its card in Settings, built with the
-dialog's own `_group`/`_field`/`_actions` so it lines up with the rest, on
-the Settings → Plugins page they share).
+config key that gates it), `provides` (the *native* capability it stands in
+for, if any — how a plugin steps aside for a backend that can do the same
+thing itself, without any core naming it), and `settings` (its card in
+Settings, built with the dialog's own `_group`/`_field`/`_actions` so it lines
+up with the rest, on the Settings → Plugins page they share).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.
@@ -236,10 +354,14 @@ never told about). Everything the conversation core does goes through it and
 names no plugin: `desks.chat_tools` / `desks.realtime_tools` compose the tool
 list, `desks.get(name)` routes a call — `TalkSession._answer` in the cascade,
 `RealtimeTalk._handle` on the server event — and `desks.take()` sweeps every
-desk for one answer. Adding a plugin therefore touches `talk.py`,
-`realtime_talk.py` and `handlers/mode.py` not at all;
+desk for one answer. A desk has two ways in: `ask` (work on a thread, answer
+onto the queue, swept between turns) and `run_now` (work on the caller's
+thread, answer handed straight back) — for the one protocol that is already
+holding the line, the Live engine's Responses delegation. Adding a plugin therefore touches `talk.py`,
+`realtime_talk.py`, `live_talk.py` and `handlers/mode.py` not at all;
 `tests/test_plugins.py` pins that by driving a plugin the core has never heard
-of through both engines.
+of through all three engines — including both of the Live engine's delegation
+modes, which reach a plugin by opposite routes.
 
 The answer is handed back *between turns only*: the cascade's `_talk_listen`
 breaks with `action="result"` when a desk is ready and the VAD has not heard
@@ -256,8 +378,10 @@ instruction it has already absorbed rather than news to be read out — measured
 on `gpt-oss-120b`, one reply in three even mentioned it. So `TalkSession`
 keeps the role and changes only the wire shape: `_spoken_to()` sends those
 turns as `user`, which lands three times in three, while `turns`, the F4
-history and the generation prompt still see `system`. The Realtime engine needs
-no such thing — its `_say_result` system item is acted on as sent.
+history and the generation prompt still see `system`. `consult()`, the Live
+engine's client delegation, reads the turns the same way for the same reason.
+The server engines need no such thing — Realtime's `_say_result` system item
+and Live's `commentary.append` are both acted on as sent.
 
 A plugin may also be a **source** instead of a tool: no `run`, a `watch` that
 runs on its own thread for the length of the session and calls `Desk.put`.
@@ -266,6 +390,17 @@ them; `is_tool` keeps a source off the tool lists and out of `Desks.get`, so a
 call naming it is a hallucination and is dropped rather than crashing. Nothing
 downstream changes — "an answer arrives between two turns" never depended on
 the model having asked for it.
+
+Under Live, a source costs two things the tool route never needed.
+`realtime_tools_except` checks `is_tool` like the other lists — without it a
+function with no `run` is declared to OpenAI's backend. And `push_result`
+sweeps the desks in *both* delegation modes: under `responses` a tool's answer
+goes back on its own call, but a source has no call to answer. Measured on
+`gpt-live-1`, both modes: the notification is said aloud, in the voice's own
+words, once the previous reply's audio has stopped arriving. That can be long
+after its transcript is complete — 3 s in one run, 27 s in another — so a check
+that gives up on `push_result` after a few seconds reads a correct wait as a
+failure.
 
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model

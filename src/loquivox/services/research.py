@@ -213,6 +213,11 @@ PLUGIN = Plugin(
     run=_run,
     message=result_message,
     enabled=lambda: bool(config_module.CFG.TALK_RESEARCH),
+    # A backend that can search the web itself does not need this too: offering
+    # both is a coin toss between two searches that answer to different
+    # settings. Declaring the capability is what lets the Live engine stand
+    # this one down without knowing which plugin it is.
+    provides="web_search",
     note=lambda args: (f"🔎 Recherche en cours : {question_of(args)}"
                        if question_of(args) else ""),
     result_note="🔎 Résultat reçu — l'assistant vous le donne",
