@@ -311,6 +311,16 @@ around:
   event that never comes leaves `_quiet()` false for ever, and then the
   microphone stays echo-gated after the assistant's first word, `push_result`
   never fires, and `finished_speaking()` only ever expires on its timeout.
+  The timestamp fell into the same hole a second way: **the server never stops
+  sending**. Between replies `gpt-live-1` streams a 100 ms frame every 100 ms,
+  measured at a peak of 0–7 (int16) in both delegation modes, so a clock moved
+  by every delta never aged past `AUDIO_IDLE` either — a plugin's answer came
+  back only when the stream happened to stall. Only an *audible* frame
+  (`SILENT_PEAK`) moves `_last_audio` now; silence under `AUDIO_IDLE` (1 s) is
+  a pause in the reply and is played, silence past it is the idle stream and is
+  dropped. The window has to outlast a pause between sentences, or a reply
+  reads as over halfway through: `push_result` would cut in and
+  `finished_speaking()` would clip the last sentence.
   `session.started` is the mirror image — it is the *only* thing that may
   release `start()`, since the API rejects anything sent before it, and
   releasing on our own send would hand back an unusable session. Both are
@@ -397,10 +407,9 @@ function with no `run` is declared to OpenAI's backend. And `push_result`
 sweeps the desks in *both* delegation modes: under `responses` a tool's answer
 goes back on its own call, but a source has no call to answer. Measured on
 `gpt-live-1`, both modes: the notification is said aloud, in the voice's own
-words, once the previous reply's audio has stopped arriving. That can be long
-after its transcript is complete — 3 s in one run, 27 s in another — so a check
-that gives up on `push_result` after a few seconds reads a correct wait as a
-failure.
+words, about 1.5 s after the last word of the reply before it — once `_quiet()`
+can tell that reply is over, which it could not before (see the Live engine's
+"no end-of-output-audio event" below).
 
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
