@@ -433,13 +433,6 @@ class Config:
         "i'm done", "im done", "that's it", "that's all", "go ahead",
         "write it", "write the text", "done",
     )
-    #: Chat mode (F4) has no writing phase — until one of these is said. "Écris
-    #: ça" turns the conversation into a briefing on the spot: the text is
-    #: generated from everything said so far and reviewed like F6's.
-    TALK_WRITE_PHRASES: Tuple[str, ...] = (
-        "ecris ca", "ecris-le", "ecris le", "ecris moi", "redige", "note ca",
-        "write it", "write that", "write this", "write me",
-    )
     # How long the generated text waits for a verdict before being left on the
     # clipboard (seconds) — it is never typed without an explicit accept.
     TALK_REVIEW_TIMEOUT: float = 120.0
@@ -500,6 +493,10 @@ class Config:
     TALK_SPEAK_REPLIES: bool = True
     #: let the conversation call ``research`` (services/research.py)
     TALK_RESEARCH: bool = True
+    #: let a chat (F4) call ``write_text`` (services/write.py): the text is
+    #: produced from the conversation and pasted at the cursor without the
+    #: conversation ending. Off, F4 writes nothing and F6 is the way to a text.
+    TALK_WRITE_TOOL: bool = True
     #: let Collie Board's notifications reach a conversation in progress
     #: (services/board.py). Off by default: it polls a local service most
     #: installations do not run.
@@ -529,8 +526,10 @@ class Config:
         "You are on a live voice call with the user. They called you about what "
         "is in front of them — the screen described in your context and, when "
         "there is one, the text they had selected — to discuss it, understand "
-        "it, check it or get an opinion. Nothing gets written at the end: this "
-        "is the whole exchange.\n\n"
+        "it, check it or get an opinion. The conversation is the point, and it "
+        "does not end with a text: it ends when they end it. Use your tools "
+        "when one of them does what is being asked of you, and keep "
+        "talking.\n\n"
         "What reaches you is a speech transcript, so it is spoken language, not "
         "writing: it wanders, it backtracks, and the recognizer mishears words. "
         "When a word looks wrong, say what you understood rather than guessing "
@@ -565,8 +564,14 @@ class Config:
         "Use your tools when the answer needs facts you do not have. Return the "
         "relevant facts in at most two short sentences, with no markdown and no "
         "preamble. Use confirmed values, never invent one, and say plainly when "
-        "you cannot establish something. If the conversation does not yet say "
-        "what is wanted, return the one question that would settle it."
+        "you cannot establish something.\n\n"
+        "Some of your tools do not answer a question, they DO something the "
+        "user has asked for. Call those. Do not describe what you could do, do "
+        "not list the tool, do not ask which one to use, and never say you are "
+        "unable to do something one of your tools does — calling it IS how you "
+        "do it. Ask a question only when the conversation leaves you unable to "
+        "act at all; the answer to \"what exactly do you want?\" is almost "
+        "always already in it."
     )
     TALK_GENERATE_PROMPT: str = (
         "You write the final text the user has just discussed with you by voice. "
@@ -850,10 +855,6 @@ def _build_config() -> Config:
         overrides["TALK_FINISH_ON_PHRASE"] = bool(talk["finish_on_phrase"])
     if "finish_by_model" in talk:
         overrides["TALK_FINISH_BY_MODEL"] = bool(talk["finish_by_model"])
-    if "write_phrases" in talk:
-        overrides["TALK_WRITE_PHRASES"] = tuple(
-            str(phrase).strip().lower() for phrase in talk["write_phrases"]
-            if str(phrase).strip())
     if "finish_phrases" in talk:
         overrides["TALK_FINISH_PHRASES"] = tuple(
             str(phrase).strip().lower() for phrase in talk["finish_phrases"]
@@ -947,6 +948,8 @@ def _build_config() -> Config:
         overrides["MODEL_RESEARCH"] = str(models["research"]).strip()
     if "research" in talk:
         overrides["TALK_RESEARCH"] = bool(talk["research"])
+    if "write_tool" in talk:
+        overrides["TALK_WRITE_TOOL"] = bool(talk["write_tool"])
     if "board" in talk:
         overrides["TALK_BOARD"] = bool(talk["board"])
     if "tts" in models:

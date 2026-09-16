@@ -112,6 +112,11 @@ class AppState:
     # True for the whole duration of a talk session (many turns), so a second
     # press of the talk key can't start a competing conversation.
     talk_active: bool = False
+    # The TalkSession that owns the microphone right now, None outside one.
+    # A plugin's ``run`` gets its arguments and nothing else — this is how the
+    # one plugin whose work IS the conversation (services/write.py) reaches
+    # the turns it has to write from.
+    talk_session: Optional[Any] = None
     # True once this talk session has said that the room drowns the microphone
     # (services/talk.py echo_note); saying it once a reply would be nagging.
     echo_advised: bool = False

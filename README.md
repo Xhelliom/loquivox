@@ -147,8 +147,11 @@ becomes **one finished text**, ready to paste.
 
 `F4` is the same conversation with a different reason to talk: it looks at your screen and
 the text you selected, and you discuss it — check an error, get an opinion, understand a
-page. Nothing is written at the end, until you say *"write it"* (or *"écris ça"* in French): the chat
-then turns into a briefing on the spot and the text is generated from everything said so far.
+page. And when you want the text, you say so out loud — *"écris ça"*, *"write it"* — and it
+is written from everything said so far and pasted at your cursor **without the conversation
+stopping**. So the next sentence can be *"non, plus court, et enlève le dernier paragraphe"*,
+and the one after that too. That is the difference between an assistant you brief and one
+you work with.
 
 **Speech to speech, two ways** — in Settings → Models, or with one of the presets there
 (*Fast*, *Natural*, *Private*):

@@ -1734,10 +1734,12 @@ class SettingsDialog:
         cls._field(body, "Cutting in (× the echo)", cls._talk_barge_margin, labels)
 
         body = cls._group(
-            vbox, "Ending the conversation",
+            vbox, "Ending the briefing (F6)",
             "Enter always writes the text — or the talk key itself, with the "
             "keyboard left free. That one can't be turned off, so there is "
-            "always a way out. These are extras.")
+            "always a way out. These are extras. A chat (F4) ends on the key "
+            "alone: it writes through the tool, whenever you ask, without "
+            "ending.")
 
         cls._talk_phrase_check = Gtk.CheckButton(
             label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")

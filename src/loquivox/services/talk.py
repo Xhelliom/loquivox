@@ -178,15 +178,6 @@ def user_said_done(text: str, max_words: int = 6) -> bool:
     return _short_match(text, cfg.TALK_FINISH_PHRASES, max_words)
 
 
-def user_asked_write(text: str, max_words: int = 6) -> bool:
-    """
-    True when a chat-mode turn asks for a text ("écris ça"): the conversation
-    becomes a briefing and the writing phase runs on it. Same matching rules
-    as ``user_said_done``; phrases come from ``CFG.TALK_WRITE_PHRASES``.
-    """
-    return _short_match(text, config_module.CFG.TALK_WRITE_PHRASES, max_words)
-
-
 def _short_match(text: str, phrases, max_words: int) -> bool:
     """Whether a SHORT utterance contains one of the phrases."""
     normalized = _normalize(text)
@@ -215,8 +206,10 @@ class TalkSession:
         #: the text the user had selected when the session opened (F4 only)
         self.selection: Optional[str] = None
         #: one desk per enabled plugin: calls in flight, answers waiting to
-        #: be slipped in between two turns (see services/plugins.py)
-        self.desks = Desks()
+        #: be slipped in between two turns (see services/plugins.py). A chat
+        #: gets the plugins a briefing must not have — the one that writes a
+        #: text, which is how a briefing already ends.
+        self.desks = Desks(chat=not write)
         #: the conversation so far, as API messages (user/assistant turns)
         self.turns: List[Dict[str, Any]] = []
         #: what was on screen when the session started, described once by the
@@ -451,7 +444,7 @@ class TalkSession:
         if self.turns and self.turns[-1]["role"] == "assistant":
             self.turns[-1]["content"] += " …[cut off by the user]"
 
-    def generate(self) -> Optional[str]:
+    def generate(self, instruction: str = "") -> Optional[str]:
         """
         Write the final text from the whole conversation.
 
@@ -459,15 +452,24 @@ class TalkSession:
         (which forbids writing the text) is swapped for the generation one, and
         a closing user request is appended. Returns None if nothing was said, or
         if the call failed.
+
+        ``instruction`` is the last word on the brief, when the caller has it in
+        the user's own words ("plus court, sans le dernier paragraphe"). The
+        conversation is still the brief — this only says which of the things in
+        it applies to *this* version, which a transcript buries and a caller
+        that was handed it should not have to hope the model digs back out.
         """
         if not self.turns:
             return None
         cfg = config_module.CFG
+        request = cfg.TALK_GENERATE_REQUEST
+        if instruction.strip():
+            request += "\n\n" + instruction.strip()
         messages = (
             [{"role": "system", "content": cfg.TALK_GENERATE_PROMPT}]
             + self._context_messages()
             + self.turns
-            + [{"role": "user", "content": cfg.TALK_GENERATE_REQUEST}]
+            + [{"role": "user", "content": request}]
         )
         result = AIService.complete(messages)
         return (result or "").strip() or None
@@ -507,12 +509,13 @@ if __name__ == "__main__":
     assert not ends_briefing("D'accord, je rédige.")
 
     chat = TalkSession(write=False)
+    assert len(chat.desks.realtime_tools) > len(TalkSession().desks.realtime_tools), \
+        "a chat and a briefing were given the same tools — chat_only did nothing"
     assert FINISH_MARKER not in chat.system_prompt(), "chat mode must not carry the marker protocol"
     assert FINISH_MARKER in TalkSession().system_prompt() or "never write it" in TalkSession().system_prompt().lower()
     chat.selection = "hello"
     assert "SELECTED TEXT" in chat.context_clause() and "hello" in chat.context_clause()
     assert user_said_done("C’est bon, on a fini.") and user_said_done("J'ai fini")
-    assert user_asked_write("Écris ça !") and not user_asked_write("quand tu écris ça, fais court, sinon ça ne passe pas")
     brief = TalkSession(); brief.selection = "hello"
     assert "STARTING TEXT" in brief.context_clause()
     assert _MARKER_RE.search("D'accord, je rédige. [[WRITE]]")
