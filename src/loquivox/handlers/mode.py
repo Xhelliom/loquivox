@@ -345,7 +345,16 @@ class ModeHandler:
                     print("⚠️  Talk mode needs keyboard access — is your user in "
                           "the 'input' group?")
                     return
-                if write:
+                # The keys named here are the ones talk_listen_keys answers to,
+                # which with the keyboard left free is the session's own hotkey
+                # and nothing else.
+                cfg = config_module.CFG
+                own = cfg.HOTKEY_DEFS["talk" if write else "ai"][0]
+                if cfg.TALK_FREE_KEYBOARD:
+                    print(f"{'🗣️  Talk' if write else '💬 Chat'} mode — speak "
+                          f"freely, the keyboard stays yours. {own}: "
+                          f"{'write the text' if write else 'end'}")
+                elif write:
                     print("🗣️  Talk mode — speak freely. Enter: write the text · "
                           "Space: end this turn · Esc: drop the conversation")
                 else:
@@ -542,7 +551,7 @@ class ModeHandler:
         mapping = KeyboardHandler.talk_listen_keys()
         cancelled = False
         try:
-            with keys.exclusive():
+            with keys.exclusive(grab=not cfg.TALK_FREE_KEYBOARD):
                 while True:
                     pressed = keys.poll(mapping, 0.05)
                     talk.tick()
@@ -745,7 +754,9 @@ class ModeHandler:
         deadline = time.monotonic() + cfg.TALK_TURN_TIMEOUT
         # Exclusive only while we wait on the user: no keystroke of this turn
         # reaches the app underneath, and nothing here can block on the network.
-        with keys.exclusive():
+        # Unless the user asked for the keyboard back, in which case the turn is
+        # driven by the session's own hotkey alone (see talk_listen_keys).
+        with keys.exclusive(grab=not cfg.TALK_FREE_KEYBOARD):
             while True:
                 # A short poll: this is what stands between the detector saying
                 # "finished" and the recording actually stopping.

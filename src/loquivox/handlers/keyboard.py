@@ -81,12 +81,17 @@ class GrabbedKeys:
         return bool(self._devices)
 
     @contextmanager
-    def exclusive(self):
+    def exclusive(self, grab: bool = True):
         """
         Hold the exclusive grab for the duration of the block — wrap every wait
         on the user, and nothing else.
+
+        ``grab=False`` waits without taking it (``TALK_FREE_KEYBOARD``): the
+        keys still reach us, and they reach the focused app too. The session
+        then answers to its own hotkey only — see ``talk_listen_keys``.
         """
-        self._grab()
+        if grab:
+            self._grab()
         try:
             yield self
         finally:
@@ -387,6 +392,15 @@ class KeyboardHandler:
     @classmethod
     def _on_press(cls, mode: str) -> None:
         """Handle key press for a recognized mode."""
+        # A talk session drives itself from its own key map (talk_listen_keys),
+        # so the global session keys must never reach it — grabbed or not. With
+        # the keyboard left free they are being typed into another app; even
+        # grabbed, the gaps between two waits leak them through. An Esc mid-turn
+        # would reset_capture() under the session's feet, a Space would pause a
+        # recording it does not know is paused.
+        if STATE.talk_active and mode in ("cancel", "pause", "refine"):
+            return
+
         # Cancel the active recording / in-flight transcription (no insert).
         if mode == "cancel":
             ModeHandler.cancel_active()
@@ -589,8 +603,18 @@ class KeyboardHandler:
         Space (or the talk key itself) ends the turn now instead of waiting for
         the VAD to hear the pause; Enter ends the conversation and writes the
         text; Esc drops the whole thing.
+
+        With the keyboard left free (``TALK_FREE_KEYBOARD``) every one of those
+        keys is also landing in whatever the user is typing into, so none of
+        them may drive the session: only its own hotkey answers, and pressing
+        it again ends the session. ``start_talk_session`` is what stops that
+        press opening a second one.
         """
         import loquivox.config as config_module
+
+        if config_module.CFG.TALK_FREE_KEYBOARD:
+            return {code: "finish"
+                    for code in cls.trigger_codes("talk") | cls.trigger_codes("ai")}
 
         mapping: Dict[int, str] = {ecodes.KEY_SPACE: "send", ecodes.KEY_ESC: "cancel"}
         mapping.update({code: "finish" for code in _CONFIRM_CODES})
@@ -618,7 +642,14 @@ class KeyboardHandler:
         same condition as ``talk_listen_keys`` so the strip cannot offer a key
         that does nothing.
         """
+        import loquivox.config as config_module
+
+        cfg = config_module.CFG
         finish = "write it" if STATE.current_mode == "talk" else "end"
+        if cfg.TALK_FREE_KEYBOARD:
+            # The one key the session still answers to; the rest belong to
+            # whatever the user is typing into.
+            return (([cfg.HOTKEY_DEFS[STATE.current_mode][0]], finish),)
         hints: List[Tuple[List[str], str]] = [
             (["Space"], "end turn"), (["Enter"], finish), (["Esc"], "cancel"),
         ]

@@ -1696,6 +1696,22 @@ class SettingsDialog:
         cls._talk_speak_check.set_active(bool(config_module.CFG.TALK_SPEAK_REPLIES))
         body.pack_start(cls._talk_speak_check, False, False, 0)
 
+        cls._talk_free_kbd_check = Gtk.CheckButton(
+            label="Keep typing in other apps while the conversation runs")
+        cls._talk_free_kbd_check.set_active(bool(config_module.CFG.TALK_FREE_KEYBOARD))
+        cls._talk_free_kbd_check.set_tooltip_text(
+            "A session normally takes the keyboard for itself while it waits on "
+            "you, so nothing you press reaches the app underneath.\n\n"
+            "Ticked, it leaves it alone: you carry on typing, and your shortcuts "
+            "keep working. Every key then lands in that app too, so the session "
+            f"answers to {config_module.CFG.HOTKEY_DEFS['talk'][0]} / "
+            f"{config_module.CFG.HOTKEY_DEFS['ai'][0]} alone — pressed again, it "
+            "ends the session — and Space / Enter / Esc / S / T no longer do "
+            "anything to it. The review of the finished text still takes the "
+            "keyboard: it is a question with an answer."
+        )
+        body.pack_start(cls._talk_free_kbd_check, False, False, 0)
+
         cls._talk_barge_margin = Gtk.SpinButton.new_with_range(1.0, 6.0, 0.1)
         cls._talk_barge_margin.set_digits(1)
         cls._talk_barge_margin.set_value(float(config_module.CFG.TALK_BARGE_IN_MARGIN))
@@ -1717,8 +1733,9 @@ class SettingsDialog:
 
         body = cls._group(
             vbox, "Ending the conversation",
-            "Enter always writes the text — that one can't be turned off, so "
-            "there is always a way out. These are extras.")
+            "Enter always writes the text — or the talk key itself, with the "
+            "keyboard left free. That one can't be turned off, so there is "
+            "always a way out. These are extras.")
 
         cls._talk_phrase_check = Gtk.CheckButton(
             label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
@@ -1890,6 +1907,7 @@ class SettingsDialog:
         depth = cls._talk_depth.get_active_id() or "normal"
         semantic = bool(cls._talk_semantic_check.get_active())
         speak = bool(cls._talk_speak_check.get_active())
+        free_keyboard = bool(cls._talk_free_kbd_check.get_active())
         screenshot = bool(cls._talk_shot_check.get_active())
         auto_paste = bool(cls._talk_autopaste_check.get_active())
         buffer = cls._talk_instructions.get_buffer()
@@ -1897,6 +1915,7 @@ class SettingsDialog:
                                        buffer.get_end_iter(), False).strip()
         try:
             update_section("talk", {
+                "free_keyboard": free_keyboard,
                 "finish_on_phrase": phrase,
                 "finish_by_model": by_model,
                 "depth": depth,

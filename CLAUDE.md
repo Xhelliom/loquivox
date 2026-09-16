@@ -200,6 +200,26 @@ The cascade, step by step:
    next wait starts — but takes the exclusive grab only inside
    `with keys.exclusive():`, around the waits themselves. Never hold a grab
    across a network call: a hung request would freeze the user's keyboard.
+
+   `CFG.TALK_FREE_KEYBOARD` (Settings → Talk, off by default) drops the grab
+   altogether: `exclusive(grab=False)`, passed by `_talk_listen` and
+   `_talk_converse_server`, so the user keeps typing and keeps their shortcuts
+   in whatever app has the focus while they talk. The mouse was never grabbed,
+   so nothing else changes. What *does* change is that every key now lands in
+   that app as well, which makes the session's own key map a liability rather
+   than a convenience: `talk_listen_keys()` therefore answers to the session's
+   hotkey alone (`talk`/`ai` → "finish", the same key that opened it — a second
+   session is refused by `start_talk_session`'s `talk_active` guard), and
+   `talk_hints()` shows that one key and nothing else. Space, Enter, Esc, S
+   and T belong to the app being typed into.
+
+   The global session hotkeys need the same treatment and do **not** get it
+   from the grab: `_on_press` drops `cancel`/`pause`/`refine` outright while
+   `STATE.talk_active`, free keyboard or not. Even a grabbed session leaks them
+   through the gaps between two waits, and an Esc landing there is a
+   `reset_capture()` under the session's feet. The F6 review panel keeps its
+   grab: it is a question waiting for an answer, not a conversation running
+   beside the user's work. `tests/test_free_keyboard.py` pins all of it.
 2. Each turn: `_talk_listen` records until the turn ends (see below),
    `_talk_transcribe` transcribes (streaming backends included) and applies the
    hallucination guard, `TalkSession.reply` answers, and `_talk_speak` speaks
