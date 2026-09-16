@@ -314,9 +314,12 @@ class ModeHandler:
         session never takes, so this is the way in when the keyboard is free.
 
         ``action`` is one of ``talk_listen_keys``'s own verdicts ("send",
-        "finish", "cancel") or "free", which flips the keyboard switch for the
-        session and stores it as the new default. Called on the GTK thread; the
-        conversation loop picks it up on its next poll.
+        "finish", "cancel", "screen", "select") or "free", which flips the
+        keyboard switch for the session and stores it as the new default.
+        Called on the GTK thread; the conversation loop picks it up on its next
+        poll. Clicking costs the session nothing: the bubble refuses focus
+        while it is up, so the window S captures and the selection T copies are
+        still the ones under the cursor.
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
 
@@ -326,7 +329,7 @@ class ModeHandler:
             ModeHandler._remember_free_keyboard(free)
             print(f"⌨️  Keyboard {'left to you' if free else 'held by the session'}")
             return
-        if action in ("send", "finish", "cancel"):
+        if action in ("send", "finish", "cancel", "screen", "select"):
             STATE.talk_click = action
 
     @staticmethod

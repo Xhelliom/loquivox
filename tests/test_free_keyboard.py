@@ -82,6 +82,10 @@ try:
 
     # A clicked button is read exactly once, like a key press, and only the
     # session's own verdicts get through.
+    for verdict in ("finish", "cancel", "screen", "select"):
+        mode_module.ModeHandler.talk_click(verdict)
+        assert mode_module.ModeHandler._talk_clicked() == verdict, \
+            f"the bar offers {verdict} and the loop never sees it"
     mode_module.ModeHandler.talk_click("finish")
     assert mode_module.ModeHandler._talk_clicked() == "finish"
     assert mode_module.ModeHandler._talk_clicked() is None, "a click was read twice"
@@ -96,7 +100,8 @@ try:
     for token, value in bubble.ChatOverlay._talk_bar_bits().items():
         assert "{" + token + "}" in html, f"the bar renders {token}, the page has no slot"
         html = html.replace("{" + token + "}", value)
-    assert "talkAction('cancel')" in html and "talkAction('free')" in html
+    for verdict in ("cancel", "free", "screen", "select"):
+        assert f"talkAction('{verdict}')" in html, f"no button for {verdict}"
     print("✓ the talk bar renders with no placeholder left")
 finally:
     config_module.CFG = base

@@ -223,10 +223,16 @@ The cascade, step by step:
 
    Which leaves the session with no way to be *dropped* — its hotkey means
    "finish", and under F6 finishing writes the text. So the bubble grows a
-   `.talk-bar`: `🔓/🔒 Keyboard`, `End turn` (cascade only — the server engines
-   close turns themselves, and a button they ignore is a dead one), `End` /
-   `Write it`, `Drop`. The mouse is the one device a session never takes, which
-   is what makes buttons the right answer here rather than one more key.
+   `.talk-bar`: `🔓/🔒 Keyboard`, `Look`, `Selection`, `End turn` (cascade only
+   — the server engines close turns themselves, and a button they ignore is a
+   dead one), `End` / `Write it`, `Drop`. The mouse is the one device a session
+   never takes, which is what makes buttons the right answer here rather than
+   one more key. Every key the free keyboard gives up has a button: `Look` and
+   `Selection` are S and T, and `Look` is rendered under `_talk_looks()` — the
+   very condition the key is, so a capture nobody enabled has no button either.
+   Clicking costs the session nothing because the bubble refuses focus while it
+   is up (`KeyboardMode.NONE` / `set_accept_focus(not talk)`): the window S
+   captures and the selection T copies are still the ones under the cursor.
    A click posts `{action:'Talk'}` → `ModeHandler.talk_click`, which leaves a
    verdict in `STATE.talk_click` for the conversation loop to pick up on its
    next poll, exactly where a key press would have landed (`_talk_clicked()`

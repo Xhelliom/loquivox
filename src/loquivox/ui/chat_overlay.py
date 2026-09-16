@@ -330,6 +330,9 @@ html, body {{
 .talk .talk-bar {{
   flex-shrink: 0;
   display: flex; align-items: center; gap: 6px;
+  /* Five or six buttons in a bubble sized to its content: they wrap rather
+     than force the window wider than the text it is showing. */
+  flex-wrap: wrap;
   padding: 8px 12px 10px;
   border-top: 1px solid {accent_alpha20};
 }}
@@ -543,6 +546,10 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
   <div class="talk-bar">
     <button class="keys{free_class}" id="keys-btn" onclick="talkAction('free')"
             title="{free_title}">{free_label}</button>
+    {look_btn}
+    <button onclick="talkAction('select')"
+            title="Send whatever is highlighted right now as the text to work from (T)"
+            >Selection</button>
     <span class="spacer"></span>
     {send_btn}
     <button onclick="talkAction('finish')">{finish_label}</button>
@@ -995,6 +1002,12 @@ class ChatOverlay(Gtk.Window):
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
 
         free = KeyboardHandler.free_keyboard()
+        # Same condition as the S key, for the same reason: a button that
+        # uploads the window must not exist for someone who turned the capture
+        # off. Selection has no such cost and is always there.
+        look = ('<button onclick="talkAction(\'screen\')" '
+                'title="Look at the focused window again (S)">Look</button>'
+                if KeyboardHandler._talk_looks() else "")
         # "End turn" is the cascade's alone: the server engines close turns
         # themselves and ignore the key, so offering the button would be
         # offering a dead one.
@@ -1013,6 +1026,7 @@ class ChatOverlay(Gtk.Window):
                 "to drive the conversation."),
             "finish_label": "Write it" if STATE.current_mode == "talk" else "End",
             "send_btn": send,
+            "look_btn": look,
         }
 
     def _on_policy_decision(self, webview, decision, decision_type) -> bool:
