@@ -208,6 +208,86 @@ The cascade, step by step:
    next wait starts — but takes the exclusive grab only inside
    `with keys.exclusive():`, around the waits themselves. Never hold a grab
    across a network call: a hung request would freeze the user's keyboard.
+
+   `CFG.TALK_FREE_KEYBOARD` (Settings → Talk, off by default) drops the grab
+   altogether: `exclusive(grab=False)`, passed by `_talk_listen` and
+   `_talk_converse_server`, so the user keeps typing and keeps their shortcuts
+   in whatever app has the focus while they talk. The mouse was never grabbed,
+   so nothing else changes. What *does* change is that every key now lands in
+   that app as well, which makes the session's own key map a liability rather
+   than a convenience: `talk_listen_keys()` therefore answers to the session's
+   hotkey alone, and `talk_hints()` shows that one key and nothing else. Space,
+   Enter, Esc, S and T belong to the app being typed into. The actions do not
+   go away with the keys; they move to the mouse (below).
+
+   That one key does **not** go through the session's key map — which is empty
+   in this mode — but through the listener: `start_talk_session` answers a
+   press during `talk_active` by queueing "finish". The listener is the only
+   thing that matched the whole chord, and a map built from bare keycodes would
+   have ended the session on the `d` of a `CTRL+SHIFT+D` typed into an editor.
+   Only while the keyboard is free: grabbed, the same key means "end this turn"
+   and one key cannot mean both.
+
+   The global session hotkeys need the same treatment and do **not** get it
+   from the grab. `_on_press` returns on `STATE.talk_active` *before* reaching
+   `cancel`/`pause`/`refine`, free keyboard or not — even a grabbed session
+   leaks them through the gaps between two waits, and an Esc landing there is a
+   `reset_capture()` under the session's feet. The guard is placed rather than
+   named: the three branches that must survive a session (`talk`/`ai`, which
+   end it, and `pin`/`tts`, which have nothing to do with it) sit above it, so
+   "a running session protects me" is what any mode added later inherits. The
+   F6 review panel keeps its grab: it is a question waiting for an answer, not
+   a conversation running beside the user's work.
+   `tests/test_free_keyboard.py` pins all of it.
+
+   `pin` and `tts` sit **below** that guard too, which they did not at first:
+   unpinning fades the bubble out and destroys it, so an F9 pressed in an
+   editor left the conversation with no bubble and brought the side panel back
+   in its place at the next message. There is no such thing as a global hotkey
+   that is harmless mid-session.
+
+   Which leaves the session with no way to be *dropped* — its hotkey means
+   "finish", and under F6 finishing writes the text. So the bubble grows a
+   `.talk-bar`, and the mouse is the one device a session never takes, which is
+   what makes buttons the right answer here rather than one more key. Clicking
+   costs the session nothing because the bubble refuses focus while it is up
+   (`KeyboardMode.NONE` / `set_accept_focus(not talk)`): the window `Look again`
+   captures and the selection `Send selection` copies are still the ones under
+   the cursor. A click posts `{action:'Talk'}` → `ModeHandler.talk_click`,
+   which queues a verdict in `STATE.talk_click` for the conversation loop to
+   pick up on its next poll, exactly where a key press would have landed.
+   `contentHeight()` counts the bar, or the bubble is sized to the conversation
+   alone and its last turn hides behind it. The bar is empty while the *last*
+   message is a `result`: the review panel has its own verdicts and its own
+   grabbed keys, and these buttons would drive a loop that has stopped
+   listening — the last message rather than any, because "keep talking" (V)
+   goes back to the conversation with the old candidate still in the history,
+   and the bar has to come back with it.
+
+   One action is the mouse's to lose: `Look again` is not rendered under
+   `screenshot_region = "cursor"`, because clicking it puts the pointer on the
+   bubble and the capture would frame the bubble. The **key** still does it —
+   the pointer never moved.
+
+   **`KeyboardHandler.talk_actions()` is the single list of what a session can
+   be told to do** — `(verdict, keycodes, key name, what it does)` — and the
+   key map, the hint strip and the buttons are all views of it, down to the
+   wording (`what.capitalize()` is the button's label). This is `_REVIEW_KEYS`'
+   trick one level up, and it is not theoretical: said three times, the list
+   had already drifted — the strip offered "Space: end turn" under the server
+   engines, which close turns themselves and ignore that key. Conditions live
+   in the table, not in each view: Space exists for `STATE.talk_engine ==
+   "cascade"` (set when the engine actually opens, so a server engine that
+   falls back is still right), and S/`Look again` under `_talk_looks()`.
+
+   The `🔓` switch flips the whole thing mid-conversation, and there is no
+   runtime copy of the answer: `ModeHandler._remember_free_keyboard` writes
+   config.toml and reloads `CFG` — reloading *is* how it applies, and the next
+   session opens the way this one ended. `KeyboardHandler.free_keyboard()` is
+   the single reader. `ModeHandler._talk_wait()` is where both loops wait, so
+   it is the one place the switch is followed: it compares it against
+   `keys.grabbed` and calls `keys.follow()`, rebuilds the key map and re-shows
+   the overlay when they disagree.
 2. Each turn: `_talk_listen` records until the turn ends (see below),
    `_talk_transcribe` transcribes (streaming backends included) and applies the
    hallucination guard, `TalkSession.reply` answers, and `_talk_speak` speaks

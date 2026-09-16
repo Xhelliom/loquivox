@@ -3,8 +3,10 @@ Unified handler for all recording modes.
 """
 from __future__ import annotations
 
+import queue
 import threading
 import time
+from dataclasses import replace
 from typing import Optional, Tuple
 
 import numpy as np
@@ -293,11 +295,26 @@ class ModeHandler:
         transcription, the model and the user's keys), and holds the keyboard
         for its whole life — see ``GrabbedKeys``.
         """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
         if STATE.talk_active or STATE.recording:
+            if STATE.talk_active and KeyboardHandler.free_keyboard():
+                # With the keyboard free this press is how a session ENDS, and
+                # the listener is the one thing that matched the whole chord —
+                # a key map built from bare keycodes would end the session on
+                # the "d" of CTRL+SHIFT+D typed into an editor. Not while the
+                # keyboard is grabbed: there the same key means "end this turn"
+                # (talk_listen_keys), and one key cannot mean both.
+                STATE.talk_click.put("finish")
             return
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        # Anything clicked before now belongs to the session that just ended —
+        # drained here rather than in its `finally`, which a click landing
+        # between that and the bar going away would slip past.
+        while ModeHandler._talk_clicked() is not None:
+            pass
         selection = ClipboardService.copy_selected()
         # Up front, before anything that can block. Opening the keyboards takes
         # ~350 ms and the conversation engine up to a second more; the user
@@ -306,6 +323,79 @@ class ModeHandler:
         ChatManager.set_talk(True)      # deferred — see ChatManager._OPEN_DELAY_MS
         threading.Thread(target=ModeHandler._talk_worker, args=(write, selection),
                          daemon=True).start()
+
+    @staticmethod
+    def talk_click(action: str) -> None:
+        """
+        A button in the talk bubble was clicked — the mouse is the one thing a
+        session never takes, so this is the way in when the keyboard is free.
+
+        ``action`` is one of the verdicts ``KeyboardHandler.talk_actions``
+        offers, or "free", which flips the keyboard switch. Called on the GTK
+        thread; the conversation loop picks it up on its next poll. Clicking
+        costs the session nothing: the bubble refuses focus while it is up, so
+        the window S captures and the selection T copies are still the ones
+        under the cursor.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
+        if action == "free":
+            ModeHandler._remember_free_keyboard(not KeyboardHandler.free_keyboard())
+        elif any(action == verdict for verdict, *_ in KeyboardHandler.talk_actions()):
+            STATE.talk_click.put(action)
+
+    @staticmethod
+    def _remember_free_keyboard(free: bool) -> None:
+        """
+        Flip the keyboard switch, and keep it: written to config.toml and
+        reloaded, so ``free_keyboard()`` answers the new way from the next poll
+        on and the session after this one opens the way this one ended. No
+        runtime copy — reloading IS how it applies.
+        """
+        from loquivox.config_io import ConfigWriteError, update_section
+        try:
+            update_section("talk", {"free_keyboard": free})
+            config_module.reload_config()
+        except ConfigWriteError as e:
+            # The preference is lost, the session's answer is not: this click
+            # has to do something or the button reads as broken.
+            print(f"⚠️  Keyboard preference not saved: {e}")
+            config_module.CFG = replace(config_module.CFG, TALK_FREE_KEYBOARD=free)
+        # The Settings page is the other writer of this key; an open one would
+        # write its stale checkbox back on the next Apply.
+        from loquivox.ui.settings_dialog import SettingsDialog
+        SettingsDialog.sync_talk_switch()
+        print(f"⌨️  Keyboard {'left to you' if free else 'held by the session'}")
+
+    @staticmethod
+    def _talk_wait(keys, session, timeout: float) -> Optional[str]:
+        """
+        Wait ``timeout`` for the user to say what to do, by key or by button.
+
+        The one place a conversation loop waits, so the one place the bubble's
+        keyboard switch is followed: flipped mid-wait, the grab, the key map
+        and the hint strip all move with it. Both loops call this; neither
+        knows how the answer arrived.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
+        mapping = KeyboardHandler.talk_listen_keys()
+        pressed = keys.poll(mapping, timeout) or ModeHandler._talk_clicked()
+        if KeyboardHandler.free_keyboard() == keys.grabbed:  # flipped since we asked
+            keys.follow(grab=not keys.grabbed)
+            # The strip, not the whole overlay: a re-show clears the partial
+            # transcript the user is watching themselves speak into, and only
+            # which keys are on offer has changed.
+            OverlayManager.set_hints(KeyboardHandler.talk_hints())
+        return pressed
+
+    @staticmethod
+    def _talk_clicked() -> Optional[str]:
+        """Take the oldest pending click, if any — read once, like a key press."""
+        try:
+            return STATE.talk_click.get_nowait()
+        except queue.Empty:
+            return None
 
     @staticmethod
     def _show_talk_overlay(write: bool = True) -> None:
@@ -348,7 +438,16 @@ class ModeHandler:
                     print("⚠️  Talk mode needs keyboard access — is your user in "
                           "the 'input' group?")
                     return
-                if write:
+                # The keys named here are the ones talk_listen_keys answers to,
+                # which with the keyboard left free is the session's own hotkey
+                # and nothing else.
+                cfg = config_module.CFG
+                own = cfg.HOTKEY_DEFS["talk" if write else "ai"][0]
+                if cfg.TALK_FREE_KEYBOARD:
+                    print(f"{'🗣️  Talk' if write else '💬 Chat'} mode — speak "
+                          f"freely, the keyboard stays yours. {own}: "
+                          f"{'write the text' if write else 'end'}")
+                elif write:
                     print("🗣️  Talk mode — speak freely. Enter: write the text · "
                           "Space: end this turn · Esc: drop the conversation")
                 else:
@@ -371,6 +470,7 @@ class ModeHandler:
                         return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
+            STATE.talk_engine = "cascade"
             STATE.talk_session = None
             session.desks.close()        # stop the plugins watching for this session
             ModeHandler.reset_capture()  # a turn may have died mid-flight
@@ -492,7 +592,16 @@ class ModeHandler:
         turns land in the same ``TalkSession``, and the writing pass that
         follows is a text completion that never learns which ran.
         """
+        # What the session can be *told* to do depends on who holds it: the
+        # server engines close turns themselves and ignore "end turn". Set here
+        # rather than read from CFG where it is needed, because a server engine
+        # that cannot open falls back to the cascade and CFG never learns — and
+        # normalised first, or a typo in config.toml reads as a server engine
+        # while the cascade actually runs, losing it Space.
         engine = config_module.CFG.TALK_ENGINE
+        if engine not in ("realtime", "live"):
+            engine = "cascade"
+        STATE.talk_engine = engine
         if engine == "realtime":
             from loquivox.services.realtime_talk import RealtimeTalk
             return ModeHandler._talk_converse_server(session, keys, RealtimeTalk,
@@ -528,7 +637,10 @@ class ModeHandler:
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
 
         cfg = config_module.CFG
-        ModeHandler._show_talk_overlay()
+        # session.write, never the default: this re-show is what STATE.current_mode
+        # ends up being for the rest of the session, and an F4 chat relabelled
+        # "talk" loses S (_talk_looks) and offers F6 as the key that ends it.
+        ModeHandler._show_talk_overlay(session.write)
         OverlayManager.set_status("Connecting…")
         talk = engine(session)
         try:
@@ -541,14 +653,14 @@ class ModeHandler:
             # Falling straight through to the cascade would leave both behind,
             # and the cascade is about to want the microphone.
             talk.close()
+            STATE.talk_engine = "cascade"
             return ModeHandler._talk_converse(session, keys)
 
-        mapping = KeyboardHandler.talk_listen_keys()
         cancelled = False
         try:
-            with keys.exclusive():
+            with keys.exclusive(grab=not KeyboardHandler.free_keyboard()):
                 while True:
-                    pressed = keys.poll(mapping, 0.05)
+                    pressed = ModeHandler._talk_wait(keys, session, 0.05)
                     talk.tick()
                     if talk.push_context():
                         print(f"👁️  Screen context handed to the {label} session")
@@ -700,7 +812,7 @@ class ModeHandler:
 
         cfg = config_module.CFG
         STATE.vad = None
-        ModeHandler._show_talk_overlay()
+        ModeHandler._show_talk_overlay(session.write)  # never the default — see above
 
         # ready_detector() never blocks: while the model is still downloading
         # in the background, this turn simply ends on silence like before.
@@ -740,16 +852,17 @@ class ModeHandler:
         stream = STATE.stream_session
         remote_turns = stream is not None and stream.semantic_turns
 
-        mapping = KeyboardHandler.talk_listen_keys()
         action = "send"
         deadline = time.monotonic() + cfg.TALK_TURN_TIMEOUT
         # Exclusive only while we wait on the user: no keystroke of this turn
         # reaches the app underneath, and nothing here can block on the network.
-        with keys.exclusive():
+        # Unless the user asked for the keyboard back, in which case the turn is
+        # driven by the session's own hotkey alone (see talk_listen_keys).
+        with keys.exclusive(grab=not KeyboardHandler.free_keyboard()):
             while True:
                 # A short poll: this is what stands between the detector saying
                 # "finished" and the recording actually stopping.
-                pressed = keys.poll(mapping, 0.03)
+                pressed = ModeHandler._talk_wait(keys, session, 0.03)
                 if pressed == "screen":
                     # Looking again does not end the turn: the user is very
                     # likely mid-sentence about the thing they just changed.

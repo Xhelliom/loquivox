@@ -136,6 +136,16 @@ tts        = ["F10"]
 # Talk mode (F6): a spoken conversation with the AI that ends in ONE generated
 # text, typed at the cursor and left on the clipboard.
 
+# A session normally takes the keyboard for itself while it waits on you, so
+# nothing you press reaches the app underneath. true leaves it alone: you keep
+# typing and your shortcuts keep working while you talk. Every key then lands in
+# that app too, so the session answers to the talk key alone (F6 / F4, pressed
+# again to end it) and Space / Enter / Esc / S / T no longer do anything to it.
+# The review of the finished text still takes the keyboard. The talk bubble
+# carries the same switch, so it can be flipped mid-conversation — and what it
+# is flipped to is written back here.
+free_keyboard = false
+
 # Turn detection, in two layers. The energy VAD hears the pause; the semantic
 # model decides whether that pause actually ends your sentence.
 #
