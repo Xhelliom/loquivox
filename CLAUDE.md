@@ -220,6 +220,28 @@ The cascade, step by step:
    `reset_capture()` under the session's feet. The F6 review panel keeps its
    grab: it is a question waiting for an answer, not a conversation running
    beside the user's work. `tests/test_free_keyboard.py` pins all of it.
+
+   Which leaves the session with no way to be *dropped* — its hotkey means
+   "finish", and under F6 finishing writes the text. So the bubble grows a
+   `.talk-bar`: `🔓/🔒 Keyboard`, `End turn` (cascade only — the server engines
+   close turns themselves, and a button they ignore is a dead one), `End` /
+   `Write it`, `Drop`. The mouse is the one device a session never takes, which
+   is what makes buttons the right answer here rather than one more key.
+   A click posts `{action:'Talk'}` → `ModeHandler.talk_click`, which leaves a
+   verdict in `STATE.talk_click` for the conversation loop to pick up on its
+   next poll, exactly where a key press would have landed (`_talk_clicked()`
+   reads it once, like a key). `contentHeight()` counts the bar, or the bubble
+   is sized to the conversation alone and its last turn hides behind it.
+
+   The `🔓` switch flips the whole thing mid-conversation:
+   `STATE.talk_free_keyboard` outranks `CFG.TALK_FREE_KEYBOARD`, and
+   `KeyboardHandler.free_keyboard()` is the single reader everything asks —
+   the key map, the hint strip, and both conversation loops, which compare it
+   against what they opened with and call `keys.follow()`, rebuild the mapping
+   and re-show the overlay when it changed. It is also written back to
+   config.toml, so the next session opens the way this one ended, and cleared
+   in the worker's `finally` (it is the *session's* answer, not a new default
+   hiding in runtime state).
 2. Each turn: `_talk_listen` records until the turn ends (see below),
    `_talk_transcribe` transcribes (streaming backends included) and applies the
    hallucination guard, `TalkSession.reply` answers, and `_talk_speak` speaks

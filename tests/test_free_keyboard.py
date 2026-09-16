@@ -67,6 +67,37 @@ try:
         STATE.talk_active = False
         mode_module.ModeHandler.cancel_active = real
     print("✓ the global Esc leaves a conversation alone, and only a conversation")
+
+    # The bubble's switch: a session answer that outranks the setting, and is
+    # dropped when the session ends (the worker's finally).
+    config_module.CFG = replace(base, TALK_FREE_KEYBOARD=False)
+    assert not KeyboardHandler.free_keyboard()
+    STATE.talk_free_keyboard = True           # what talk_click("free") writes
+    try:
+        assert KeyboardHandler.free_keyboard(), "the switch loses to the setting"
+        assert set(KeyboardHandler.talk_listen_keys().values()) == {"finish"}
+    finally:
+        STATE.talk_free_keyboard = None
+    assert not KeyboardHandler.free_keyboard(), "the switch outlived its session"
+
+    # A clicked button is read exactly once, like a key press, and only the
+    # session's own verdicts get through.
+    mode_module.ModeHandler.talk_click("finish")
+    assert mode_module.ModeHandler._talk_clicked() == "finish"
+    assert mode_module.ModeHandler._talk_clicked() is None, "a click was read twice"
+    mode_module.ModeHandler.talk_click("rm -rf")
+    assert mode_module.ModeHandler._talk_clicked() is None, "anything drives the session"
+    print("✓ the switch is the session's, and a click is read once")
+
+    # Every token the talk bar declares is one the render fills in: a leftover
+    # {placeholder} is a button with a brace for a label.
+    import loquivox.ui.chat_overlay as bubble
+    html = bubble.CHAT_HTML_TEMPLATE
+    for token, value in bubble.ChatOverlay._talk_bar_bits().items():
+        assert "{" + token + "}" in html, f"the bar renders {token}, the page has no slot"
+        html = html.replace("{" + token + "}", value)
+    assert "talkAction('cancel')" in html and "talkAction('free')" in html
+    print("✓ the talk bar renders with no placeholder left")
 finally:
     config_module.CFG = base
 print("\n✓ free-keyboard checks pass")

@@ -1708,7 +1708,9 @@ class SettingsDialog:
             f"{config_module.CFG.HOTKEY_DEFS['ai'][0]} alone — pressed again, it "
             "ends the session — and Space / Enter / Esc / S / T no longer do "
             "anything to it. The review of the finished text still takes the "
-            "keyboard: it is a question with an answer."
+            "keyboard: it is a question with an answer.\n\n"
+            "The bubble carries the same switch, so it can also be flipped "
+            "mid-conversation — and what you flip it to lands back here."
         )
         body.pack_start(cls._talk_free_kbd_check, False, False, 0)
 

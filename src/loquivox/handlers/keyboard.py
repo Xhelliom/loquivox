@@ -97,6 +97,16 @@ class GrabbedKeys:
         finally:
             self._ungrab()
 
+    def follow(self, grab: bool) -> None:
+        """
+        Take or drop the grab in the middle of a wait, when the user flips the
+        bubble's keyboard switch. A no-op when it already matches.
+        """
+        if grab and not self._grabbed:
+            self._grab()
+        elif not grab and self._grabbed:
+            self._ungrab()
+
     def _grab(self) -> None:
         for dev in self._grabbable:
             try:
@@ -595,6 +605,22 @@ class KeyboardHandler:
 
     # --- Talk mode key maps --------------------------------------------------
 
+    @staticmethod
+    def free_keyboard() -> bool:
+        """
+        Whether this talk session leaves the keyboard to the user.
+
+        ``CFG.TALK_FREE_KEYBOARD`` is the default; the bubble's switch overrides
+        it for the session in ``STATE.talk_free_keyboard``. Everything that has
+        to agree on the answer — the key map, the hint strip, the grab itself —
+        asks here.
+        """
+        import loquivox.config as config_module
+
+        if STATE.talk_free_keyboard is not None:
+            return STATE.talk_free_keyboard
+        return bool(config_module.CFG.TALK_FREE_KEYBOARD)
+
     @classmethod
     def talk_listen_keys(cls) -> Dict[int, str]:
         """
@@ -610,9 +636,7 @@ class KeyboardHandler:
         it again ends the session. ``start_talk_session`` is what stops that
         press opening a second one.
         """
-        import loquivox.config as config_module
-
-        if config_module.CFG.TALK_FREE_KEYBOARD:
+        if cls.free_keyboard():
             return {code: "finish"
                     for code in cls.trigger_codes("talk") | cls.trigger_codes("ai")}
 
@@ -646,7 +670,7 @@ class KeyboardHandler:
 
         cfg = config_module.CFG
         finish = "write it" if STATE.current_mode == "talk" else "end"
-        if cfg.TALK_FREE_KEYBOARD:
+        if cls.free_keyboard():
             # The one key the session still answers to; the rest belong to
             # whatever the user is typing into.
             return (([cfg.HOTKEY_DEFS[STATE.current_mode][0]], finish),)

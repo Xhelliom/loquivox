@@ -323,6 +323,28 @@ html, body {{
 .talk .chat-scroll-area {{ will-change: auto; transform: none; }}
 /* The keyboard is grabbed for the whole session — there is nothing to type into. */
 .talk .chat-input-bar {{ display: none; }}
+/* The session's controls, for the one input device it never takes: the mouse.
+   With the keyboard left free these buttons are the only way to end a turn or
+   drop the conversation, so they are not decoration. Hidden outside talk. */
+.talk-bar {{ display: none; }}
+.talk .talk-bar {{
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid {accent_alpha20};
+}}
+.talk-bar button {{
+  border: 1px solid {accent_alpha20};
+  background: {white_alpha05}; color: {text};
+  font-family: inherit; font-size: 11px; line-height: 1;
+  padding: 6px 10px; border-radius: 9px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}}
+.talk-bar button:hover {{ background: {accent_alpha20}; border-color: {accent}; }}
+.talk-bar button:active {{ transform: scale(0.97); }}
+.talk-bar .spacer {{ flex: 1; }}
+.talk-bar .drop {{ border-color: {white_alpha10}; color: {dim_text}; }}
+.talk-bar .keys.free {{ background: {accent_alpha30}; border-color: {accent}; }}
 .talk .chat-container {{ padding-bottom: 12px; }}
 .talk .chat-scroll-area {{ padding-bottom: 4px; }}
 /* The bubble is sized to its content: a trailing margin under the last turn
@@ -360,6 +382,16 @@ function post(msg) {
 }
 
 function signalDrag() { post({action: 'Drag'}); }
+function talkAction(key) {
+  post({action: 'Talk', key: key});
+  if (key !== 'free') return;
+  // Answer the click now rather than at the next message: the page is only
+  // re-rendered when a turn lands, and a switch that looks stuck reads as a
+  // switch that did nothing. The render is what it ends up agreeing with.
+  const btn = document.getElementById('keys-btn');
+  if (btn) btn.textContent = btn.classList.toggle('free')
+    ? '🔓 Keyboard free' : '🔒 Keyboard held';
+}
 function signalClose() { post({action: 'Close'}); }
 
 // --- Talk bubble: live text and content-driven height ----------------------
@@ -368,8 +400,13 @@ let lastHeight = 0;
 function contentHeight() {
   const hint = document.querySelector('.pin-hint');
   const chat = document.getElementById('chat');
+  // The talk bar counts too, or the bubble is sized to the conversation alone
+  // and the last turn is cut off behind it. offsetHeight is 0 when it is
+  // display:none, which is every mode but talk.
+  const bar = document.querySelector('.talk-bar');
   return Math.ceil((hint ? hint.offsetHeight + 16 : 0) +
-                   (chat ? chat.scrollHeight : 0)) + 12;
+                   (chat ? chat.scrollHeight : 0) +
+                   (bar ? bar.offsetHeight : 0)) + 12;
 }
 
 // Tell Python how tall the bubble should be. Ignored below a few pixels so a
@@ -502,6 +539,14 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
   {pin_hint}
   <div class="chat-scroll-area" id="scroll-area">
     <div id="chat" class="chat-container">{messages}<div id="live"></div></div>
+  </div>
+  <div class="talk-bar">
+    <button class="keys{free_class}" id="keys-btn" onclick="talkAction('free')"
+            title="{free_title}">{free_label}</button>
+    <span class="spacer"></span>
+    {send_btn}
+    <button onclick="talkAction('finish')">{finish_label}</button>
+    <button class="drop" onclick="talkAction('cancel')">Drop</button>
   </div>
   <div class="chat-input-bar">
     <textarea id="chat-input" rows="1" placeholder="Type a message…"></textarea>
@@ -766,6 +811,11 @@ class ChatOverlay(Gtk.Window):
             elif action == 'Close':
                 from loquivox.managers.chat import ChatManager
                 ChatManager.hide_manual()
+            elif action == 'Talk':
+                # The session's own controls — the mouse is the one device it
+                # never grabs, so this is the way in with the keyboard free.
+                from loquivox.handlers.mode import ModeHandler
+                ModeHandler.talk_click(msg.get('key', ''))
             elif action == 'KeepAlive':
                 # Pause the auto-hide while the input box has focus, resume on blur.
                 from loquivox.managers.chat import ChatManager
@@ -923,6 +973,8 @@ class ChatOverlay(Gtk.Window):
         html = html.replace("{pin_hint}", pin_hint)
         html = html.replace("{talk_class}", " talk" if self.talk else "")
         html = html.replace("{TALK}", "true" if self.talk else "false")
+        for token, value in self._talk_bar_bits().items():
+            html = html.replace("{" + token + "}", value)
         html = html.replace("{CHAT_CSS}", formatted_css)
         html = html.replace("{CHAT_JS}", CHAT_JS)
 
@@ -931,6 +983,37 @@ class ChatOverlay(Gtk.Window):
         self._ready = False
         self._pending_js = None
         self.webview.load_html(html, None)
+
+    @staticmethod
+    def _talk_bar_bits() -> Dict[str, str]:
+        """
+        The talk bar's labels, read fresh on every render — the page is reloaded
+        for each message, so this is also how the keyboard switch stays in step
+        with whatever flipped it (the bar itself, or Settings → Talk).
+        """
+        import loquivox.config as config_module
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
+        free = KeyboardHandler.free_keyboard()
+        # "End turn" is the cascade's alone: the server engines close turns
+        # themselves and ignore the key, so offering the button would be
+        # offering a dead one.
+        # ponytail: reads the setting, not the engine that actually opened —
+        # a session that fell back to the cascade shows no button, and the VAD
+        # ends its turns anyway.
+        send = ('<button onclick="talkAction(\'send\')">End turn</button>'
+                if config_module.CFG.TALK_ENGINE == "cascade" else "")
+        return {
+            "free_class": " free" if free else "",
+            "free_label": "🔓 Keyboard free" if free else "🔒 Keyboard held",
+            "free_title": html_lib.escape(
+                "The session takes the keyboard while it waits on you. Click to "
+                "leave it yours: you keep typing and your shortcuts keep working "
+                "in whatever app has the focus, and these buttons become the way "
+                "to drive the conversation."),
+            "finish_label": "Write it" if STATE.current_mode == "talk" else "End",
+            "send_btn": send,
+        }
 
     def _on_policy_decision(self, webview, decision, decision_type) -> bool:
         """Handle URI navigations (copy://, settings://)."""

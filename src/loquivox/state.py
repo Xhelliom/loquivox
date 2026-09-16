@@ -115,6 +115,15 @@ class AppState:
     # True once this talk session has said that the room drowns the microphone
     # (services/talk.py echo_note); saying it once a reply would be nagging.
     echo_advised: bool = False
+    # This session's answer to "is the keyboard the user's?", flipped live by
+    # the bubble's switch. None outside a session and until it is touched, which
+    # is what makes CFG.TALK_FREE_KEYBOARD the default rather than a one-time
+    # seed — see KeyboardHandler.free_keyboard().
+    talk_free_keyboard: Optional[bool] = None
+    # One action clicked in the talk bubble ("send" / "finish" / "cancel"),
+    # waiting for the conversation loop to pick it up. The mouse is never
+    # grabbed, so this is the one way in when the keyboard is left free.
+    talk_click: Optional[str] = None
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance

@@ -308,6 +308,45 @@ class ModeHandler:
                          daemon=True).start()
 
     @staticmethod
+    def talk_click(action: str) -> None:
+        """
+        A button in the talk bubble was clicked — the mouse is the one thing a
+        session never takes, so this is the way in when the keyboard is free.
+
+        ``action`` is one of ``talk_listen_keys``'s own verdicts ("send",
+        "finish", "cancel") or "free", which flips the keyboard switch for the
+        session and stores it as the new default. Called on the GTK thread; the
+        conversation loop picks it up on its next poll.
+        """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
+        if action == "free":
+            free = not KeyboardHandler.free_keyboard()
+            STATE.talk_free_keyboard = free
+            ModeHandler._remember_free_keyboard(free)
+            print(f"⌨️  Keyboard {'left to you' if free else 'held by the session'}")
+            return
+        if action in ("send", "finish", "cancel"):
+            STATE.talk_click = action
+
+    @staticmethod
+    def _remember_free_keyboard(free: bool) -> None:
+        """Persist the switch so the next session opens the way this one ended."""
+        from loquivox.config_io import ConfigWriteError, update_section
+        try:
+            update_section("talk", {"free_keyboard": free})
+        except ConfigWriteError as e:
+            print(f"⚠️  Keyboard preference not saved: {e}")
+            return
+        config_module.reload_config()
+
+    @staticmethod
+    def _talk_clicked() -> Optional[str]:
+        """Take the pending click, if any — read once, like a key press."""
+        action, STATE.talk_click = STATE.talk_click, None
+        return action
+
+    @staticmethod
     def _show_talk_overlay(write: bool = True) -> None:
         """
         The recording overlay in its talk (F6) or chat (F4) livery.
@@ -377,6 +416,11 @@ class ModeHandler:
                         return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
+            # Session-scoped, both of them: the next session reads the switch
+            # from CFG again, and a click that arrived too late is not its
+            # business.
+            STATE.talk_free_keyboard = None
+            STATE.talk_click = None
             session.desks.close()        # stop the plugins watching for this session
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()
@@ -533,7 +577,10 @@ class ModeHandler:
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid import cycle
 
         cfg = config_module.CFG
-        ModeHandler._show_talk_overlay()
+        # session.write, never the default: this re-show is what STATE.current_mode
+        # ends up being for the rest of the session, and an F4 chat relabelled
+        # "talk" loses S (_talk_looks) and offers F6 as the key that ends it.
+        ModeHandler._show_talk_overlay(session.write)
         OverlayManager.set_status("Connecting…")
         talk = engine(session)
         try:
@@ -549,11 +596,19 @@ class ModeHandler:
             return ModeHandler._talk_converse(session, keys)
 
         mapping = KeyboardHandler.talk_listen_keys()
+        free = KeyboardHandler.free_keyboard()
         cancelled = False
         try:
-            with keys.exclusive(grab=not cfg.TALK_FREE_KEYBOARD):
+            with keys.exclusive(grab=not free):
                 while True:
-                    pressed = keys.poll(mapping, 0.05)
+                    pressed = keys.poll(mapping, 0.05) or ModeHandler._talk_clicked()
+                    if KeyboardHandler.free_keyboard() != free:
+                        # The bubble's switch was flipped mid-conversation: the
+                        # grab and the key map both follow, live.
+                        free = not free
+                        keys.follow(grab=not free)
+                        mapping = KeyboardHandler.talk_listen_keys()
+                        ModeHandler._show_talk_overlay(session.write)
                     talk.tick()
                     if talk.push_context():
                         print(f"👁️  Screen context handed to the {label} session")
@@ -709,7 +764,7 @@ class ModeHandler:
 
         cfg = config_module.CFG
         STATE.vad = None
-        ModeHandler._show_talk_overlay()
+        ModeHandler._show_talk_overlay(session.write)  # never the default — see above
 
         # ready_detector() never blocks: while the model is still downloading
         # in the background, this turn simply ends on silence like before.
@@ -750,17 +805,23 @@ class ModeHandler:
         remote_turns = stream is not None and stream.semantic_turns
 
         mapping = KeyboardHandler.talk_listen_keys()
+        free = KeyboardHandler.free_keyboard()
         action = "send"
         deadline = time.monotonic() + cfg.TALK_TURN_TIMEOUT
         # Exclusive only while we wait on the user: no keystroke of this turn
         # reaches the app underneath, and nothing here can block on the network.
         # Unless the user asked for the keyboard back, in which case the turn is
         # driven by the session's own hotkey alone (see talk_listen_keys).
-        with keys.exclusive(grab=not cfg.TALK_FREE_KEYBOARD):
+        with keys.exclusive(grab=not free):
             while True:
                 # A short poll: this is what stands between the detector saying
                 # "finished" and the recording actually stopping.
-                pressed = keys.poll(mapping, 0.03)
+                pressed = keys.poll(mapping, 0.03) or ModeHandler._talk_clicked()
+                if KeyboardHandler.free_keyboard() != free:
+                    free = not free
+                    keys.follow(grab=not free)
+                    mapping = KeyboardHandler.talk_listen_keys()
+                    ModeHandler._show_talk_overlay(session.write)
                 if pressed == "screen":
                     # Looking again does not end the turn: the user is very
                     # likely mid-sentence about the thing they just changed.
