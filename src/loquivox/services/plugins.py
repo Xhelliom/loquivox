@@ -33,6 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 _MODULES: Tuple[str, ...] = (
     "loquivox.services.research",
     "loquivox.services.board",
+    "loquivox.services.write",
 )
 
 _REGISTRY: Dict[str, "Plugin"] = {}
@@ -81,6 +82,11 @@ class Plugin:
     #: which plugin it is (see ``Desks.realtime_tools_except``). "" for a
     #: plugin that duplicates nothing, which is almost all of them.
     provides: str = ""
+    #: only offered in an open conversation (F4), never in a briefing (F6)
+    #: whose whole ending IS the text it produces. A briefing already has a
+    #: way to finish; a tool that finishes it differently is a second one, and
+    #: a model handed both takes both.
+    chat_only: bool = False
     #: one line for the bubble when the call starts, "" for none
     note: Optional[Callable[[Dict[str, Any]], str]] = None
     #: one line for the bubble when the answer is handed back
@@ -236,10 +242,15 @@ class Desks:
     The set is snapshotted when the session opens: a tool that appears
     mid-conversation would be one the model was never told about, and Settings
     already says its changes take effect on the next talk session.
+
+    ``chat`` is the session's shape, not a plugin's name: an open conversation
+    (F4) or a briefing that ends in one text (F6). It is all a ``chat_only``
+    plugin is filtered on.
     """
 
-    def __init__(self) -> None:
-        self._desks: Dict[str, Desk] = {p.name: Desk(p) for p in enabled_plugins()}
+    def __init__(self, chat: bool = False) -> None:
+        self._desks: Dict[str, Desk] = {p.name: Desk(p) for p in enabled_plugins()
+                                        if chat or not p.chat_only}
         #: set when the session ends — the one thing a source watches for
         self.closed = threading.Event()
         for desk in self._desks.values():
@@ -384,15 +395,25 @@ if __name__ == "__main__":
         register(Plugin(name="seeker", description="", parameters={}, started="",
                         run=lambda a: "x", message=lambda a, r: {},
                         provides="web_search"))
-        desks = Desks()
-        assert [t["function"]["name"] for t in desks.chat_tools] == ["echo", "seeker"]
-        assert [t["name"] for t in desks.realtime_tools] == ["echo", "seeker"]
+        register(Plugin(name="scribe", description="", parameters={}, started="",
+                        run=lambda a: "x", message=lambda a, r: {},
+                        chat_only=True))
+        # A briefing already ends in a text; a tool that writes one is only on
+        # the table in an open conversation.
+        assert "scribe" not in [t["name"] for t in Desks().realtime_tools]
+        assert "scribe" in [t["name"] for t in Desks(chat=True).realtime_tools]
+        assert Desks().get("scribe") is None and Desks(chat=True).get("scribe")
+        desks = Desks(chat=True)
+        assert [t["function"]["name"] for t in desks.chat_tools] \
+            == ["echo", "seeker", "scribe"]
+        assert [t["name"] for t in desks.realtime_tools] == ["echo", "seeker", "scribe"]
         # A native tool stands a declaring plugin down, and only that one.
         assert [t["name"] for t in desks.realtime_tools_except(("web_search",))] \
-            == ["echo"]
-        assert [t["name"] for t in desks.realtime_tools_except(())] == ["echo", "seeker"]
+            == ["echo", "scribe"]
+        assert [t["name"] for t in desks.realtime_tools_except(())] \
+            == ["echo", "seeker", "scribe"]
         assert [t["name"] for t in desks.realtime_tools_except(("other",))] \
-            == ["echo", "seeker"]
+            == ["echo", "seeker", "scribe"]
         assert "src" not in [t["name"] for t in desks.realtime_tools_except(())], \
             "a source was declared to a backend as a tool it cannot run"
         assert desks.get("off") is None and desks.get("echo") is not None

@@ -338,6 +338,9 @@ class ModeHandler:
 
         session = TalkSession(write=write)
         session.selection = selection.strip() or None
+        # The one thing a plugin cannot be handed through its arguments: the
+        # conversation itself. services/write.py writes from it.
+        STATE.talk_session = session
         STATE.echo_advised = False
         try:
             with GrabbedKeys() as keys:
@@ -351,7 +354,7 @@ class ModeHandler:
                 else:
                     print("💬 Chat mode — speak freely. Enter/Esc: end · "
                           "Space: end this turn · S: look again · say "
-                          "\"écris ça\" to get a text")
+                          "\"écris ça\" for a text, the conversation carries on")
                 if not write or config_module.CFG.TALK_SCREENSHOT:
                     ModeHandler._talk_look(session)  # in chat, the screen IS the subject
                 while True:
@@ -368,6 +371,7 @@ class ModeHandler:
                         return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
+            STATE.talk_session = None
             session.desks.close()        # stop the plugins watching for this session
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()
@@ -588,11 +592,13 @@ class ModeHandler:
         Four things can end the briefing: Enter (handled in ``_talk_listen``),
         the user saying so in a short utterance (caught here, before the model
         is called), the model answering with its end-of-briefing marker, and
-        ``TALK_MAX_TURNS``. The middle two are independently toggleable — see
+        ``TALK_MAX_TURNS``. The middle two are a *briefing's* — a chat ends on
+        the key alone, and asks for its text through the write tool without
+        ending at all. The middle two are independently toggleable — see
         ``services/talk.py``. Everything said is kept as part of the brief
         either way.
         """
-        from loquivox.services.talk import user_asked_write, user_said_done
+        from loquivox.services.talk import user_said_done
 
         cfg = config_module.CFG
         prefix = None  # audio captured over a reply — the next turn's first words
@@ -641,13 +647,7 @@ class ModeHandler:
                 continue  # nothing said (or a hallucination) — just listen again
 
             ChatManager.add_message("user", f"🗣️ {text}")
-            if not session.write and user_asked_write(text):
-                # "Écris ça" — the chat becomes a briefing; the worker sees
-                # the flag and runs the writing phase on everything said.
-                session.add_user(text)
-                session.write = True
-                return False
-            if user_said_done(text):
+            if session.write and user_said_done(text):
                 # "Vas-y, écris-le" — no point paying for a reply that would
                 # only say "ok"; the turn still counts as part of the brief.
                 session.add_user(text)

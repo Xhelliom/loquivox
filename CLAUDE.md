@@ -40,10 +40,18 @@ shown in a GTK overlay, with optional TTS read-back.
   (no marker protocol, no depth clause), the screen is always captured, the
   selection copied at the key press rides along in `context_clause()`, and the
   turns are poured into `STATE.conversation_history` at the end so the bubble's
-  typed input continues the same discussion. Nothing is generated or typed —
-  unless the user says one of `TALK_WRITE_PHRASES` ("écris ça"): `user_asked_write`
-  flips `session.write`, the conversation loop returns and `_talk_worker` runs
-  the same writing phase as F6 on everything said so far.
+  typed input continues the same discussion. A text is produced *during* the
+  conversation, not at the end of it: the `write_text` plugin
+  (`services/write.py`, `CFG.TALK_WRITE_TOOL`) runs F6's generation pass on a
+  desk thread, types the result at the cursor and hands it back between two
+  turns, so "écris ça" then "non, plus court" is one conversation. It is
+  `chat_only` — a briefing already ends in a text, and a model offered both
+  ways to finish takes both. Nothing else in F4 is generated or typed, and no
+  phrase writes anything: the phrase is what makes the *model* call the tool
+  (the deterministic `user_asked_write` matcher and `TALK_WRITE_PHRASES` are
+  gone with it). `user_said_done` is now guarded by `session.write` at its
+  three call sites for the same reason — a chat ends on the key, not on
+  "j'ai fini".
 - F6 copies the selection too, as the text to rework: "select, F6, say how,
   done" replaces the old one-shot rewrite (F7) and vision (F8) modes, whose
   shared `_ai_action_worker` and Cairo review panel are gone with them. **T**
@@ -381,16 +389,18 @@ twice), `run` (the background work), `message` (its answer as a system
 message), `started` (the stub the model speaks from meanwhile), `enabled` (the
 config key that gates it), `provides` (the *native* capability it stands in
 for, if any — how a plugin steps aside for a backend that can do the same
-thing itself, without any core naming it), and `settings` (its card in
-Settings, built with the dialog's own `_group`/`_field`/`_actions` so it lines
-up with the rest, on the Settings → Plugins page they share).
+thing itself, without any core naming it), `chat_only` (offered in an open
+conversation and never in a briefing — the session's *shape*, not a plugin's
+name), and `settings` (its card in Settings, built with the dialog's own
+`_group`/`_field`/`_actions` so it lines up with the rest, on the
+Settings → Plugins page they share).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.
 
 `TalkSession.desks` is a `Desks`, one `Desk` per *enabled* plugin, snapshotted
 when the session opens (a tool appearing mid-conversation is one the model was
-never told about). Everything the conversation core does goes through it and
+never told about) and, in a briefing, minus the `chat_only` ones. Everything the conversation core does goes through it and
 names no plugin: `desks.chat_tools` / `desks.realtime_tools` compose the tool
 list, `desks.get(name)` routes a call — `TalkSession._answer` in the cascade,
 `RealtimeTalk._handle` on the server event — and `desks.take()` sweeps every
@@ -440,6 +450,32 @@ goes back on its own call, but a source has no call to answer. Measured on
 words, about 1.5 s after the last word of the reply before it — once `_quiet()`
 can tell that reply is over, which it could not before (see the Live engine's
 "no end-of-output-audio event" below).
+
+`write_text` (`services/write.py`) is the second tool, and it is what turns a
+conversation into co-working: the same generation pass F6 ends on, called
+*during* the session instead. The conversation is the brief —
+`TalkSession.generate()` reads the turns, and the text it wrote is one of them
+(`result_message` keeps it as a system turn), so a second call is a revision of
+what the user can see rather than a fresh attempt at the same brief. Its one
+argument, `instruction`, is only the last word on that brief ("plus court"),
+which a transcript buries; it also gives the model something to fill, and an
+empty schema turns out not to be free — `gpt-oss-120b` through Groq answered
+one with `Parsing failed. The model generated output that could not be parsed`
+on the turn after it had said out loud that it had the function. It reaches the session through `STATE.talk_session`, the one thing a
+plugin cannot be handed in its arguments, and it is called `write_text` rather
+than `write` because `tests/test_plugins.py` checks the conversation core
+names no plugin — and that core is full of `session.write`. The text lands where the cursor is:
+a revision sits *next to* the previous one unless the user selects it first,
+which is deliberate — a window we know nothing about is not one we can tidy up
+after ourselves.
+
+That same session is where `TALK_LIVE_BACKEND_PROMPT` earned its clause about
+tools that *act*: it is written for a backend that answers questions ("return
+the relevant facts in at most two short sentences", "return the one question
+that would settle it"), so the thinking model did exactly that — *« Oui, j'ai
+la fonction write_text. Quel texte aimerais-tu que je rédige ? »* — instead of
+calling it. A tool the conversation core dispatches is not a fact to report;
+under client delegation the backend prompt is the only place that can say so.
 
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
