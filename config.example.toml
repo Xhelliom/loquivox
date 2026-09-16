@@ -203,9 +203,11 @@ research = true
 # Reads the local board (127.0.0.1:8788, COLLIE_BOARD_PORT) and nothing else.
 # Off by default — most installations do not run that service.
 board = false
-# Chat mode (F4) writes nothing — until one of these is said: the conversation
-# then becomes a briefing and the text is generated and reviewed like F6's.
-# write_phrases = ["écris ça", "rédige", "write it"]
+# Let a chat (F4) write a text without ending: ask for it out loud ("écris
+# ça"), it is written from everything said so far, pasted at your cursor, and
+# the conversation carries on — so the next sentence can ask for another
+# version. Off = F4 writes nothing and F6 stays the way to get a text.
+write_tool = true
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.
 review_timeout = 120.0

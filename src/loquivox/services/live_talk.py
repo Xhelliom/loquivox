@@ -50,8 +50,7 @@ import sounddevice as sd
 import loquivox.config as config_module
 from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
-from loquivox.services.talk import (_strip_marker, echo_note, user_asked_write,
-                                    user_said_done)
+from loquivox.services.talk import _strip_marker, echo_note, user_said_done
 from loquivox.services.vad import EchoGate
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
@@ -374,10 +373,9 @@ class LiveTalk:
 
         ChatManager.add_message("user", f"🗣️ {text}")
         self._session.add_user(text)
-        if not self._session.write and user_asked_write(text):
-            self._session.write = True   # "écris ça": the chat becomes a briefing
-            self.done = True
-        elif user_said_done(text):
+        # Only a briefing ends on a phrase: a chat ends on the key, and
+        # "vas-y, écris ça" is the model's cue to call the write tool.
+        if self._session.write and user_said_done(text):
             self.done = True
 
     def _on_assistant_said(self, text: str) -> None:
