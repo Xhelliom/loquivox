@@ -35,8 +35,6 @@ try:
     free = KeyboardHandler.talk_listen_keys()
     assert free and not set(free) & TYPING, f"typing still drives the session: {set(free) & TYPING}"
     assert set(free.values()) == {"finish"}, free
-    own = set(KeyboardHandler.trigger_codes("talk")) | set(KeyboardHandler.trigger_codes("ai"))
-    assert set(free) == own, (set(free), own)
     STATE.current_mode = "ai"
     hints = KeyboardHandler.talk_hints()
     assert hints == (([base.HOTKEY_DEFS["ai"][0]], "end"),), hints
@@ -68,41 +66,50 @@ try:
         mode_module.ModeHandler.cancel_active = real
     print("✓ the global Esc leaves a conversation alone, and only a conversation")
 
-    # The bubble's switch: a session answer that outranks the setting, and is
-    # dropped when the session ends (the worker's finally).
+    # One table, three views: every action the keys bind has a button, and
+    # "end turn" exists for the cascade alone — the server engines close turns
+    # themselves and ignore it.
     config_module.CFG = replace(base, TALK_FREE_KEYBOARD=False)
-    assert not KeyboardHandler.free_keyboard()
-    STATE.talk_free_keyboard = True           # what talk_click("free") writes
-    try:
-        assert KeyboardHandler.free_keyboard(), "the switch loses to the setting"
-        assert set(KeyboardHandler.talk_listen_keys().values()) == {"finish"}
-    finally:
-        STATE.talk_free_keyboard = None
-    assert not KeyboardHandler.free_keyboard(), "the switch outlived its session"
+    import loquivox.ui.chat_overlay as bubble
+
+    for engine in ("cascade", "realtime", "live"):
+        STATE.talk_engine = engine
+        verdicts = {v for v, _c, _k, _w in KeyboardHandler.talk_actions()}
+        assert ("send" in verdicts) == (engine == "cascade"), \
+            f"{engine} offers a turn key it ignores: {verdicts}"
+        mapped = set(KeyboardHandler.talk_listen_keys().values())
+        assert verdicts <= mapped, (engine, verdicts - mapped)
+        assert len(KeyboardHandler.talk_hints()) == len(verdicts), engine
+    STATE.talk_engine = "cascade"
+    print("✓ keys, hints and buttons all come from talk_actions()")
 
     # A clicked button is read exactly once, like a key press, and only the
     # session's own verdicts get through.
-    for verdict in ("finish", "cancel", "screen", "select"):
+    for verdict in ("send", "finish", "cancel", "screen", "select"):
         mode_module.ModeHandler.talk_click(verdict)
         assert mode_module.ModeHandler._talk_clicked() == verdict, \
             f"the bar offers {verdict} and the loop never sees it"
-    mode_module.ModeHandler.talk_click("finish")
-    assert mode_module.ModeHandler._talk_clicked() == "finish"
     assert mode_module.ModeHandler._talk_clicked() is None, "a click was read twice"
     mode_module.ModeHandler.talk_click("rm -rf")
     assert mode_module.ModeHandler._talk_clicked() is None, "anything drives the session"
-    print("✓ the switch is the session's, and a click is read once")
+    print("✓ a click is read once, and only the session's own verdicts")
 
-    # Every token the talk bar declares is one the render fills in: a leftover
-    # {placeholder} is a button with a brace for a label.
-    import loquivox.ui.chat_overlay as bubble
-    html = bubble.CHAT_HTML_TEMPLATE
-    for token, value in bubble.ChatOverlay._talk_bar_bits().items():
-        assert "{" + token + "}" in html, f"the bar renders {token}, the page has no slot"
-        html = html.replace("{" + token + "}", value)
-    for verdict in ("cancel", "free", "screen", "select"):
-        assert f"talkAction('{verdict}')" in html, f"no button for {verdict}"
-    print("✓ the talk bar renders with no placeholder left")
+    # The bar is rendered, not templated: the page keeps one slot for it, and
+    # every action it offers is wired to talkAction.
+    bubble_self = bubble.ChatOverlay.__new__(bubble.ChatOverlay)
+    bubble_self.talk = True
+    STATE.chat_messages = []
+    bar = bubble_self._talk_bar()
+    assert "{talk_bar}" in bubble.CHAT_HTML_TEMPLATE, "the page has no slot for the bar"
+    for verdict, _c, _k, _w in KeyboardHandler.talk_actions():
+        assert f'talkAction("{verdict}")' in bar, f"no button for {verdict}"
+    assert 'talkAction("free")' in bar and "{" not in bar, bar
+    STATE.chat_messages = [{"role": "result", "content": "x"}]
+    assert bubble_self._talk_bar() == "", "the review panel is offered dead buttons"
+    STATE.chat_messages = []
+    bubble_self.talk = False
+    assert bubble_self._talk_bar() == "", "the side panel renders the talk bar"
+    print("✓ the bar is one button per action, and only while the session listens")
 finally:
     config_module.CFG = base
 print("\n✓ free-keyboard checks pass")

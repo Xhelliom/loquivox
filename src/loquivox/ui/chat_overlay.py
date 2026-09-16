@@ -266,15 +266,17 @@ html, body {{
   margin: 10px 0; border: 1px solid {white_alpha05};
 }}
 
-/* Text input bar (type to chat, in addition to voice) */
-.chat-input-bar {{
+/* Text input bar (type to chat, in addition to voice) and, in talk mode, the
+   session's own controls — same strip under the same rule. */
+.chat-input-bar, .talk-bar {{
   flex-shrink: 0;
-  display: flex; align-items: flex-end; gap: 8px;
+  display: flex; gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid {accent_alpha20};
   background: {bg_rgba};
   z-index: 20;
 }}
+.chat-input-bar {{ align-items: flex-end; }}
 .chat-input-bar textarea {{
   flex: 1; resize: none;
   background: {white_alpha05};
@@ -325,17 +327,11 @@ html, body {{
 .talk .chat-input-bar {{ display: none; }}
 /* The session's controls, for the one input device it never takes: the mouse.
    With the keyboard left free these buttons are the only way to end a turn or
-   drop the conversation, so they are not decoration. Hidden outside talk. */
-.talk-bar {{ display: none; }}
-.talk .talk-bar {{
-  flex-shrink: 0;
-  display: flex; align-items: center; gap: 6px;
-  /* Five or six buttons in a bubble sized to its content: they wrap rather
-     than force the window wider than the text it is showing. */
-  flex-wrap: wrap;
-  padding: 8px 12px 10px;
-  border-top: 1px solid {accent_alpha20};
-}}
+   drop the conversation, so they are not decoration. Rendered in talk mode
+   only — there is nothing for them to drive otherwise.
+   Five or six buttons in a bubble sized to its content: they wrap rather than
+   force the window wider than the text it is showing. */
+.talk-bar {{ align-items: center; flex-wrap: wrap; gap: 6px; }}
 .talk-bar button {{
   border: 1px solid {accent_alpha20};
   background: {white_alpha05}; color: {text};
@@ -344,7 +340,7 @@ html, body {{
   transition: background 0.15s, border-color 0.15s;
 }}
 .talk-bar button:hover {{ background: {accent_alpha20}; border-color: {accent}; }}
-.talk-bar button:active {{ transform: scale(0.97); }}
+.talk-bar button:active {{ transform: scale(0.96); }}
 .talk-bar .spacer {{ flex: 1; }}
 .talk-bar .drop {{ border-color: {white_alpha10}; color: {dim_text}; }}
 .talk-bar .keys.free {{ background: {accent_alpha30}; border-color: {accent}; }}
@@ -392,8 +388,9 @@ function talkAction(key) {
   // re-rendered when a turn lands, and a switch that looks stuck reads as a
   // switch that did nothing. The render is what it ends up agreeing with.
   const btn = document.getElementById('keys-btn');
-  if (btn) btn.textContent = btn.classList.toggle('free')
-    ? '🔓 Keyboard free' : '🔒 Keyboard held';
+  // The labels come from the button's own data-*, so there is one source for
+  // them and the next render agrees with this click by construction.
+  if (btn) btn.textContent = btn.dataset[btn.classList.toggle('free') ? 'on' : 'off'];
 }
 function signalClose() { post({action: 'Close'}); }
 
@@ -543,18 +540,7 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
   <div class="chat-scroll-area" id="scroll-area">
     <div id="chat" class="chat-container">{messages}<div id="live"></div></div>
   </div>
-  <div class="talk-bar">
-    <button class="keys{free_class}" id="keys-btn" onclick="talkAction('free')"
-            title="{free_title}">{free_label}</button>
-    {look_btn}
-    <button onclick="talkAction('select')"
-            title="Send whatever is highlighted right now as the text to work from (T)"
-            >Selection</button>
-    <span class="spacer"></span>
-    {send_btn}
-    <button onclick="talkAction('finish')">{finish_label}</button>
-    <button class="drop" onclick="talkAction('cancel')">Drop</button>
-  </div>
+  {talk_bar}
   <div class="chat-input-bar">
     <textarea id="chat-input" rows="1" placeholder="Type a message…"></textarea>
     <button class="send-btn" onclick="sendMessage()" title="Send">&#10148;</button>
@@ -980,8 +966,7 @@ class ChatOverlay(Gtk.Window):
         html = html.replace("{pin_hint}", pin_hint)
         html = html.replace("{talk_class}", " talk" if self.talk else "")
         html = html.replace("{TALK}", "true" if self.talk else "false")
-        for token, value in self._talk_bar_bits().items():
-            html = html.replace("{" + token + "}", value)
+        html = html.replace("{talk_bar}", self._talk_bar())
         html = html.replace("{CHAT_CSS}", formatted_css)
         html = html.replace("{CHAT_JS}", CHAT_JS)
 
@@ -991,43 +976,48 @@ class ChatOverlay(Gtk.Window):
         self._pending_js = None
         self.webview.load_html(html, None)
 
-    @staticmethod
-    def _talk_bar_bits() -> Dict[str, str]:
+    #: Why the keyboard switch is worth a button, said once.
+    _FREE_TIP = ("The session takes the keyboard while it waits on you. Click to "
+                 "leave it yours: you keep typing and your shortcuts keep working "
+                 "in whatever app has the focus, and these buttons become the way "
+                 "to drive the conversation.")
+    _FREE_LABELS = ("🔒 Keyboard held", "🔓 Keyboard free")
+
+    def _talk_bar(self) -> str:
         """
-        The talk bar's labels, read fresh on every render — the page is reloaded
-        for each message, so this is also how the keyboard switch stays in step
-        with whatever flipped it (the bar itself, or Settings → Talk).
+        The session's controls, one button per action it currently offers.
+
+        Derived from ``KeyboardHandler.talk_actions()`` rather than listed
+        again: which actions exist, and their wording, are that table's to
+        decide — the hint strip is the same list with the keys instead of the
+        buttons. Rebuilt on every render, which is how the switch stays in step
+        with whatever flipped it (this bar, or Settings → Talk).
+
+        Empty outside talk mode, and empty once the generated text is up for
+        review: that panel has its own verdicts and its own grabbed keys, and
+        these buttons would be driving a loop that has stopped listening.
         """
-        import loquivox.config as config_module
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
 
+        if not self.talk or any(m.get("role") == "result"
+                                for m in STATE.chat_messages):
+            return ""
         free = KeyboardHandler.free_keyboard()
-        # Same condition as the S key, for the same reason: a button that
-        # uploads the window must not exist for someone who turned the capture
-        # off. Selection has no such cost and is always there.
-        look = ('<button onclick="talkAction(\'screen\')" '
-                'title="Look at the focused window again (S)">Look</button>'
-                if KeyboardHandler._talk_looks() else "")
-        # "End turn" is the cascade's alone: the server engines close turns
-        # themselves and ignore the key, so offering the button would be
-        # offering a dead one.
-        # ponytail: reads the setting, not the engine that actually opened —
-        # a session that fell back to the cascade shows no button, and the VAD
-        # ends its turns anyway.
-        send = ('<button onclick="talkAction(\'send\')">End turn</button>'
-                if config_module.CFG.TALK_ENGINE == "cascade" else "")
-        return {
-            "free_class": " free" if free else "",
-            "free_label": "🔓 Keyboard free" if free else "🔒 Keyboard held",
-            "free_title": html_lib.escape(
-                "The session takes the keyboard while it waits on you. Click to "
-                "leave it yours: you keep typing and your shortcuts keep working "
-                "in whatever app has the focus, and these buttons become the way "
-                "to drive the conversation."),
-            "finish_label": "Write it" if STATE.current_mode == "talk" else "End",
-            "send_btn": send,
-            "look_btn": look,
-        }
+        buttons = [
+            f'<button class="keys{" free" if free else ""}" id="keys-btn"'
+            f' data-on="{self._FREE_LABELS[1]}" data-off="{self._FREE_LABELS[0]}"'
+            f' onclick=\'talkAction("free")\''
+            f' title="{html_lib.escape(self._FREE_TIP)}"'
+            f'>{self._FREE_LABELS[free]}</button>',
+            '<span class="spacer"></span>',
+        ]
+        for verdict, _codes, key, what in KeyboardHandler.talk_actions():
+            # The key is worth naming only while it still works; with the
+            # keyboard free it belongs to the app being typed into.
+            tip = "" if free else f' title="{key}"'
+            buttons.append(f'<button onclick=\'talkAction("{verdict}")\'{tip}>'
+                           f'{what.capitalize()}</button>')
+        return f'<div class="talk-bar">{"".join(buttons)}</div>'
 
     def _on_policy_decision(self, webview, decision, decision_type) -> bool:
         """Handle URI navigations (copy://, settings://)."""

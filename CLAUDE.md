@@ -211,43 +211,55 @@ The cascade, step by step:
    hotkey alone (`talk`/`ai` → "finish", the same key that opened it — a second
    session is refused by `start_talk_session`'s `talk_active` guard), and
    `talk_hints()` shows that one key and nothing else. Space, Enter, Esc, S
-   and T belong to the app being typed into.
+   and T belong to the app being typed into. The actions do not go away with
+   the keys; they move to the mouse (below).
 
    The global session hotkeys need the same treatment and do **not** get it
-   from the grab: `_on_press` drops `cancel`/`pause`/`refine` outright while
-   `STATE.talk_active`, free keyboard or not. Even a grabbed session leaks them
-   through the gaps between two waits, and an Esc landing there is a
-   `reset_capture()` under the session's feet. The F6 review panel keeps its
-   grab: it is a question waiting for an answer, not a conversation running
-   beside the user's work. `tests/test_free_keyboard.py` pins all of it.
+   from the grab. `_on_press` returns on `STATE.talk_active` *before* reaching
+   `cancel`/`pause`/`refine`, free keyboard or not — even a grabbed session
+   leaks them through the gaps between two waits, and an Esc landing there is a
+   `reset_capture()` under the session's feet. The guard is placed rather than
+   named: the three branches that must survive a session (`talk`/`ai`, which
+   end it, and `pin`/`tts`, which have nothing to do with it) sit above it, so
+   "a running session protects me" is what any mode added later inherits. The
+   F6 review panel keeps its grab: it is a question waiting for an answer, not
+   a conversation running beside the user's work.
+   `tests/test_free_keyboard.py` pins all of it.
 
    Which leaves the session with no way to be *dropped* — its hotkey means
    "finish", and under F6 finishing writes the text. So the bubble grows a
-   `.talk-bar`: `🔓/🔒 Keyboard`, `Look`, `Selection`, `End turn` (cascade only
-   — the server engines close turns themselves, and a button they ignore is a
-   dead one), `End` / `Write it`, `Drop`. The mouse is the one device a session
-   never takes, which is what makes buttons the right answer here rather than
-   one more key. Every key the free keyboard gives up has a button: `Look` and
-   `Selection` are S and T, and `Look` is rendered under `_talk_looks()` — the
-   very condition the key is, so a capture nobody enabled has no button either.
-   Clicking costs the session nothing because the bubble refuses focus while it
-   is up (`KeyboardMode.NONE` / `set_accept_focus(not talk)`): the window S
-   captures and the selection T copies are still the ones under the cursor.
-   A click posts `{action:'Talk'}` → `ModeHandler.talk_click`, which leaves a
-   verdict in `STATE.talk_click` for the conversation loop to pick up on its
-   next poll, exactly where a key press would have landed (`_talk_clicked()`
-   reads it once, like a key). `contentHeight()` counts the bar, or the bubble
-   is sized to the conversation alone and its last turn hides behind it.
+   `.talk-bar`, and the mouse is the one device a session never takes, which is
+   what makes buttons the right answer here rather than one more key. Clicking
+   costs the session nothing because the bubble refuses focus while it is up
+   (`KeyboardMode.NONE` / `set_accept_focus(not talk)`): the window `Look again`
+   captures and the selection `Send selection` copies are still the ones under
+   the cursor. A click posts `{action:'Talk'}` → `ModeHandler.talk_click`,
+   which queues a verdict in `STATE.talk_click` for the conversation loop to
+   pick up on its next poll, exactly where a key press would have landed.
+   `contentHeight()` counts the bar, or the bubble is sized to the conversation
+   alone and its last turn hides behind it. The bar is empty once a `result`
+   message is up: the review panel has its own verdicts and its own grabbed
+   keys, and these buttons would drive a loop that has stopped listening.
 
-   The `🔓` switch flips the whole thing mid-conversation:
-   `STATE.talk_free_keyboard` outranks `CFG.TALK_FREE_KEYBOARD`, and
-   `KeyboardHandler.free_keyboard()` is the single reader everything asks —
-   the key map, the hint strip, and both conversation loops, which compare it
-   against what they opened with and call `keys.follow()`, rebuild the mapping
-   and re-show the overlay when it changed. It is also written back to
-   config.toml, so the next session opens the way this one ended, and cleared
-   in the worker's `finally` (it is the *session's* answer, not a new default
-   hiding in runtime state).
+   **`KeyboardHandler.talk_actions()` is the single list of what a session can
+   be told to do** — `(verdict, keycodes, key name, what it does)` — and the
+   key map, the hint strip and the buttons are all views of it, down to the
+   wording (`what.capitalize()` is the button's label). This is `_REVIEW_KEYS`'
+   trick one level up, and it is not theoretical: said three times, the list
+   had already drifted — the strip offered "Space: end turn" under the server
+   engines, which close turns themselves and ignore that key. Conditions live
+   in the table, not in each view: Space exists for `STATE.talk_engine ==
+   "cascade"` (set when the engine actually opens, so a server engine that
+   falls back is still right), and S/`Look again` under `_talk_looks()`.
+
+   The `🔓` switch flips the whole thing mid-conversation, and there is no
+   runtime copy of the answer: `ModeHandler._remember_free_keyboard` writes
+   config.toml and reloads `CFG` — reloading *is* how it applies, and the next
+   session opens the way this one ended. `KeyboardHandler.free_keyboard()` is
+   the single reader. `ModeHandler._talk_wait()` is where both loops wait, so
+   it is the one place the switch is followed: it compares it against
+   `keys.grabbed` and calls `keys.follow()`, rebuilds the key map and re-shows
+   the overlay when they disagree.
 2. Each turn: `_talk_listen` records until the turn ends (see below),
    `_talk_transcribe` transcribes (streaming backends included) and applies the
    hallucination guard, `TalkSession.reply` answers, and `_talk_speak` speaks

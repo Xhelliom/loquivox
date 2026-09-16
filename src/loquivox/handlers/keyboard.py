@@ -76,6 +76,12 @@ class GrabbedKeys:
         self.close()
 
     @property
+    def grabbed(self) -> bool:
+        """True while the exclusive grab is held — what the bubble's keyboard
+        switch is compared against, rather than a second copy of the answer."""
+        return self._grabbed
+
+    @property
     def alive(self) -> bool:
         """False when no keyboard could be opened — there is nothing to wait on."""
         return bool(self._devices)
@@ -90,8 +96,7 @@ class GrabbedKeys:
         keys still reach us, and they reach the focused app too. The session
         then answers to its own hotkey only — see ``talk_listen_keys``.
         """
-        if grab:
-            self._grab()
+        self.follow(grab)
         try:
             yield self
         finally:
@@ -100,14 +105,14 @@ class GrabbedKeys:
     def follow(self, grab: bool) -> None:
         """
         Take or drop the grab in the middle of a wait, when the user flips the
-        bubble's keyboard switch. A no-op when it already matches.
+        bubble's keyboard switch. A no-op when it already matches — both halves
+        carry that guard themselves.
         """
-        if grab and not self._grabbed:
-            self._grab()
-        elif not grab and self._grabbed:
-            self._ungrab()
+        self._grab() if grab else self._ungrab()
 
     def _grab(self) -> None:
+        if self._grabbed:
+            return
         for dev in self._grabbable:
             try:
                 dev.grab()
@@ -402,32 +407,6 @@ class KeyboardHandler:
     @classmethod
     def _on_press(cls, mode: str) -> None:
         """Handle key press for a recognized mode."""
-        # A talk session drives itself from its own key map (talk_listen_keys),
-        # so the global session keys must never reach it — grabbed or not. With
-        # the keyboard left free they are being typed into another app; even
-        # grabbed, the gaps between two waits leak them through. An Esc mid-turn
-        # would reset_capture() under the session's feet, a Space would pause a
-        # recording it does not know is paused.
-        if STATE.talk_active and mode in ("cancel", "pause", "refine"):
-            return
-
-        # Cancel the active recording / in-flight transcription (no insert).
-        if mode == "cancel":
-            ModeHandler.cancel_active()
-            return
-
-        # Pause / resume the current recording (only while one is active).
-        if mode == "pause":
-            if STATE.recording:
-                cls._toggle_pause()
-            return
-
-        # Stop the active recording, then pick a refinement level for it.
-        if mode == "refine":
-            if STATE.recording:
-                cls._stop_and_choose()
-            return
-
         # Talk mode: a whole spoken conversation, driven by its own worker,
         # which owns the precondition (it owns the flag).
         # F4 is the same session with nothing written at the end: a conversation
@@ -448,6 +427,39 @@ class KeyboardHandler:
                 TTSService.toggle()
             return
 
+        # Everything below this line is the session's business, not a global
+        # hotkey's: a talk session drives itself from its own key map
+        # (talk_listen_keys) and owns the microphone for its whole life. The
+        # three above are the exceptions — they end it, or toggle something
+        # that has nothing to do with it. Guarding here rather than naming the
+        # modes to drop is what makes "a session protects me" the default a
+        # mode added later inherits.
+        #
+        # Grabbed or not: with the keyboard left free these keys are being
+        # typed into another app, and even grabbed, the gaps between two waits
+        # leak them through. An Esc landing here would reset_capture() under
+        # the session's feet, a Space would pause a recording it does not know
+        # is paused.
+        if STATE.talk_active:
+            return
+
+        # Cancel the active recording / in-flight transcription (no insert).
+        if mode == "cancel":
+            ModeHandler.cancel_active()
+            return
+
+        # Pause / resume the current recording (only while one is active).
+        if mode == "pause":
+            if STATE.recording:
+                cls._toggle_pause()
+            return
+
+        # Stop the active recording, then pick a refinement level for it.
+        if mode == "refine":
+            if STATE.recording:
+                cls._stop_and_choose()
+            return
+
         # Toggle mode: pressing same key again stops recording
         if STATE.recording and STATE.toggle_mode:
             if mode == STATE.current_mode:
@@ -455,11 +467,6 @@ class KeyboardHandler:
             return
 
         if STATE.recording:
-            return
-
-        # A talk session owns the microphone for its whole life, including the
-        # gaps between turns where the keyboard is not grabbed.
-        if STATE.talk_active:
             return
 
         # Start recording for this mode
@@ -610,46 +617,65 @@ class KeyboardHandler:
         """
         Whether this talk session leaves the keyboard to the user.
 
-        ``CFG.TALK_FREE_KEYBOARD`` is the default; the bubble's switch overrides
-        it for the session in ``STATE.talk_free_keyboard``. Everything that has
-        to agree on the answer — the key map, the hint strip, the grab itself —
-        asks here.
+        The one reader of the setting: the key map, the hint strip, the grab
+        itself and the bubble's switch all ask here, so they cannot disagree.
+        The switch writes through ``ModeHandler._remember_free_keyboard``,
+        which reloads ``CFG`` — there is no second, runtime copy to arbitrate
+        against.
         """
         import loquivox.config as config_module
 
-        if STATE.talk_free_keyboard is not None:
-            return STATE.talk_free_keyboard
         return bool(config_module.CFG.TALK_FREE_KEYBOARD)
+
+    @classmethod
+    def talk_actions(cls) -> Tuple[Tuple[str, Tuple[int, ...], str, str], ...]:
+        """
+        What this session can be told to do, once: ``(verdict, keycodes, key
+        name, what it does)`` per action, in the order they are offered.
+
+        The key map, the hint strip and the bubble's buttons are all *views* of
+        this — the same trick ``_REVIEW_KEYS`` plays for the review panel, and
+        for the same reason. Said three times, the list had already drifted:
+        the strip offered "Space: end turn" under the server engines, which
+        close turns themselves and ignore that key.
+
+        Two actions are conditional, and the condition belongs here rather than
+        in each view: Space is the cascade's alone, and S exists only where the
+        screen is already part of the deal — a key that uploads the window must
+        not exist for someone who turned the capture off.
+        """
+        actions = []
+        if STATE.talk_engine == "cascade":
+            actions.append(("send", (ecodes.KEY_SPACE,), "Space", "end turn"))
+        actions.append(("finish", tuple(_CONFIRM_CODES), "Enter",
+                        "write it" if STATE.current_mode == "talk" else "end"))
+        actions.append(("cancel", (ecodes.KEY_ESC,), "Esc", "cancel"))
+        if cls._talk_looks():
+            actions.append(("screen", (ecodes.KEY_S,), "S", "look again"))
+        actions.append(("select", (ecodes.KEY_T,), "T", "send selection"))
+        return tuple(actions)
 
     @classmethod
     def talk_listen_keys(cls) -> Dict[int, str]:
         """
         Keycode → action while a talk turn is being recorded.
 
-        Space (or the talk key itself) ends the turn now instead of waiting for
-        the VAD to hear the pause; Enter ends the conversation and writes the
-        text; Esc drops the whole thing.
-
         With the keyboard left free (``TALK_FREE_KEYBOARD``) every one of those
         keys is also landing in whatever the user is typing into, so none of
         them may drive the session: only its own hotkey answers, and pressing
         it again ends the session. ``start_talk_session`` is what stops that
-        press opening a second one.
+        press opening a second one. The actions themselves do not go away —
+        they move to the mouse, see the bubble's talk bar.
         """
         if cls.free_keyboard():
             return {code: "finish"
                     for code in cls.trigger_codes("talk") | cls.trigger_codes("ai")}
 
-        mapping: Dict[int, str] = {ecodes.KEY_SPACE: "send", ecodes.KEY_ESC: "cancel"}
-        mapping.update({code: "finish" for code in _CONFIRM_CODES})
+        mapping: Dict[int, str] = {code: verdict
+                                   for verdict, codes, _key, _what in cls.talk_actions()
+                                   for code in codes}
         for code in cls.trigger_codes("talk"):
             mapping.setdefault(code, "send")
-        if cls._talk_looks():
-            # Only when the screen is already part of the deal: S sends what is
-            # on screen to the cloud, and a key that does that must not exist
-            # for someone who turned the capture off.
-            mapping[ecodes.KEY_S] = "screen"
-        mapping[ecodes.KEY_T] = "select"  # send the highlighted text
         return mapping
 
     @staticmethod
@@ -662,25 +688,20 @@ class KeyboardHandler:
     @classmethod
     def talk_hints(cls) -> Tuple[Tuple[List[str], str], ...]:
         """
-        What the overlay shows while a talk turn is recording — built from the
-        same condition as ``talk_listen_keys`` so the strip cannot offer a key
-        that does nothing.
+        What the overlay shows while a talk turn is recording — the same list
+        ``talk_listen_keys`` binds, so the strip cannot offer a key that does
+        nothing.
         """
         import loquivox.config as config_module
 
-        cfg = config_module.CFG
-        finish = "write it" if STATE.current_mode == "talk" else "end"
+        actions = cls.talk_actions()
         if cls.free_keyboard():
             # The one key the session still answers to; the rest belong to
             # whatever the user is typing into.
-            return (([cfg.HOTKEY_DEFS[STATE.current_mode][0]], finish),)
-        hints: List[Tuple[List[str], str]] = [
-            (["Space"], "end turn"), (["Enter"], finish), (["Esc"], "cancel"),
-        ]
-        if cls._talk_looks():
-            hints.append((["S"], "look again"))
-        hints.append((["T"], "send selection"))
-        return tuple(hints)
+            finish = next(what for verdict, _c, _k, what in actions
+                          if verdict == "finish")
+            return (([config_module.CFG.HOTKEY_DEFS[STATE.current_mode][0]], finish),)
+        return tuple(([key], what) for _verdict, _codes, key, what in actions)
 
     @classmethod
     def talk_review_keys(cls) -> Dict[int, str]:

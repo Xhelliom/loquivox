@@ -115,15 +115,16 @@ class AppState:
     # True once this talk session has said that the room drowns the microphone
     # (services/talk.py echo_note); saying it once a reply would be nagging.
     echo_advised: bool = False
-    # This session's answer to "is the keyboard the user's?", flipped live by
-    # the bubble's switch. None outside a session and until it is touched, which
-    # is what makes CFG.TALK_FREE_KEYBOARD the default rather than a one-time
-    # seed — see KeyboardHandler.free_keyboard().
-    talk_free_keyboard: Optional[bool] = None
-    # One action clicked in the talk bubble ("send" / "finish" / "cancel"),
-    # waiting for the conversation loop to pick it up. The mouse is never
-    # grabbed, so this is the one way in when the keyboard is left free.
-    talk_click: Optional[str] = None
+    # Which engine actually holds the conversation ("cascade" / "realtime" /
+    # "live"), set once it has opened — CFG.TALK_ENGINE is only what was asked
+    # for, and a server engine that fails to open falls back. What the session
+    # can be told to do depends on it (KeyboardHandler.talk_actions).
+    talk_engine: str = "cascade"
+    # Actions clicked in the talk bubble, waiting for the conversation loop to
+    # pick them up. The mouse is never grabbed, so this is the one way in when
+    # the keyboard is left free — a queue rather than a slot because it is
+    # written from the GTK thread and read from the worker.
+    talk_click: queue.SimpleQueue = field(default_factory=queue.SimpleQueue)
 
     # --- UI Windows ---
     overlay_window: Optional[Any] = None   # GtkOverlay instance
