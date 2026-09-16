@@ -1900,6 +1900,20 @@ class SettingsDialog:
                 widget.set_sensitive(active)
 
     @classmethod
+    def sync_talk_switch(cls) -> None:
+        """
+        Put the keyboard checkbox back in step with ``CFG``.
+
+        Two writers own that key — this page and the bubble's switch — and a
+        dialog left open while a conversation runs would otherwise write its
+        stale checkbox back on the next Apply, silently undoing the flip. The
+        page is built from ``CFG``, so this only matters while it is already up.
+        """
+        check = getattr(cls, "_talk_free_kbd_check", None)
+        if check is not None and cls._instance is not None:
+            check.set_active(bool(config_module.CFG.TALK_FREE_KEYBOARD))
+
+    @classmethod
     def _on_apply_talk(cls, _btn: Gtk.Button) -> None:
         """Write the talk knobs to config.toml and reload — next session uses them."""
         from loquivox.config_io import ConfigWriteError, update_section

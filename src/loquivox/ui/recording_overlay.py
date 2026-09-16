@@ -226,8 +226,19 @@ class GtkOverlay(Gtk.Window):
         was perfectly good. Everything cleared here is what a fresh ``__init__``
         would have set.
         """
-        self._hints = hints
         self._reset_state()
+        self.set_hints(hints)
+
+    def set_hints(self, hints=None) -> None:
+        """
+        Swap the hint strip without touching what the overlay is showing.
+
+        ``reset()`` is for a new turn, and clears the live transcript and the
+        status beat with it. Flipping the keyboard switch mid-turn changes only
+        which keys are on offer — clearing there would wipe the partial
+        transcript the user is watching themselves speak into.
+        """
+        self._hints = hints
         self._base_w = self.width(self.refine_badge, self._hints)
         self._resize(self._base_w, self._base_h)
         self.drawing_area.queue_draw()

@@ -295,11 +295,26 @@ class ModeHandler:
         transcription, the model and the user's keys), and holds the keyboard
         for its whole life — see ``GrabbedKeys``.
         """
+        from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
+
         if STATE.talk_active or STATE.recording:
+            if STATE.talk_active and KeyboardHandler.free_keyboard():
+                # With the keyboard free this press is how a session ENDS, and
+                # the listener is the one thing that matched the whole chord —
+                # a key map built from bare keycodes would end the session on
+                # the "d" of CTRL+SHIFT+D typed into an editor. Not while the
+                # keyboard is grabbed: there the same key means "end this turn"
+                # (talk_listen_keys), and one key cannot mean both.
+                STATE.talk_click.put("finish")
             return
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        # Anything clicked before now belongs to the session that just ended —
+        # drained here rather than in its `finally`, which a click landing
+        # between that and the bar going away would slip past.
+        while ModeHandler._talk_clicked() is not None:
+            pass
         selection = ClipboardService.copy_selected()
         # Up front, before anything that can block. Opening the keyboards takes
         # ~350 ms and the conversation engine up to a second more; the user
@@ -346,6 +361,10 @@ class ModeHandler:
             # has to do something or the button reads as broken.
             print(f"⚠️  Keyboard preference not saved: {e}")
             config_module.CFG = replace(config_module.CFG, TALK_FREE_KEYBOARD=free)
+        # The Settings page is the other writer of this key; an open one would
+        # write its stale checkbox back on the next Apply.
+        from loquivox.ui.settings_dialog import SettingsDialog
+        SettingsDialog.sync_talk_switch()
         print(f"⌨️  Keyboard {'left to you' if free else 'held by the session'}")
 
     @staticmethod
@@ -364,7 +383,10 @@ class ModeHandler:
         pressed = keys.poll(mapping, timeout) or ModeHandler._talk_clicked()
         if KeyboardHandler.free_keyboard() == keys.grabbed:  # flipped since we asked
             keys.follow(grab=not keys.grabbed)
-            ModeHandler._show_talk_overlay(session.write)
+            # The strip, not the whole overlay: a re-show clears the partial
+            # transcript the user is watching themselves speak into, and only
+            # which keys are on offer has changed.
+            OverlayManager.set_hints(KeyboardHandler.talk_hints())
         return pressed
 
     @staticmethod
@@ -445,10 +467,7 @@ class ModeHandler:
                         return  # delivered, copied or dropped — the session is over
         finally:
             STATE.vad = None
-            # A click that arrived too late is not the next session's business.
             STATE.talk_engine = "cascade"
-            while ModeHandler._talk_clicked() is not None:
-                pass
             session.desks.close()        # stop the plugins watching for this session
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()
@@ -569,11 +588,15 @@ class ModeHandler:
         turns land in the same ``TalkSession``, and the writing pass that
         follows is a text completion that never learns which ran.
         """
-        engine = config_module.CFG.TALK_ENGINE
         # What the session can be *told* to do depends on who holds it: the
         # server engines close turns themselves and ignore "end turn". Set here
         # rather than read from CFG where it is needed, because a server engine
-        # that cannot open falls back to the cascade and CFG never learns.
+        # that cannot open falls back to the cascade and CFG never learns — and
+        # normalised first, or a typo in config.toml reads as a server engine
+        # while the cascade actually runs, losing it Space.
+        engine = config_module.CFG.TALK_ENGINE
+        if engine not in ("realtime", "live"):
+            engine = "cascade"
         STATE.talk_engine = engine
         if engine == "realtime":
             from loquivox.services.realtime_talk import RealtimeTalk

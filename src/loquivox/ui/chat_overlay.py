@@ -342,7 +342,6 @@ html, body {{
 .talk-bar button:hover {{ background: {accent_alpha20}; border-color: {accent}; }}
 .talk-bar button:active {{ transform: scale(0.96); }}
 .talk-bar .spacer {{ flex: 1; }}
-.talk-bar .drop {{ border-color: {white_alpha10}; color: {dim_text}; }}
 .talk-bar .keys.free {{ background: {accent_alpha30}; border-color: {accent}; }}
 .talk .chat-container {{ padding-bottom: 12px; }}
 .talk .chat-scroll-area {{ padding-bottom: 4px; }}
@@ -999,8 +998,11 @@ class ChatOverlay(Gtk.Window):
         """
         from loquivox.handlers.keyboard import KeyboardHandler  # lazy: avoid cycle
 
-        if not self.talk or any(m.get("role") == "result"
-                                for m in STATE.chat_messages):
+        # The *last* message, like ``ChatManager.set_result``'s own invariant:
+        # scanning the whole history would keep the bar hidden for the rest of
+        # a session that went back to talking (V), where it is the only way in.
+        if not self.talk or (STATE.chat_messages
+                             and STATE.chat_messages[-1].get("role") == "result"):
             return ""
         free = KeyboardHandler.free_keyboard()
         buttons = [
@@ -1011,7 +1013,15 @@ class ChatOverlay(Gtk.Window):
             f'>{self._FREE_LABELS[free]}</button>',
             '<span class="spacer"></span>',
         ]
+        import loquivox.config as config_module
+
         for verdict, _codes, key, what in KeyboardHandler.talk_actions():
+            # The one thing a button cannot do that its key can: clicking moves
+            # the pointer onto the bubble, so a capture framed on the pointer
+            # would frame the bubble. The key still does it, the button does
+            # not exist.
+            if verdict == "screen" and config_module.CFG.TALK_SCREENSHOT_REGION == "cursor":
+                continue
             # The key is worth naming only while it still works; with the
             # keyboard free it belongs to the app being typed into.
             tip = "" if free else f' title="{key}"'

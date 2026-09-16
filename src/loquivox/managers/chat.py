@@ -62,10 +62,13 @@ class ChatManager:
         Put a generated text up for review, replacing the previous attempt.
 
         A rewrite (R) must not stack a second copy under the first: what is on
-        screen is the candidate, and there is only ever one.
+        screen is the candidate, and there is only ever one. Any previous one,
+        not just the last message — "keep talking" (V) goes back to the
+        conversation, so by the time the next candidate lands there are turns
+        on top of the old one and popping the tail would miss it.
         """
-        if STATE.chat_messages and STATE.chat_messages[-1]["role"] == "result":
-            STATE.chat_messages.pop()
+        STATE.chat_messages[:] = [m for m in STATE.chat_messages
+                                  if m.get("role") != "result"]
         ChatManager.add_message("result", text, status=status)
 
     @staticmethod

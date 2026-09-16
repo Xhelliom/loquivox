@@ -32,13 +32,27 @@ try:
         "a grabbed session lost its own keys"
 
     config_module.CFG = replace(base, TALK_FREE_KEYBOARD=True)
-    free = KeyboardHandler.talk_listen_keys()
-    assert free and not set(free) & TYPING, f"typing still drives the session: {set(free) & TYPING}"
-    assert set(free.values()) == {"finish"}, free
+    assert KeyboardHandler.talk_listen_keys() == {}, "typing still drives the session"
     STATE.current_mode = "ai"
     hints = KeyboardHandler.talk_hints()
     assert hints == (([base.HOTKEY_DEFS["ai"][0]], "end"),), hints
-    print(f"✓ free keyboard: the session answers to its own keys only {sorted(free)}")
+
+    # The way out is the listener, which is the only thing that matched the
+    # whole chord — a bare keycode would end the session on the "d" of a
+    # CTRL+SHIFT+D typed into an editor.
+    STATE.talk_active = True
+    try:
+        KeyboardHandler._on_press("talk")
+        assert mode_module.ModeHandler._talk_clicked() == "finish", \
+            "the session hotkey no longer ends a free-keyboard session"
+        config_module.CFG = replace(base, TALK_FREE_KEYBOARD=False)
+        KeyboardHandler._on_press("talk")
+        assert mode_module.ModeHandler._talk_clicked() is None, \
+            "a grabbed session ends on a key that means 'end this turn'"
+        config_module.CFG = replace(base, TALK_FREE_KEYBOARD=True)
+    finally:
+        STATE.talk_active = False
+    print("✓ free keyboard: no key drives the session, its hotkey still ends it")
 
     keys = GrabbedKeys.__new__(GrabbedKeys)      # no devices opened
     keys._grabbable, keys._grabbed, grabs = [], False, []
@@ -106,7 +120,21 @@ try:
     assert 'talkAction("free")' in bar and "{" not in bar, bar
     STATE.chat_messages = [{"role": "result", "content": "x"}]
     assert bubble_self._talk_bar() == "", "the review panel is offered dead buttons"
+    # Back to talking (V) puts turns on top of the old candidate; the bar is
+    # the only way in with the keyboard free, so it must come back.
+    STATE.chat_messages.append({"role": "user", "content": "et sinon"})
+    assert bubble_self._talk_bar() != "", "the bar never came back after V"
     STATE.chat_messages = []
+
+    # A button cannot frame a capture on the pointer: clicking put the pointer
+    # on the bubble. The key still can.
+    config_module.CFG = replace(base, TALK_SCREENSHOT_REGION="cursor",
+                                TALK_SCREENSHOT=True)
+    assert 'talkAction("screen")' not in bubble_self._talk_bar(), \
+        "the Look button would capture the bubble"
+    assert any(v == "screen" for v, *_ in KeyboardHandler.talk_actions()), \
+        "the S key went away with the button"
+    config_module.CFG = replace(base, TALK_FREE_KEYBOARD=True)
     bubble_self.talk = False
     assert bubble_self._talk_bar() == "", "the side panel renders the talk bar"
     print("✓ the bar is one button per action, and only while the session listens")

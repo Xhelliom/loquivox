@@ -415,6 +415,25 @@ class KeyboardHandler:
             ModeHandler.start_talk_session(write=(mode == "talk"))
             return
 
+        # Everything below this line is the session's business, not a global
+        # hotkey's: a talk session drives itself from its own key map
+        # (talk_listen_keys) and from the bubble's buttons, and it owns the
+        # microphone for its whole life. Only the two above survive it, because
+        # they are how it ends. Guarding here rather than naming the modes to
+        # drop is what makes "a running session protects me" the default that a
+        # mode added later inherits — pin used to sit above this line and it
+        # was not harmless: unpinning fades the bubble out and destroys it, so
+        # an F9 pressed in an editor left the conversation with no bubble and
+        # brought the side panel back in its place.
+        #
+        # Grabbed or not: with the keyboard left free these keys are being
+        # typed into another app, and even grabbed, the gaps between two waits
+        # leak them through. An Esc landing here would reset_capture() under
+        # the session's feet, a Space would pause a recording it does not know
+        # is paused.
+        if STATE.talk_active:
+            return
+
         # Pin toggle (non-recording action)
         if mode == "pin":
             if not STATE.recording:
@@ -425,22 +444,6 @@ class KeyboardHandler:
         if mode == "tts":
             if not STATE.recording:
                 TTSService.toggle()
-            return
-
-        # Everything below this line is the session's business, not a global
-        # hotkey's: a talk session drives itself from its own key map
-        # (talk_listen_keys) and owns the microphone for its whole life. The
-        # three above are the exceptions — they end it, or toggle something
-        # that has nothing to do with it. Guarding here rather than naming the
-        # modes to drop is what makes "a session protects me" the default a
-        # mode added later inherits.
-        #
-        # Grabbed or not: with the keyboard left free these keys are being
-        # typed into another app, and even grabbed, the gaps between two waits
-        # leak them through. An Esc landing here would reset_capture() under
-        # the session's feet, a Space would pause a recording it does not know
-        # is paused.
-        if STATE.talk_active:
             return
 
         # Cancel the active recording / in-flight transcription (no insert).
@@ -660,16 +663,19 @@ class KeyboardHandler:
         """
         Keycode → action while a talk turn is being recorded.
 
-        With the keyboard left free (``TALK_FREE_KEYBOARD``) every one of those
-        keys is also landing in whatever the user is typing into, so none of
-        them may drive the session: only its own hotkey answers, and pressing
-        it again ends the session. ``start_talk_session`` is what stops that
-        press opening a second one. The actions themselves do not go away —
-        they move to the mouse, see the bubble's talk bar.
+        Empty with the keyboard left free (``TALK_FREE_KEYBOARD``): every one of
+        these keys is landing in whatever the user is typing into, so none of
+        them may drive the session. The actions do not go away — they move to
+        the mouse, see the bubble's talk bar — and the session's own hotkey
+        still ends it, through the listener (``start_talk_session``), which is
+        the only thing that matches a whole chord. Matching bare keycodes here
+        would end the session on the "d" of a CTRL+SHIFT+D typed elsewhere.
+
+        Polling an empty map is not a waste: it is what keeps reading the
+        devices, so nothing piles up on our fds while the user types.
         """
         if cls.free_keyboard():
-            return {code: "finish"
-                    for code in cls.trigger_codes("talk") | cls.trigger_codes("ai")}
+            return {}
 
         mapping: Dict[int, str] = {code: verdict
                                    for verdict, codes, _key, _what in cls.talk_actions()

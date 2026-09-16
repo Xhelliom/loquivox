@@ -28,6 +28,14 @@ class OverlayManager:
         OverlayManager._show_impl(mode, hints)
 
     @staticmethod
+    @run_on_main_thread
+    def set_hints(hints=None) -> None:
+        """Put a new hint strip on the overlay already up, and nothing else."""
+        existing = STATE.overlay_window
+        if existing is not None:
+            existing.set_hints(hints)
+
+    @staticmethod
     def _show_impl(mode: str, hints=None) -> None:
         # Late import to avoid circular dependency
         from loquivox.ui.recording_overlay import GtkOverlay
