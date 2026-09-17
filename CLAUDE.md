@@ -574,7 +574,13 @@ composes nothing: `marker()` / `content()` are the board's own
 the trace of an alert the board has since retracted (its ADR 0011), so
 `still_standing()` re-reads `GET /api/cards/<id>` and drops an entry whose card
 has moved since — a question answered at the keyboard is not asked again out
-loud. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
+loud. Twice, in fact: at the poll, and again through `Plugin.still_true`, which
+`Desk.take()` asks the moment a message is about to be handed back — the desk
+is only emptied at the next gap in the conversation, which can be a minute
+after the poll if the user kept talking. The message carries its entry
+(`board.Alert`, a `dict` that goes on the wire unchanged) so the re-check has
+something to re-read; the core still names no plugin, and a `still_true` that
+raises drops the message rather than speaking it. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
 local service most installations do not run.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
