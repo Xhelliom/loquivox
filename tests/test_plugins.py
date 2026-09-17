@@ -285,6 +285,39 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     print("✓ client delegation reaches the plugin with no tool name on the wire")
 
 
+def test_an_answer_is_rechecked_when_it_is_handed_back():
+    """
+    A plugin may say, at the last moment, that its answer no longer holds.
+
+    The desk is emptied at the next gap in the conversation, which can be long
+    after the answer was queued. ``Plugin.still_true`` is asked then, by the
+    one sweep all three engines share, so a message that stopped being true in
+    between is never said — and the core still names no plugin.
+    """
+    holds = {"ok": True}
+    plugins.register(Plugin(name="ticker",
+                            watch=lambda put, stop: (put({"role": "system", "content": "tick"}),
+                                                     stop.wait(30)),
+                            still_true=lambda message: holds["ok"]))
+    try:
+        session = TalkSession()
+        assert _wait(session.desks.ready), "the source never spoke"
+        holds["ok"] = False
+        assert session.desks.take() is None, "a stale answer was handed back"
+        assert not session.desks.ready()
+        session.desks.close()
+
+        holds["ok"] = True
+        session = TalkSession()
+        assert _wait(session.desks.ready)
+        plugin, message = session.desks.take()
+        assert plugin.name == "ticker" and message["content"] == "tick"
+        session.desks.close()
+    finally:
+        plugins._REGISTRY.pop("ticker", None)
+    print("✓ an answer is re-checked the moment it is handed back")
+
+
 class _Event_delegation:
     """The shape ``session.delegation.created`` arrives in."""
 
@@ -354,5 +387,6 @@ if __name__ == "__main__":
     test_the_live_engine_answers_the_backend_with_the_real_result()
     test_client_delegation_reaches_the_plugin_through_our_backend()
     test_a_native_tool_stands_down_only_what_it_replaces()
+    test_an_answer_is_rechecked_when_it_is_handed_back()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")

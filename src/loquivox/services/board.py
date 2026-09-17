@@ -117,9 +117,21 @@ def content(entry: Dict[str, Any]) -> str:
     return f"{marker(entry)} · {subject_}" + (f"\n{body}" if body else "")
 
 
+class Alert(dict):
+    """
+    The notification as a system message that still knows its entry.
+
+    A plain dict on the wire — every engine sends it as is — with the log entry
+    kept beside it so ``still_true`` can re-read the card when the message is
+    finally about to be said, not only when it was found.
+    """
+
+    entry: Dict[str, Any]
+
+
 def alert_message(entry: Dict[str, Any]) -> Dict[str, str]:
     """The notification as a system message, for either engine."""
-    return {"role": "system", "content": (
+    message = Alert(role="system", content=(
         "A notification from the user's kanban board has just arrived, about "
         f"« {subject(entry)} »:\n\n{content(entry)}\n\n"
         "This is not about the text being written. Interrupt yourself politely "
@@ -127,7 +139,9 @@ def alert_message(entry: Dict[str, Any]) -> Dict[str, str]:
         "language — what it is about, named as above, and what it wants — then "
         "ask what they want to do about it. Do not read the lines out as they "
         "are written, and invent nothing beyond them."
-    )}
+    ))
+    message.entry = entry
+    return message
 
 
 # --- the source ------------------------------------------------------------
@@ -163,6 +177,18 @@ def _entries() -> Optional[List[Dict[str, Any]]]:
         return None
     return [e for e in log["entries"] if isinstance(e, dict)
             and isinstance(e.get("id"), int)]
+
+
+def still_true(message: Dict[str, str]) -> bool:
+    """
+    Re-read the card the moment the message is about to be spoken.
+
+    ``_watch`` already checked once, at the poll; but the desk is only emptied
+    at the next gap in the conversation, which can be a minute later if the
+    user kept talking, and a question answered at the keyboard in between must
+    not be asked out loud anyway.
+    """
+    return still_standing(getattr(message, "entry", {}))
 
 
 def _watch(put: Callable[[Dict[str, str]], None], stop: threading.Event) -> None:
@@ -234,6 +260,7 @@ PLUGIN = Plugin(
     name="board",
     enabled=lambda: bool(config_module.CFG.TALK_BOARD),
     watch=_watch,
+    still_true=still_true,
     result_note="📋 Notification du board",
     settings=_settings,
 )
@@ -273,6 +300,13 @@ if __name__ == "__main__":
     assert not still_standing({"cardId": "moved", "cardStatus": "review"})
     assert not still_standing({"cardId": "gone", "cardStatus": "review"}), \
         "a card that cannot be re-read was spoken anyway"
+    # The message carries its entry, and answers the same question later.
+    alert = alert_message({"cardId": "live", "cardStatus": "review", "status": "blocked"})
+    assert json.loads(json.dumps(alert)) == {"role": "system", "content": alert["content"]}
+    assert still_true(alert)
+    cards["live"]["card"]["status"] = "done"
+    assert not still_true(alert), "a card moved after the poll was spoken anyway"
+    assert still_true({"role": "system", "content": "no entry"})
 
     # The watch seeds on what is already there, then speaks only what is new.
     log = {"entries": [{"id": 2, "status": "done", "cwd": "/h/git/x"}]}

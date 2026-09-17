@@ -99,6 +99,11 @@ class Plugin:
     #: session. Called with the desk's ``put`` and the event ``Desks.close()``
     #: sets; it must return once that event is set, and must not raise.
     watch: Optional[Callable[[Callable[[Dict[str, str]], None], threading.Event], None]] = None
+    #: whether a queued message still holds, asked at the moment it is about
+    #: to be handed back — which can be well after it was queued, if the user
+    #: kept talking. A message this answers False to is dropped in silence.
+    #: ``None`` means an answer never goes stale.
+    still_true: Optional[Callable[[Dict[str, str]], bool]] = None
 
     @property
     def is_tool(self) -> bool:
@@ -228,10 +233,22 @@ class Desk:
         return not self._results.empty()
 
     def take(self) -> Optional[Dict[str, str]]:
+        """The next answer that still holds; a stale one is dropped, not returned."""
+        while True:
+            try:
+                message = self._results.get_nowait()
+            except queue.Empty:
+                return None
+            if self.plugin.still_true is None or self._holds(message):
+                return message
+
+    def _holds(self, message: Dict[str, str]) -> bool:
+        """The plugin's own re-check, and a raising one drops the message."""
         try:
-            return self._results.get_nowait()
-        except queue.Empty:
-            return None
+            return bool(self.plugin.still_true(message))
+        except Exception as e:
+            print(f"⚠️  Plugin {self.plugin.name} could not re-check its answer: {e}")
+            return False
 
 
 class Desks:
@@ -355,6 +372,22 @@ if __name__ == "__main__":
 
     src = Plugin(name="src", watch=_source)
     assert not src.is_tool and p.is_tool
+
+    # A message is re-checked when it is handed back, not when it was queued:
+    # what was true at the poll may not be by the next gap in the conversation.
+    valid = {"a": True, "b": False}
+    stale = Desk(Plugin(name="stale", still_true=lambda m: valid[m["content"]]))
+    stale.put({"role": "system", "content": "a"})
+    stale.put({"role": "system", "content": "b"})
+    stale.put({"role": "system", "content": "a"})
+    valid["a"] = False
+    assert stale.ready() and stale.take() is None, "a stale answer was handed back"
+    stale.put({"role": "system", "content": "b"})
+    valid["b"] = True
+    assert stale.take() == {"role": "system", "content": "b"}
+    crashing = Desk(Plugin(name="crash", still_true=lambda m: 1 / 0))
+    crashing.put({"role": "system", "content": "x"})
+    assert crashing.take() is None, "a raising re-check let the message through"
 
     boom = Plugin(name="boom", description="", parameters={}, started="",
                   run=lambda a: 1 / 0, message=lambda a, r: {})
