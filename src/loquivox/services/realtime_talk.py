@@ -259,7 +259,8 @@ class RealtimeTalk:
             return []
         if self._gate is None:
             self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
-                                  margin=cfg.TALK_BARGE_IN_MARGIN)
+                                  margin=cfg.TALK_BARGE_IN_MARGIN,
+                                  headset=cfg.TALK_HEADSET)
         self._gate.feed(mono)
         if self._gate.speech_seconds < cfg.TALK_BARGE_IN_MS / 1000.0:
             self._held.append(mono)

@@ -1714,6 +1714,20 @@ class SettingsDialog:
         )
         body.pack_start(cls._talk_free_kbd_check, False, False, 0)
 
+        cls._talk_headset_check = Gtk.CheckButton(
+            label="The reply plays in my headset's earpieces")
+        cls._talk_headset_check.set_active(bool(config_module.CFG.TALK_HEADSET))
+        cls._talk_headset_check.set_tooltip_text(
+            "Skips the echo calibration: interrupting starts working at the "
+            "plain voice threshold instead of × the measured echo.\n\n"
+            "For a headset only — typically a USB one, where interrupting "
+            "otherwise needs shouting because your own voice lands in the "
+            "calibration window and becomes the bar. With the speakers on, "
+            "their echo would read as speech and every reply would cut "
+            "itself off."
+        )
+        body.pack_start(cls._talk_headset_check, False, False, 0)
+
         cls._talk_barge_margin = Gtk.SpinButton.new_with_range(1.0, 6.0, 0.1)
         cls._talk_barge_margin.set_digits(1)
         cls._talk_barge_margin.set_value(float(config_module.CFG.TALK_BARGE_IN_MARGIN))
@@ -1928,6 +1942,7 @@ class SettingsDialog:
         free_keyboard = bool(cls._talk_free_kbd_check.get_active())
         screenshot = bool(cls._talk_shot_check.get_active())
         auto_paste = bool(cls._talk_autopaste_check.get_active())
+        headset = bool(cls._talk_headset_check.get_active())
         buffer = cls._talk_instructions.get_buffer()
         instructions = buffer.get_text(buffer.get_start_iter(),
                                        buffer.get_end_iter(), False).strip()
@@ -1945,6 +1960,7 @@ class SettingsDialog:
                 "screenshot_region": cls._talk_shot_region.get_active_id() or "window",
                 "screenshot_restore_clipboard": bool(cls._talk_shot_clip.get_active()),
                 "barge_in_margin": round(float(cls._talk_barge_margin.get_value()), 2),
+                "headset": headset,
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
             })

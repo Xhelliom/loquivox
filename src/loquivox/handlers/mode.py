@@ -946,7 +946,8 @@ class ModeHandler:
         if started.is_set():
             gate = STATE.vad = EchoGate(STATE.capture_rate,
                                         threshold=cfg.TALK_VAD_THRESHOLD,
-                                        margin=cfg.TALK_BARGE_IN_MARGIN)
+                                        margin=cfg.TALK_BARGE_IN_MARGIN,
+                                        headset=cfg.TALK_HEADSET)
         needed = cfg.TALK_BARGE_IN_MS / 1000.0
         while speaker.is_alive():
             vad = STATE.vad

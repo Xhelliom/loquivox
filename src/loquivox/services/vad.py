@@ -198,6 +198,14 @@ class EchoGate:
     headset there is nothing to leak, the bar sits at ``threshold`` and
     interrupting works as it always did.
 
+    ``headset`` skips the calibration window outright: the bar is ``threshold``
+    from the first block. It exists for the case the calibration gets wrong —
+    a USB headset whose voice lands in the measurement window (an interruption
+    attempted the moment the reply starts reads as echo, and the bar then sits
+    at twice the voice: nothing short of shouting gets through). Only set it
+    when the reply really plays in the headset's earpieces: with the speakers
+    on, the echo would read as speech and the assistant would cut itself off.
+
     Threading: ``feed()`` runs in the PortAudio callback while the talk loop
     reads ``speech_seconds`` from its own thread — plain float reads, as in
     ``VoiceActivityDetector``.
@@ -209,13 +217,16 @@ class EchoGate:
     ADVICE_GAIN: float = 2.0
 
     def __init__(self, sample_rate: int, *, threshold: float = 0.02,
-                 margin: float = 2.0, calibration_ms: int = 600) -> None:
+                 margin: float = 2.0, calibration_ms: int = 600,
+                 headset: bool = False) -> None:
         self.sample_rate = max(1, int(sample_rate))
         self.threshold = float(threshold)
         self.margin = max(1.0, float(margin))
         #: A reply often opens with a beat of silence; calibrating on that
         #: alone would put the bar under the echo that follows.
-        self._calibration = max(0.0, calibration_ms / 1000.0)
+        #: A headset calibrates on nothing: there is no leak to measure, and a
+        #: voice caught in the window would become the bar instead.
+        self._calibration = 0.0 if headset else max(0.0, calibration_ms / 1000.0)
         self.elapsed = 0.0
         #: loudest block of the calibration window — the echo, as heard here
         self.echo_peak = 0.0
@@ -358,4 +369,16 @@ if __name__ == "__main__":
     # headset — where an assistant that cannot be interrupted is not the case.
     assert loud.advice and "headset" in loud.advice, loud.advice
     assert not head.advice, head.advice
+
+    # Headset mode skips calibration: a voice speaking over the reply from the
+    # first block counts at once, and never becomes the bar. Without it the
+    # same voice, caught in the 600 ms window, would set the bar at twice
+    # itself and only shouting would get through.
+    hs = EchoGate(RATE, threshold=0.02, margin=2.0, calibration_ms=600,
+                  headset=True)
+    assert hs.bar == 0.02, hs.bar
+    for _ in range(4):                  # the user cuts in the moment it starts
+        hs.feed(voice)
+    assert hs.echo_peak == 0.0, hs.echo_peak
+    assert hs.speech_seconds >= 0.3, "headset barge-in waited out calibration"
     print("✓ EchoGate OK")

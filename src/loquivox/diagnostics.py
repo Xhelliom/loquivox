@@ -439,7 +439,8 @@ def _config_summary() -> str:
         keys = ("BACKEND", "FALLBACK_BACKEND", "TALK_ENGINE", "TTS_ENGINE",
                 "MODEL_CHAT", "MODEL_VISION", "OVERLAY_POSITION",
                 "POSTPROCESS_LEVEL", "POSTPROCESS_TRANSLATE",
-                "TALK_SCREENSHOT", "TALK_RESEARCH", "TALK_BARGE_IN")
+                "TALK_SCREENSHOT", "TALK_RESEARCH", "TALK_BARGE_IN",
+                "TALK_HEADSET")
         return "\n".join(f"  {k} = {getattr(cfg, k)!r}" for k in keys
                          if hasattr(cfg, k))
     except Exception as e:

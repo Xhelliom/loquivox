@@ -355,6 +355,17 @@ differs is who decides to call it and who waits:
 | a slow plugin | the backend waits (see below) | nothing waits |
 | the answer reaches the backend | directly, as its tool result | through `session.turns`, next turn |
 
+Under `client` that last row has a price the cascade never pays: there, the
+conversation loop is blocked while the plugin works, so the stub *is* the wait.
+Live is full duplex, and a voice model handed a stub with nothing else keeps
+the floor — measured, 23 s of restating the brief as a question the plugin's
+own answer had already settled, while `push_result` waited for a gap that
+never came. So `_consult` sends `AWAIT_RESULT` as `thinking` whenever
+`Desks.coming()` says something is on its way (in flight *or* already queued —
+the caller is asking whether something is about to arrive, not which leg it is
+on), and sends it *before* the commentary, which is what sets the model
+talking.
+
 The `responses` waiting is the one place Loquivox deliberately does the
 *opposite* of the other two engines, and `_answer_call` is where. Cascade and
 Realtime answer a tool call with the plugin's `started` stub because their
@@ -721,8 +732,12 @@ stopped, with no reason given.
 event and not the call to `speak()`: the calibration window has to measure the
 reply's own echo, so it must not open on the silence before the first sample
 reaches the speakers. On a headset it measures a quiet room, the bar stays at
-`TALK_VAD_THRESHOLD`, and that is why there is no "do you wear headphones"
-setting.
+`TALK_VAD_THRESHOLD`, and that is why there is normally no "do you wear
+headphones" setting. The exception is a voice caught in that window — typically
+a USB headset, where interrupting the moment the reply starts reads as echo and
+the bar lands at twice the voice, so only shouting gets through. `TALK_HEADSET`
+(Settings → Talk, off by default) skips the calibration for exactly that case;
+it must stay off on speakers, where the echo would read as speech instead.
 
 What was heard when the user cut in is not thrown away: `snapshot_tail` keeps
 `TALK_BARGE_IN_KEEP` seconds and hands them to the next `_talk_listen` as its

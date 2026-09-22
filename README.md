@@ -195,7 +195,10 @@ question at a time and still knows when to stop.
 **Cut it off whenever you like.** Start talking while it is still speaking and it
 stops mid-sentence and listens — your first words are kept as the start of your turn,
 not lost to the interruption. It works out how loudly it can hear itself by listening
-to its own reply, so a headset needs no setting at all; on speakers with the volume up,
+to its own reply, so a headset normally needs no setting; if interrupting still
+needs shouting on one (typically USB — your own voice lands in the calibration
+window and becomes the bar), tick *The reply plays in my headset's earpieces* in
+Settings → Talk (`headset = true`). On speakers with the volume up,
 `libpipewire-module-echo-cancel` keeps it from cutting itself off. Turn it off with
 `barge_in = false`.
 

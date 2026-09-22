@@ -329,6 +329,13 @@ class Config:
     # and nothing can interrupt it. Each reply prints the two numbers to set it
     # from: the echo peak and the loudest block heard.
     TALK_BARGE_IN_MARGIN: float = 2.0
+    # The reply plays in a headset's earpieces: skip the echo calibration and
+    # interrupt at the plain threshold. For the case auto-calibration gets
+    # wrong — a voice caught in the measurement window becomes the bar, and
+    # only shouting gets through (typical with a USB headset). Only set this
+    # when the assistant really speaks in the headset: with the speakers on,
+    # their echo reads as speech and every reply cuts itself off.
+    TALK_HEADSET: bool = False
     # How the conversation is held:
     #   "cascade"  — STT → LLM → TTS, every slot swappable (local or cloud)
     #   "realtime" — one OpenAI Realtime session, speech in and speech out:
@@ -918,6 +925,8 @@ def _build_config() -> Config:
         overrides["TALK_BARGE_IN_KEEP"] = float(talk["barge_in_keep"])
     if "barge_in_margin" in talk:
         overrides["TALK_BARGE_IN_MARGIN"] = float(talk["barge_in_margin"])
+    if "headset" in talk:
+        overrides["TALK_HEADSET"] = bool(talk["headset"])
     if str(talk.get("system_prompt", "")).strip():
         overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
     if "chat_prompt" in talk and str(talk["chat_prompt"]).strip():

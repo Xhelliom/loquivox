@@ -316,6 +316,12 @@ barge_in_keep = 1.5
 # cuts itself off; too high and you cannot interrupt it. Every reply prints
 # `🔉 echo peak … · loudest …` — set this just under loudest / peak.
 barge_in_margin = 2.0
+# Headset: the reply plays in the headset's earpieces — skip the echo
+# calibration and interrupt at the plain threshold. For a headset only
+# (typically USB, where interrupting otherwise needs shouting because your
+# own voice lands in the calibration window and becomes the bar). With the
+# speakers on, their echo reads as speech and every reply cuts itself off.
+headset = false
 
 # Screen context: the focused window, captured when the session starts,
 # described once by the vision model and handed to the conversation. Most of
