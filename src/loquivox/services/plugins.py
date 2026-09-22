@@ -324,6 +324,18 @@ class Desks:
     def ready(self) -> bool:
         return any(desk.ready() for desk in self._desks.values())
 
+    def coming(self) -> bool:
+        """
+        Whether an answer is on its way — still being worked on, or queued and
+        waiting for the next gap in the conversation.
+
+        Both halves count, because what a caller does with this is decide
+        whether something is about to arrive, not which leg of the journey it
+        is on. The Live engine's client delegation asks: it hands the voice
+        model a stub and must tell it to hold the floor for the real answer.
+        """
+        return any(desk.pending or desk.ready() for desk in self._desks.values())
+
     def take(self) -> Optional[Tuple[Plugin, Dict[str, str]]]:
         """Sweep the desks for one answer to hand back. None when there is none."""
         for desk in self._desks.values():
@@ -460,13 +472,19 @@ if __name__ == "__main__":
         assert desks.closed.is_set()
 
         assert not desks.ready() and desks.take() is None
+        assert not desks.coming(), "idle desks announced an answer on its way"
         desks.get("echo").ask('{"say": "hi"}')
         for _ in range(100):
             if desks.ready():
                 break
             time.sleep(0.01)
+        # Still coming once the work itself is done: it is queued, and the
+        # question a caller asks is whether something is about to arrive, not
+        # which leg of the journey it is on.
+        assert desks.coming(), "a queued answer read as nothing coming"
         plugin, message = desks.take()
         assert plugin.name == "echo" and message["content"] == "hi"
+        assert not desks.coming(), "a handed-back answer was still counted"
     finally:
         _REGISTRY.clear()
         _REGISTRY.update(saved)

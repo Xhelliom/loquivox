@@ -106,6 +106,19 @@ QUIET_CONTEXT: str = (
     "aloud or asked about it. Never speak because it arrived and never describe "
     "it unprompted: wait for the user to speak, then use it to understand them."
 )
+#: Sent as thinking beside a delegation answer while a plugin is still at work,
+#: because that answer is a stub and the real one cannot be handed over until
+#: ``push_result`` finds a gap. Nothing otherwise tells the voice model to leave
+#: one: measured on ``gpt-live-1``, a call whose answer was ready within the
+#: second reached it 23 s later, because it had kept the floor for all of them
+#: — restating the brief as a question its own answer had already settled.
+AWAIT_RESULT: str = (
+    "A result you are waiting on is still being produced and will reach you "
+    "shortly. Say the line you have just been given, then stop and wait in "
+    "silence: do not restate it, do not recap the conversation, and do not ask "
+    "the user to confirm anything. Speak again when the result arrives, or "
+    "when the user does."
+)
 
 
 def _is_audible(pcm: bytes) -> bool:
@@ -522,6 +535,11 @@ class LiveTalk:
                              delegation_id=delegation_id)
                 return
             print(f"🧠 Delegation ({took:.1f}s): '{answer}'")
+            if self._session.desks.coming():
+                # Before the commentary, not after: thinking is silent, the
+                # commentary is what sets the model talking, and the rule has
+                # to be in hand by then. See AWAIT_RESULT.
+                self._append("thinking", AWAIT_RESULT, delegation_id=delegation_id)
             self._append("commentary", answer, delegation_id=delegation_id)
         except Exception as e:
             print(f"⚠️  Delegation failed: {e}")
@@ -1075,6 +1093,18 @@ if __name__ == "__main__":
     time.sleep(0.05)
     assert sent == [("commentary", "il fait 12 degrés", "item_1")], sent
     assert len(consulted) == 1, consulted
+    # A stub answer handed over while a plugin is still working must carry the
+    # rule to stop after saying it — and carry it *first*, the commentary being
+    # what sets the model talking. See AWAIT_RESULT.
+    sent.clear()
+    held = LiveTalk(TalkSession())
+    held._session.consult = lambda: "je rédige"
+    held._session.desks.coming = lambda: True
+    held._append = lambda kind, content, delegation_id=None: sent.append(kind)
+    held._on_delegation(_Event(type="session.delegation.created",
+                               delegation=_Event(id="item_8", target="client")))
+    assert _wait_for(lambda: len(sent) == 2)
+    assert sent == ["thinking", "commentary"], sent
     # A backend with nothing to say must still answer: the voice model asked
     # for help, `_seen` means it will not ask twice, and silence is for ever.
     sent.clear()

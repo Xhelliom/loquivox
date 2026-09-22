@@ -235,7 +235,7 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     on the table when the backend is consulted.
     """
     from loquivox.services import ai as ai_module
-    from loquivox.services.live_talk import LiveTalk
+    from loquivox.services.live_talk import AWAIT_RESULT, LiveTalk
 
     session = TalkSession()
     session.add_user("quel temps fait-il à Lyon")
@@ -263,7 +263,12 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
         ai_module.AIService.complete = real_complete
 
     assert "weather" in offered[0], offered
-    assert sent == [("commentary", "Il pleut à Lyon.", "item_7")], sent
+    # What the backend hands over here is the plugin's stub, and the real
+    # answer cannot follow until `push_result` finds a gap — so the rule to
+    # stop after saying it goes out with it, and goes out *first*: thinking is
+    # silent, the commentary is what sets the model talking.
+    assert sent == [("thinking", AWAIT_RESULT, "item_7"),
+                    ("commentary", "Il pleut à Lyon.", "item_7")], sent
     # The backend's answer is NOT a turn: the voice model says it in its own
     # words, and that spoken version is what the transcript brings back.
     assert session.turns[-1]["content"] == "quel temps fait-il à Lyon", session.turns
