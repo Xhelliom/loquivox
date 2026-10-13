@@ -311,6 +311,11 @@ def test_conversation_settings_say_where_they_apply():
         cls._on_talk_engine_changed(cls._engine_combo)
         assert cls._talk_semantic_check.get_sensitive() is on, engine
         assert cls._talk_depth.get_sensitive(), "depth reads for F6 on every engine"
+    # The install thread's completion must not wake the box outside the cascade.
+    cls._engine_combo.set_active_id("live")
+    cls._talk_semantic_check.set_sensitive(False)
+    cls._on_talk_engine_changed(cls._engine_combo)
+    assert not cls._talk_semantic_check.get_sensitive()
     print("✓ Conversation settings name their mode; cascade-only one greys elsewhere")
 
 
