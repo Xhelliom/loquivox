@@ -1768,7 +1768,7 @@ class SettingsDialog:
         ("deep", "Deep — pushes the reasoning further"),
     )
 
-    _SEMANTIC_LABEL_BASE = "End my turns on meaning, not on silence (cascade)"
+    _SEMANTIC_LABEL_BASE = "End my turns on meaning, not silence (cascade)"
 
     @classmethod
     def _semantic_needs_onnx(cls) -> bool:
@@ -1813,12 +1813,13 @@ class SettingsDialog:
 
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
-                " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
+                " (offers onnxruntime)" if cls._semantic_needs_onnx() else ""))
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         cls._talk_semantic_check.set_tooltip_text(
             "Read by the cascade engine alone. The Realtime and Live engines "
-            "close your turns on their own server, so this does nothing there.")
+            "close your turns on their own server, so this does nothing there. "
+            "If onnxruntime is missing, ticking asks before installing it.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)
 
         cls._talk_speak_check = Gtk.CheckButton(
