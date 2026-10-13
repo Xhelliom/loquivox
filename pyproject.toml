@@ -36,6 +36,9 @@ deepgram = ["deepgram-sdk>=7"]
 # Semantic end-of-turn detection for talk mode (Smart Turn v3, ~8 MB ONNX
 # fetched on first use). Without it, talk mode ends turns on silence alone.
 turn = ["onnxruntime>=1.17"]
+# Local wake word for the companion mode (presence listener). Without it only
+# the hotkey starts a session.
+wake = ["openwakeword>=0.6"]
 # Local offline text-to-speech (Piper). Voices are ~60 MB ONNX files fetched on
 # first use into ~/.cache/loquivox/piper. Without it, replies are spoken by the
 # configured cloud engine.
