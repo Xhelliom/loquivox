@@ -19,7 +19,12 @@ info = {"layout": {"tile_pos_in_workspace_view": [10.0, 20.0],
                    "window_size": [800, 600],
                    "window_offset_in_tile": [2.0, 3.0]}}
 assert niri_window_geometry(info) == (12, 23, 800, 600), niri_window_geometry(info)
-# Floating windows have no tile position: unknown, not zero.
+# Real niri 26.04 payload of a tiled window: no position, only the layout slot.
+tiled = {"layout": {"pos_in_scrolling_layout": [2, 1], "tile_size": [460.0, 872.0],
+                    "window_size": [460, 872], "tile_pos_in_workspace_view": None,
+                    "window_offset_in_tile": [0.0, 0.0]}}
+assert niri_window_geometry(tiled) is None
+# Without a tile position: unknown, not zero.
 assert niri_window_geometry({"layout": {"tile_pos_in_workspace_view": None,
                                         "window_size": [1, 1]}}) is None
 assert niri_window_geometry({}) is None
@@ -43,6 +48,7 @@ def check(kind, geometry):
     def probe():
         w = capture_halo._current
         seen[kind] = (w is not None, w and w.kind, w and w.get_accept_focus())
+        seen[kind + "_realized"] = bool(w and w.get_realized())
         return False
     GLib.timeout_add(100, probe)
     def after():
@@ -50,12 +56,22 @@ def check(kind, geometry):
         return False
     GLib.timeout_add(1200, after)
 
+# The thumbnail case must not depend on what the real backend knows.
+import loquivox.platform as _platform
+class _NoGeometry:
+    def focused_window_geometry(self):
+        return None
+_platform.get_screenshot = lambda: _NoGeometry()
+
+assert capture_halo.CLICK_THROUGH.is_empty()  # clicks pass through
+
 check("halo", (100, 100, 400, 300))
 GLib.timeout_add(1500, lambda: check("thumb", None) or False)
 GLib.timeout_add(3000, Gtk.main_quit)
 Gtk.main()
 
 assert seen["halo"] == (True, "halo", False), seen
+assert seen["halo_realized"] and seen["thumb_realized"], seen
 assert seen["halo_gone"], seen
 assert seen["thumb"] == (True, "thumb", False), seen
 assert seen["thumb_gone"], seen

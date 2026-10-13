@@ -121,7 +121,13 @@ class WaylandInput(InputBackend):
 def niri_window_geometry(info) -> Optional[Tuple[int, int, int, int]]:
     """``(x, y, w, h)`` from a `niri msg -j focused-window` payload, or None.
 
-    The tile position is None for floating windows, which is "unknown", not 0.
+    ``None`` means *position unknown*, the normal case for a tiled window:
+    niri reports ``tile_pos_in_workspace_view: null`` for it and only gives
+    ``pos_in_scrolling_layout`` (column, row). Its screen position depends on
+    the view's scroll offset, which no IPC call exposes (checked on niri 26.04:
+    ``focused-window``, ``windows``, ``workspaces``, ``focused-output``). So
+    this is reliable for floating windows only; callers fall back to a
+    thumbnail otherwise.
     """
     try:
         layout = info["layout"]

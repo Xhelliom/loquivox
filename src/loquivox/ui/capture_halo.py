@@ -27,16 +27,18 @@ try:
 except (ValueError, ImportError):
     HAS_LAYER_SHELL = False
 
-from loquivox.ui.recording_overlay import BOTTOM_MARGIN
-
 Geometry = Tuple[int, int, int, int]
 
 DURATION_MS = 1000
 HALO_RGB = (0.25, 0.55, 1.0)
 HALO_WIDTH = 6
 THUMB_W = 240
-#: the talk bubble is bottom-anchored above the recording overlay; sit below it
-THUMB_MARGIN = BOTTOM_MARGIN + 160
+#: the companion bubble sits at the top right; the thumbnail goes next to it,
+#: just beneath the top edge and clear of the right one
+THUMB_MARGIN_TOP = 48
+THUMB_MARGIN_SIDE = 24
+#: an empty input region: every click goes to the window underneath
+CLICK_THROUGH = cairo.Region()
 
 _current: Optional["_Flash"] = None
 
@@ -47,6 +49,7 @@ class _Flash(Gtk.Window):
     def __init__(self, geometry: Optional[Geometry], png: Optional[str], duration_ms: int):
         super().__init__(type=Gtk.WindowType.POPUP)
         self.geometry = geometry
+        self.origin = (0, 0)  # where the window sits on screen (X11 globals → local)
         self.kind = "halo" if geometry else "thumb"
         self.pixbuf = None
         if not geometry and png:
@@ -64,7 +67,7 @@ class _Flash(Gtk.Window):
         if screen.get_rgba_visual() and screen.is_composited():
             self.set_visual(screen.get_rgba_visual())
         self.connect("draw", self._draw)
-        self.connect("realize", lambda *_: self.input_shape_combine_region(cairo.Region()))
+        self.connect("realize", lambda *_: self.input_shape_combine_region(CLICK_THROUGH))
 
         if HAS_LAYER_SHELL and GtkLayerShell.is_supported():
             GtkLayerShell.init_for_window(self)
@@ -77,20 +80,26 @@ class _Flash(Gtk.Window):
                              GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
                     GtkLayerShell.set_anchor(self, edge, True)
             else:
-                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.BOTTOM, True)
-                GtkLayerShell.set_margin(self, GtkLayerShell.Edge.BOTTOM, THUMB_MARGIN)
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.TOP, True)
+                GtkLayerShell.set_anchor(self, GtkLayerShell.Edge.RIGHT, True)
+                GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, THUMB_MARGIN_TOP)
+                GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, THUMB_MARGIN_SIDE)
         else:
             self.set_keep_above(True)
             self.set_skip_taskbar_hint(True)
-            area = screen.get_display().get_primary_monitor().get_geometry()
+            display = screen.get_display()
+            monitor = display.get_primary_monitor() or display.get_monitor(0)
+            if monitor is None:  # nowhere to draw
+                self.destroy()
+                return
+            area = monitor.get_geometry()
             if geometry:
+                self.origin = (area.x, area.y)
                 self.move(area.x, area.y)
+                self.set_default_size(area.width, area.height)
             else:
-                self.move(area.x + (area.width - THUMB_W) // 2, area.y + area.height - THUMB_MARGIN)
-        if geometry and not (HAS_LAYER_SHELL and GtkLayerShell.is_supported()):
-            area = screen.get_display().get_primary_monitor().get_geometry()
-            self.set_default_size(area.width, area.height)
-        elif not geometry:
+                self.move(area.x + area.width - THUMB_W - THUMB_MARGIN_SIDE, area.y + THUMB_MARGIN_TOP)
+        if not geometry:
             h = self.pixbuf.get_height() if self.pixbuf else 1
             self.set_default_size(THUMB_W, h)
         self.show_all()
@@ -119,6 +128,7 @@ class _Flash(Gtk.Window):
         cr.set_operator(cairo.OPERATOR_OVER)
         if self.geometry:
             x, y, w, h = self.geometry
+            x, y = x - self.origin[0], y - self.origin[1]
             for i in range(HALO_WIDTH):  # soft edge: stacked strokes, fading outward
                 cr.set_source_rgba(*HALO_RGB, a * (1 - i / HALO_WIDTH) * 0.9)
                 cr.set_line_width(1)
