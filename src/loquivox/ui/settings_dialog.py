@@ -526,7 +526,6 @@ class SettingsDialog:
     def _on_apply_companion(cls, _btn) -> None:
         from loquivox.config_io import ConfigWriteError, update_section
 
-        old_wake = config_module.CFG.COMPANION_WAKE_WORD
         wake = cls._comp_wake.get_active_id()
         try:
             update_section("companion", {
@@ -538,9 +537,10 @@ class SettingsDialog:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
-        if wake != old_wake:
-            from loquivox.handlers import companion
-            companion.set_wake_word(wake)
+        # Always reload: after "Install openwakeword" the word is unchanged
+        # but the model still has to be loaded.
+        from loquivox.handlers import companion
+        companion.set_wake_word(wake)
         cls._comp_status.set_markup(
             "<small>✓ Saved — the wake word and the click apply now, "
             "the startup choice at the next launch.</small>")

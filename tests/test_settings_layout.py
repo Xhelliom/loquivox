@@ -265,7 +265,15 @@ def test_companion_settings_apply_without_editing_toml():
             cls._comp_enabled.set_active(False)
             cls._comp_wake.set_active_id("alexa")
             cls._comp_click.set_active_id("active")
-            cls._on_apply_companion(None)
+            from loquivox.handlers import companion
+            seen, real_set = [], companion.set_wake_word
+            companion.set_wake_word = seen.append
+            try:
+                cls._on_apply_companion(None)
+                cls._on_apply_companion(None)  # same word: still reloaded
+            finally:
+                companion.set_wake_word = real_set
+            assert seen == ["alexa", "alexa"], seen
             cfg = config_module.CFG
             assert (cfg.COMPANION_ENABLED, cfg.COMPANION_WAKE_WORD,
                     cfg.COMPANION_CLICK_MODE) == (False, "alexa", "active"), cfg
