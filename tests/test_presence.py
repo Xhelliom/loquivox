@@ -89,6 +89,7 @@ def test_without_openwakeword_starts_and_warns_once(capsys=None):
     with contextlib.redirect_stdout(out):
         p = _make([], None)
         p.start(); p.release(); p.resume(); p.stop()
+        p.start(); p.stop()                    # second start: _warned must keep it silent
     assert out.getvalue().count("Presence: openwakeword unavailable") == 1
     assert _Stream.opened[-1] is not None  # mic still opened
 
