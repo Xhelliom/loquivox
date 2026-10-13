@@ -155,6 +155,12 @@ def install(presence, bubble) -> Companion:
     return _companion
 
 
+def set_wake_word(name: str) -> None:
+    """Settings changed the wake word: reload it in the running listener."""
+    if _companion is not None:
+        _companion.presence.set_wake_model(name)
+
+
 def toggle_silence() -> None:
     if _companion is not None:
         _companion.toggle_silence()

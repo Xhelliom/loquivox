@@ -29,7 +29,7 @@ from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 #: what _create_dialog asks for; nothing may make the window wider than this
 DEFAULT_WIDTH = 640
 
-TABS = ["Models", "Talk", "Plugins", "Refinement", "Hotkeys",
+TABS = ["Models", "Talk", "Plugins", "Companion", "Refinement", "Hotkeys",
         "Appearance & comfort", "API Keys", "Support"]
 
 
@@ -251,6 +251,56 @@ def _scroll_hungry(widget, found=None):
     return found
 
 
+def test_companion_settings_apply_without_editing_toml():
+    """Apply writes [companion] and CFG follows; the example documents each key."""
+    import tempfile
+    from loquivox import config as config_module, config_io
+
+    cls = SettingsDialog
+    real = config_module.CONFIG_FILE
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d) / "config.toml"
+        config_module.CONFIG_FILE = config_io.CONFIG_FILE = tmp
+        try:
+            cls._comp_enabled.set_active(False)
+            cls._comp_wake.set_active_id("alexa")
+            cls._comp_click.set_active_id("active")
+            from loquivox.handlers import companion
+            import threading, time
+            seen, real_set = [], companion.set_wake_word
+            companion.set_wake_word = seen.append
+
+            def settle():  # the reload runs on a thread
+                time.sleep(0.2)
+                for t in threading.enumerate():
+                    if t is not threading.main_thread():
+                        t.join(1)
+
+            try:
+                cls._on_apply_companion(None)
+                settle()
+                cls._on_apply_companion(None)  # same word: no reload
+                settle()
+                assert seen == ["alexa"], seen
+                cls._wake_installed = True  # openwakeword just installed
+                cls._on_apply_companion(None)
+                settle()
+                assert seen == ["alexa", "alexa"], seen
+                assert not cls._wake_installed
+            finally:
+                companion.set_wake_word = real_set
+            cfg = config_module.CFG
+            assert (cfg.COMPANION_ENABLED, cfg.COMPANION_WAKE_WORD,
+                    cfg.COMPANION_CLICK_MODE) == (False, "alexa", "active"), cfg
+        finally:
+            config_module.CONFIG_FILE = config_io.CONFIG_FILE = real
+            config_module.reload_config()
+    example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text()
+    for key in ("enabled", "wake_word", "click_mode"):
+        assert f"\n{key} = " in example, key
+    print("✓ companion settings apply live and are documented")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -260,5 +310,6 @@ if __name__ == "__main__":
     test_handlers_find_their_widgets()
     test_greying_a_control_greys_its_label()
     test_wheel_over_a_control_scrolls_the_page()
+    test_companion_settings_apply_without_editing_toml()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")
