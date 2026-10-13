@@ -114,6 +114,10 @@ class AppState:
     # True while a recording is paused: audio is neither buffered nor streamed,
     # but the input stream stays open so capture can resume instantly.
     paused: bool = False
+    # Companion: "active" (listening for the wake word) or "silent"; and True
+    # while its cloud session is open (no transcript reaches the chat then).
+    presence_mode: str = "active"
+    companion_session: bool = False
     # Whatever talk mode wants the audio callback to feed while it listens:
     # a VoiceActivityDetector between turns, an EchoGate while a reply plays
     # (both in services/vad.py). None outside talk mode.

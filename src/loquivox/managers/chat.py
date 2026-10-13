@@ -35,6 +35,8 @@ class ChatManager:
         the next paste is aimed at. An overlay that is already up — pinned, or
         carrying a conversation — still gets the message.
         """
+        if STATE.companion_session:
+            return  # the companion's bubble shows no conversation
         STATE.chat_messages.append({"role": role, "text": text})
 
         # Trim to limit
@@ -225,6 +227,8 @@ class ChatManager:
         because each one carries the whole turn, not an increment, and the
         finished turn arrives as a real message right after.
         """
+        if STATE.companion_session:
+            return
         now = time.monotonic()
         if now - ChatManager._last_stream < ChatManager._STREAM_INTERVAL:
             return

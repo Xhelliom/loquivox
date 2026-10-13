@@ -52,6 +52,7 @@ HOTKEY_DESCRIPTIONS: Dict[str, str] = {
     "cancel":     "Cancel recording / transcription",
     "pause":      "Pause / resume the recording",
     "refine":     "Stop & pick this dictation's refinement",
+    "companion":  "Companion: toggle silence mode",
 }
 
 
@@ -412,6 +413,13 @@ class Config:
     TALK_IDLE_TIMEOUT: float = 15.0
     # Hard stop on the conversation length (user turns).
     TALK_MAX_TURNS: int = 30
+    #: Companion: start listening (locally) when the app launches.
+    COMPANION_ENABLED: bool = True
+    #: Presence mode a single click on the bubble switches to ("active" is the
+    #: other one; a second click goes back).
+    COMPANION_CLICK_MODE: str = "silent"
+    #: Seconds of silence, both ways, that end a companion conversation.
+    COMPANION_IDLE_TIMEOUT: float = 12.0
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
     #: so typing and shortcuts keep working in other apps. Every key then also
     #: lands in whatever is being typed into, so the session answers to its own
@@ -602,6 +610,9 @@ class Config:
         "dictation":  {"icon": "🎙️", "text": "Listening...",    "bg": "bg", "fg": "accent"},
         "ai":         {"icon": "🤖", "text": "Chat Mode...",    "bg": "bg", "fg": "accent"},
         "talk":       {"icon": "🗣️", "text": "Talk Mode...",    "bg": "bg", "fg": "accent"},
+        # The companion shows no overlay (its bubble is the whole UI); the entry
+        # keeps the table complete for anything that iterates it.
+        "companion":  {"icon": "🫧", "text": "Companion...",    "bg": "bg", "fg": "accent"},
     })
 
     #: The modes whose hotkey records audio while it is held. MODES above is the
@@ -631,6 +642,8 @@ class Config:
         # Stop the recording and choose this dictation's refinement level.
         # Unbound by default — assign a key in Settings → Hotkeys.
         "refine":     ("(unset)", []),
+        # Companion: toggle silence mode (the wake word stops being listened for).
+        "companion":  ("F7",  ["F7"]),
     })
 
 
@@ -831,6 +844,14 @@ def _build_config() -> Config:
     custom = post.get("custom_prompt", post.get("reformulate_prompt"))
     if custom is not None:
         overrides["POSTPROCESS_CUSTOM_PROMPT"] = str(custom).strip()
+
+    companion = data.get("companion", {})
+    if "enabled" in companion:
+        overrides["COMPANION_ENABLED"] = bool(companion["enabled"])
+    if str(companion.get("click_mode", "")).strip().lower() in ("active", "silent"):
+        overrides["COMPANION_CLICK_MODE"] = str(companion["click_mode"]).strip().lower()
+    if "idle_timeout" in companion:
+        overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
 
     talk = data.get("talk", {})
     if "vad" in talk:

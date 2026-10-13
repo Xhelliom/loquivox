@@ -165,6 +165,8 @@ class LiveTalk:
                  instructions: str = "") -> None:
         cfg = config_module.CFG
         self._session = session
+        #: float32 blocks sent ahead of the microphone (companion: the wake-word tail)
+        self.prefix: List[np.ndarray] = []
         self._model = model or cfg.TALK_LIVE_MODEL
         self._voice = voice or cfg.TALK_LIVE_VOICE
         self._instructions = ((instructions or session.system_prompt())
@@ -220,6 +222,15 @@ class LiveTalk:
         #: once ``close()`` has asked
         self._closed = False
         self._close_deadline: Optional[float] = None
+        self._opened = time.monotonic()
+        #: last transcript or audible audio, never cleared (``idle_for``)
+        self._last_activity = self._opened
+
+    def idle_for(self) -> float:
+        """Seconds since anyone last said or heard anything (audible audio, transcript)."""
+        if self._live:
+            return 0.0
+        return time.monotonic() - self._last_activity
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -248,6 +259,8 @@ class LiveTalk:
                                    device=resolve_input_device(),
                                    callback=self._on_audio)
         self._mic.start()
+        for block in self.prefix:   # what was said before the session was open
+            self._send_block(block)
         # The speakers after the microphone, never before: on a Bluetooth
         # headset the microphone is what switches it to HFP, and a speaker
         # stream opened first sits on the A2DP sink that switch tears down.
@@ -355,6 +368,7 @@ class LiveTalk:
         with self._lock:
             text = (self._live.pop(role, "") or "").strip()
             self._last_delta.pop(role, None)
+            self._last_activity = time.monotonic()
         if not text:
             return
         if role == "user":
@@ -377,7 +391,7 @@ class LiveTalk:
 
         with self._lock:
             text = self._live[role] = self._live.get(role, "") + delta
-            self._last_delta[role] = time.monotonic()
+            self._last_delta[role] = self._last_activity = time.monotonic()
         ChatManager.stream(role, _strip_marker(text) if role == "assistant" else text)
 
     def _on_user_said(self, text: str) -> None:
@@ -714,12 +728,15 @@ class LiveTalk:
         # a barge-in replays the held audio on top, a moment ahead of real time
         # — the model catches up.
         for chunk in self._mic_chunks(mono):
-            pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    self._conn.session.input_audio.append(audio=pcm), self._loop)
-            except Exception:
-                pass  # the loop is closing — the session is on its way out
+            self._send_block(chunk)
+
+    def _send_block(self, chunk: np.ndarray) -> None:
+        pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._conn.session.input_audio.append(audio=pcm), self._loop)
+        except Exception:
+            pass  # the loop is closing — the session is on its way out
 
     # --- session → speakers ------------------------------------------------
 
@@ -853,7 +870,7 @@ class LiveTalk:
                 with self._audio_lock:
                     if audible:
                         self._audible += 1
-                        self._last_audio = time.monotonic()
+                        self._last_audio = self._last_activity = time.monotonic()
                     self._chunks.append((chunk, audible))
                     self._queued += len(chunk)
         elif etype == "session.input_transcript.delta":

@@ -310,6 +310,8 @@ class ModeHandler:
         from loquivox.services.turn_detector import prewarm_async
         prewarm_async()  # download / build the ONNX session off the hot path
         STATE.talk_active = True
+        from loquivox.handlers import companion  # lazy: avoid cycle
+        companion.pause_for_talk()
         # Anything clicked before now belongs to the session that just ended —
         # drained here rather than in its `finally`, which a click landing
         # between that and the bar going away would slip past.
@@ -490,6 +492,8 @@ class ModeHandler:
         """
         STATE.talk_active = False
         ChatManager.set_talk(False)
+        from loquivox.handlers import companion  # lazy: avoid cycle
+        companion.resume_after_talk()
         return False
 
     @staticmethod
@@ -559,6 +563,9 @@ class ModeHandler:
         )
         if not image:
             return
+        if STATE.companion_session:
+            from loquivox.ui.capture_halo import show_capture
+            show_capture(image)
         description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
         elapsed = time.time() - started
         if not description:
@@ -640,13 +647,20 @@ class ModeHandler:
         # session.write, never the default: this re-show is what STATE.current_mode
         # ends up being for the rest of the session, and an F4 chat relabelled
         # "talk" loses S (_talk_looks) and offers F6 as the key that ends it.
-        ModeHandler._show_talk_overlay(session.write)
-        OverlayManager.set_status("Connecting…")
+        quiet = STATE.companion_session   # the companion's bubble is the whole UI
+        if not quiet:
+            ModeHandler._show_talk_overlay(session.write)
+            OverlayManager.set_status("Connecting…")
         talk = engine(session)
         try:
             talk.start()
-            OverlayManager.set_status("")
+            if not quiet:
+                OverlayManager.set_status("")
         except Exception as e:
+            if quiet:
+                talk.close()
+                print(f"⚠️  {label} talk unavailable ({e}) — companion session dropped")
+                return False
             print(f"⚠️  {label} talk unavailable ({e}) — using the cascade")
             # A session that failed to *open* has still opened things: the
             # asyncio loop is running on its thread and the socket may be up.
@@ -689,6 +703,8 @@ class ModeHandler:
                         break
                     if session.user_turns >= cfg.TALK_MAX_TURNS:
                         break
+                    if quiet and talk.idle_for() >= cfg.COMPANION_IDLE_TIMEOUT:
+                        break   # nobody is talking any more: back to standby
         finally:
             talk.close()
         if talk.error is not None:

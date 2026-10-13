@@ -131,6 +131,17 @@ ai         = ["F4", "F14"]
 talk       = ["F6"]
 pin        = ["F9"]
 tts        = ["F10"]
+companion  = ["F7"]
+
+[companion]
+# The always-present bubble: local wake-word listening, cloud session (Live
+# engine) only when spoken to. Silence key: [hotkeys] companion (F7).
+# Start listening when the app launches.
+enabled = true
+# Mode a single click on the bubble switches to ("silent" or "active").
+click_mode = "silent"
+# Seconds of silence that end a conversation and send it back to standby.
+idle_timeout = 12.0
 
 [talk]
 # Talk mode (F6): a spoken conversation with the AI that ends in ONE generated

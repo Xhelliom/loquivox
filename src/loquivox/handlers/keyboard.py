@@ -415,6 +415,13 @@ class KeyboardHandler:
             ModeHandler.start_talk_session(write=(mode == "talk"))
             return
 
+        # The companion's silence key: a presence toggle, harmless mid-session
+        # (it ends the companion's own conversation, never a talk session).
+        if mode == "companion":
+            from loquivox.handlers import companion  # lazy: avoid cycle
+            companion.toggle_silence()
+            return
+
         # Everything below this line is the session's business, not a global
         # hotkey's: a talk session drives itself from its own key map
         # (talk_listen_keys) and from the bubble's buttons, and it owns the
