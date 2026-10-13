@@ -489,6 +489,8 @@ class SettingsDialog:
         cls._comp_status = Gtk.Label()
         cls._actions(body, cls._on_apply_companion, cls._comp_status)
 
+    _wake_installed = False  # openwakeword installed since the last Apply
+
     @classmethod
     def _on_install_wake(cls, btn: Gtk.Button) -> None:
         """Install openwakeword and fetch its model files, off the GTK thread."""
@@ -509,6 +511,7 @@ class SettingsDialog:
             def done():
                 btn.set_sensitive(True)
                 if ok:
+                    cls._wake_installed = True
                     btn.set_visible(False)
                     cls._comp_status.set_markup(
                         "<small>✓ openwakeword installed — Apply to load it.</small>")
@@ -527,6 +530,7 @@ class SettingsDialog:
         from loquivox.config_io import ConfigWriteError, update_section
 
         wake = cls._comp_wake.get_active_id()
+        changed = wake != config_module.CFG.COMPANION_WAKE_WORD
         try:
             update_section("companion", {
                 "enabled": cls._comp_enabled.get_active(),
@@ -537,13 +541,27 @@ class SettingsDialog:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
-        # Always reload: after "Install openwakeword" the word is unchanged
-        # but the model still has to be loaded.
-        from loquivox.handlers import companion
-        companion.set_wake_word(wake)
-        cls._comp_status.set_markup(
-            "<small>✓ Saved — the wake word and the click apply now, "
-            "the startup choice at the next launch.</small>")
+        saved = ("<small>✓ Saved — the wake word and the click apply now, "
+                 "the startup choice at the next launch.</small>")
+        # Loading the model is slow and every Apply runs every tab's writer:
+        # only reload when the word changed or openwakeword was just installed.
+        if not (changed or cls._wake_installed):
+            cls._comp_status.set_markup(saved)
+            return
+        cls._wake_installed = False
+        cls._comp_status.set_markup("<small>Loading the wake word…</small>")
+
+        def work():
+            from loquivox.handlers import companion
+            try:
+                companion.set_wake_word(wake)
+                text = saved
+            except Exception as e:
+                text = f"<small>❌ wake word: {GLib.markup_escape_text(str(e))}</small>"
+            GLib.idle_add(lambda: cls._comp_status.set_markup(text) or False)
+
+        import threading
+        threading.Thread(target=work, daemon=True).start()
 
     # -----------------------------------------------------------------
     # Plugins tab: what the conversation can reach beyond the models

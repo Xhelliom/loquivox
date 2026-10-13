@@ -266,14 +266,29 @@ def test_companion_settings_apply_without_editing_toml():
             cls._comp_wake.set_active_id("alexa")
             cls._comp_click.set_active_id("active")
             from loquivox.handlers import companion
+            import threading, time
             seen, real_set = [], companion.set_wake_word
             companion.set_wake_word = seen.append
+
+            def settle():  # the reload runs on a thread
+                time.sleep(0.2)
+                for t in threading.enumerate():
+                    if t is not threading.main_thread():
+                        t.join(1)
+
             try:
                 cls._on_apply_companion(None)
-                cls._on_apply_companion(None)  # same word: still reloaded
+                settle()
+                cls._on_apply_companion(None)  # same word: no reload
+                settle()
+                assert seen == ["alexa"], seen
+                cls._wake_installed = True  # openwakeword just installed
+                cls._on_apply_companion(None)
+                settle()
+                assert seen == ["alexa", "alexa"], seen
+                assert not cls._wake_installed
             finally:
                 companion.set_wake_word = real_set
-            assert seen == ["alexa", "alexa"], seen
             cfg = config_module.CFG
             assert (cfg.COMPANION_ENABLED, cfg.COMPANION_WAKE_WORD,
                     cfg.COMPANION_CLICK_MODE) == (False, "alexa", "active"), cfg
