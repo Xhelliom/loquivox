@@ -520,6 +520,9 @@ class Config:
     #: produced from the conversation and pasted at the cursor without the
     #: conversation ending. Off, F4 writes nothing and F6 is the way to a text.
     TALK_WRITE_TOOL: bool = True
+    #: let a chat (F4, companion) call ``look_at_screen`` (services/look.py):
+    #: "regarde ça" re-captures the active window. Only on request.
+    TALK_LOOK_TOOL: bool = True
     #: let Collie Board's notifications reach a conversation in progress
     #: (services/board.py). Off by default: it polls a local service most
     #: installations do not run.
@@ -992,6 +995,8 @@ def _build_config() -> Config:
         overrides["TALK_RESEARCH"] = bool(talk["research"])
     if "write_tool" in talk:
         overrides["TALK_WRITE_TOOL"] = bool(talk["write_tool"])
+    if "look_tool" in talk:
+        overrides["TALK_LOOK_TOOL"] = bool(talk["look_tool"])
     if "board" in talk:
         overrides["TALK_BOARD"] = bool(talk["board"])
     if "tts" in models:

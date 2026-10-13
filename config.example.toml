@@ -232,6 +232,9 @@ board = false
 # the conversation carries on — so the next sentence can ask for another
 # version. Off = F4 writes nothing and F6 stays the way to get a text.
 write_tool = true
+# Let a chat (F4, companion) re-capture the active window when asked ("regarde
+# ça", "et là ?"). Never on its own: a capture uploads a window.
+look_tool = true
 # How long the generated text waits for a verdict before being left on the
 # clipboard (seconds). It is never typed without an explicit Enter.
 review_timeout = 120.0

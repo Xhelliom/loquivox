@@ -533,7 +533,7 @@ class ModeHandler:
         ChatManager.add_message("note", f"📋 Texte sélectionné envoyé : {preview}")
 
     @staticmethod
-    def _talk_screen_worker(session) -> None:
+    def _talk_screen_worker(session) -> str:
         """
         Hand the session what is on screen right now, in the background.
 
@@ -545,7 +545,8 @@ class ModeHandler:
         All of it happens on its own thread while the first turn is already
         being recorded: the capture costs no startup delay, and the description
         lands in time for the first reply (or, at worst, the second). Opt-in —
-        it sends the screen to the cloud — and silent on failure.
+        it sends the screen to the cloud — and silent on failure. Returns the
+        description, "" when there is none (the look plugin hands it back).
 
         The recording overlay may be in the shot: waiting for it to be gone
         would mean delaying the microphone, which is exactly what this avoids.
@@ -562,7 +563,7 @@ class ModeHandler:
             max_px=cfg.TALK_SCREENSHOT_MAX_PX,
         )
         if not image:
-            return
+            return ""
         if STATE.companion_session:
             from loquivox.ui.capture_halo import show_capture
             show_capture(image)
@@ -577,15 +578,16 @@ class ModeHandler:
             print(f"⚠️  Screen context: the vision model returned nothing "
                   f"({elapsed:.1f}s) — is {STATE.ai_vision_model} thinking "
                   f"itself out of an answer?")
-            return
+            return ""
         if config_module.TALK_SCREEN_EMPTY.lower() in description.lower():
             print(f"👁️  Screen context: nothing relevant on screen ({elapsed:.1f}s)")
-            return
+            return ""
         if not STATE.talk_active:
-            return  # the conversation ended while we were looking
+            return ""  # the conversation ended while we were looking
         session.set_context(description)
         print(f"👁️  Screen context ({elapsed:.1f}s): {description[:120]}"
               f"{'…' if len(description) > 120 else ''}")
+        return description
 
     @staticmethod
     def _talk_conversation(session, keys) -> bool:
