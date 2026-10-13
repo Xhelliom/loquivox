@@ -35,4 +35,34 @@ with tempfile.TemporaryDirectory() as d:
 
 # A drag cannot push the bubble off screen.
 assert cb.clamp((-50, 9999), (1920, 1080)) == (0, 1080 - cb.SIZE)
+# Clicks: a press/release without travel is a click, a drag is not.
+from types import SimpleNamespace as NS
+
+saved, clicks = [], []
+cb.save_position = saved.append
+bubble = NS(_on_click=lambda: clicks.append(1), _press=None, _dragging=False, _pos=(24, 24),
+            _apply_position=lambda: None, _popup_menu=lambda ev: clicks.append("menu"))
+bubble._on_press = lambda ev: cb.CompanionBubble._on_press(bubble, None, ev)
+bubble._on_motion = lambda ev: cb.CompanionBubble._on_motion(bubble, None, ev)
+bubble._on_release = lambda ev: cb.CompanionBubble._on_release(bubble, None, ev)
+ev = lambda b, x=10, y=10: NS(button=b, x=x, y=y)
+
+bubble._on_press(ev(1)); bubble._on_release(ev(1))
+assert clicks == [1] and not saved, (clicks, saved)
+bubble._on_press(ev(1)); bubble._on_motion(ev(1, 10 + cb.DRAG_THRESHOLD + 5)); bubble._on_release(ev(1))
+assert clicks == [1] and saved == [bubble._pos], (clicks, saved)
+bubble._on_press(ev(3))
+assert clicks == [1, "menu"], clicks
+
+# The redraw timer only runs while a state pulses, and is removed afterwards.
+live = set()
+cb.GLib = NS(timeout_add=lambda ms, f: live.add(1) or 1, source_remove=lambda t: live.discard(1))
+t = NS(_timer=0, _state="idle", _tick=None)
+t._stop_timer = lambda: cb.CompanionBubble._stop_timer(t)
+for state, expected in (("idle", False), ("listening", True), ("cloud", True),
+                        ("silent", False), ("speaking", True), ("idle", False)):
+    t._state = state
+    cb.CompanionBubble._sync_timer(t)
+    assert bool(live) == expected == bool(t._timer), state
+
 print("✓ companion bubble OK")

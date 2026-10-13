@@ -36,6 +36,7 @@ if HAS_LAYER_SHELL:
 SIZE = 36                        # window side, px
 DEFAULT_POSITION = (24, 24)      # (distance from the right edge, from the top)
 SETTINGS_KEY = "companion_position"
+PULSING = ("listening", "speaking", "cloud")   # the only states that animate
 DRAG_THRESHOLD = 4               # px of travel before a press becomes a drag
 
 # state → colour (r, g, b). Shape differs too (see _on_draw) so it never
@@ -121,8 +122,8 @@ class CompanionBubble(Gtk.Window):
         self.connect("button-release-event", self._on_release)
         self.connect("motion-notify-event", self._on_motion)
         self._apply_position()
-        self._timer = GLib.timeout_add(50, self._tick)
-        self.connect("destroy", lambda *_: GLib.source_remove(self._timer))
+        self._timer = 0          # redraw timer, alive only while a state pulses
+        self.connect("destroy", lambda *_: self._stop_timer())
         self.show_all()
 
     # ----------------------------------------------------------------- state
@@ -131,7 +132,19 @@ class CompanionBubble(Gtk.Window):
         """Thread-safe. Unknown names are ignored."""
         if state in STATES and state != self._state:
             self._state = state
-            self.area.queue_draw()
+            self._sync_timer()
+            self.area.queue_draw()   # once more: the last frame of a stopped pulse
+
+    def _sync_timer(self) -> None:
+        if self._state in PULSING and not self._timer:
+            self._timer = GLib.timeout_add(50, self._tick)
+        elif self._state not in PULSING:
+            self._stop_timer()
+
+    def _stop_timer(self) -> None:
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = 0
 
     # -------------------------------------------------------------- position
     def _screen_size(self) -> Tuple[int, int]:
