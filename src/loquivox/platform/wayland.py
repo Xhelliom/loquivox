@@ -10,7 +10,7 @@ import json
 import os
 import subprocess
 import time
-from typing import Tuple
+from typing import Optional, Tuple
 
 from loquivox.config import CFG
 from loquivox.platform.base import ClipboardBackend, InputBackend, ScreenshotBackend
@@ -118,6 +118,27 @@ class WaylandInput(InputBackend):
         return False
 
 
+def niri_window_geometry(info) -> Optional[Tuple[int, int, int, int]]:
+    """``(x, y, w, h)`` from a `niri msg -j focused-window` payload, or None.
+
+    ``None`` means *position unknown*, the normal case for a tiled window:
+    niri reports ``tile_pos_in_workspace_view: null`` for it and only gives
+    ``pos_in_scrolling_layout`` (column, row). Its screen position depends on
+    the view's scroll offset, which no IPC call exposes (checked on niri 26.04:
+    ``focused-window``, ``windows``, ``workspaces``, ``focused-output``). So
+    this is reliable for floating windows only; callers fall back to a
+    thumbnail otherwise.
+    """
+    try:
+        layout = info["layout"]
+        tx, ty = layout["tile_pos_in_workspace_view"]
+        w, h = layout["window_size"]
+        ox, oy = layout.get("window_offset_in_tile") or (0, 0)
+        return round(tx + ox), round(ty + oy), int(w), int(h)
+    except (TypeError, KeyError, ValueError):
+        return None
+
+
 def _wait_for_png(path: str, timeout: float = 2.0) -> bool:
     """
     True once *path* is a PNG that has been written all the way to its end.
@@ -197,6 +218,19 @@ class WaylandScreenshot(ScreenshotBackend):
             # clipboard around the same time it finishes writing the file.
             WaylandClipboard().copy(saved)
         return framed
+
+    def focused_window_geometry(self):
+        """The focused window's rectangle via niri's IPC (None elsewhere)."""
+        try:
+            result = subprocess.run(
+                ["niri", "msg", "-j", "focused-window"],
+                capture_output=True, text=True, timeout=1,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return niri_window_geometry(json.loads(result.stdout))
+        except Exception:
+            pass
+        return None
 
     def pointer_position(self):
         """

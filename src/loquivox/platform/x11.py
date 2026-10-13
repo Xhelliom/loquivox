@@ -96,6 +96,20 @@ class X11Screenshot(ScreenshotBackend):
         except Exception:
             return False
 
+    def focused_window_geometry(self):
+        """Active window rectangle via ``xdotool getactivewindow``."""
+        try:
+            result = subprocess.run(
+                ["xdotool", "getactivewindow", "getwindowgeometry", "--shell"],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode != 0:
+                return None
+            v = dict(l.split("=", 1) for l in result.stdout.splitlines() if "=" in l)
+            return int(v["X"]), int(v["Y"]), int(v["WIDTH"]), int(v["HEIGHT"])
+        except Exception:
+            return None
+
     def pointer_position(self):
         """Pointer coordinates via ``xdotool getmouselocation`` (X11 globals)."""
         try:

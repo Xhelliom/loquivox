@@ -73,6 +73,14 @@ class ScreenshotBackend(ABC):
         """
         return False
 
+    def focused_window_geometry(self) -> Optional[Tuple[int, int, int, int]]:
+        """
+        ``(x, y, w, h)`` of the focused window in logical pixels, relative to
+        the output a full-screen overlay would cover — or None when the session
+        cannot tell (a normal answer: callers degrade, they do not insist).
+        """
+        return None
+
     def pointer_position(self) -> Optional[Tuple[int, int]]:
         """
         Where the mouse pointer is, in the same coordinates as a full-screen
