@@ -1821,6 +1821,8 @@ class SettingsDialog:
             "close your turns on their own server, so this does nothing there. "
             "If onnxruntime is missing, ticking asks before installing it.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)
+        # Models is built before Talk, so its own initial call found no box yet.
+        cls._on_talk_engine_changed(cls._engine_combo)
 
         cls._talk_speak_check = Gtk.CheckButton(
             label="Read the assistant's replies aloud, even with TTS off")

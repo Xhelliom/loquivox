@@ -311,11 +311,42 @@ def test_conversation_settings_say_where_they_apply():
         cls._on_talk_engine_changed(cls._engine_combo)
         assert cls._talk_semantic_check.get_sensitive() is on, engine
         assert cls._talk_depth.get_sensitive(), "depth reads for F6 on every engine"
+    # Right after construction, before anyone touches the combo.
+    import dataclasses
+    from loquivox import config as config_module
+    real_cfg = config_module.CFG
+    try:
+        for engine, on in (("realtime", False), ("cascade", True)):
+            config_module.CFG = dataclasses.replace(real_cfg, TALK_ENGINE=engine)
+            win = cls._create_dialog()
+            assert cls._talk_semantic_check.get_sensitive() is on, engine
+            win.destroy()
+    finally:
+        config_module.CFG = real_cfg
+        cls.show()  # widgets on the class point at the dialog again
+
     # The install thread's completion must not wake the box outside the cascade.
-    cls._engine_combo.set_active_id("live")
-    cls._talk_semantic_check.set_sensitive(False)
-    cls._on_talk_engine_changed(cls._engine_combo)
-    assert not cls._talk_semantic_check.get_sensitive()
+    import threading
+    from gi.repository import GLib
+    real = (cls._semantic_needs_onnx, cls._pip_install, Gtk.MessageDialog.run)
+    cls._semantic_needs_onnx = classmethod(lambda c: True).__get__(None, cls)
+    cls._pip_install = classmethod(lambda c, pkg: (True, "")).__get__(None, cls)
+    Gtk.MessageDialog.run = lambda self: Gtk.ResponseType.OK
+    try:
+        cls._engine_combo.set_active_id("live")
+        cls._talk_semantic_check.set_active(False)
+        cls._talk_semantic_check.set_active(True)  # runs the install -> done()
+        assert not cls._talk_semantic_check.get_sensitive()  # greyed while installing
+        for _ in range(200):
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            if cls._talk_semantic_check.get_label().endswith("(ready)"):
+                break
+            threading.Event().wait(0.01)
+        assert cls._talk_semantic_check.get_label().endswith("(ready)"), "done() never ran"
+        assert not cls._talk_semantic_check.get_sensitive(), "woken outside the cascade"
+    finally:
+        cls._semantic_needs_onnx, cls._pip_install, Gtk.MessageDialog.run = real
     print("✓ Conversation settings name their mode; cascade-only one greys elsewhere")
 
 
