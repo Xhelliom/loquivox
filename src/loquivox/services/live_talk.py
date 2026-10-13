@@ -221,13 +221,14 @@ class LiveTalk:
         self._closed = False
         self._close_deadline: Optional[float] = None
         self._opened = time.monotonic()
+        #: last transcript or audible audio, never cleared (``idle_for``)
+        self._last_activity = self._opened
 
     def idle_for(self) -> float:
         """Seconds since anyone last said or heard anything (audible audio, transcript)."""
         if self._live:
             return 0.0
-        return time.monotonic() - max(self._opened, self._last_audio,
-                                      *self._last_delta.values())
+        return time.monotonic() - self._last_activity
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -363,6 +364,7 @@ class LiveTalk:
         with self._lock:
             text = (self._live.pop(role, "") or "").strip()
             self._last_delta.pop(role, None)
+            self._last_activity = time.monotonic()
         if not text:
             return
         if role == "user":
@@ -385,7 +387,7 @@ class LiveTalk:
 
         with self._lock:
             text = self._live[role] = self._live.get(role, "") + delta
-            self._last_delta[role] = time.monotonic()
+            self._last_delta[role] = self._last_activity = time.monotonic()
         ChatManager.stream(role, _strip_marker(text) if role == "assistant" else text)
 
     def _on_user_said(self, text: str) -> None:
@@ -861,7 +863,7 @@ class LiveTalk:
                 with self._audio_lock:
                     if audible:
                         self._audible += 1
-                        self._last_audio = time.monotonic()
+                        self._last_audio = self._last_activity = time.monotonic()
                     self._chunks.append((chunk, audible))
                     self._queued += len(chunk)
         elif etype == "session.input_transcript.delta":

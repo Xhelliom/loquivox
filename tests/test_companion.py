@@ -127,13 +127,20 @@ def test_silence_key_survives_a_running_session():
 def test_idle_for_counts_from_last_activity():
     from loquivox.services.live_talk import LiveTalk
     t = LiveTalk.__new__(LiveTalk)
+    import threading
     t._live, t._last_delta, t._last_audio = {}, {}, 0.0
-    t._opened = time.monotonic() - 30
+    t._lock = threading.Lock()
+    t._last_activity = time.monotonic() - 30
     assert t.idle_for() >= 30
-    t._last_delta["user"] = time.monotonic() - 2
-    assert 2 <= t.idle_for() < 3
     t._live["user"] = "en cours"
+    t._last_delta["user"] = time.monotonic() - 2
     assert t.idle_for() == 0.0
+    # un tour clos ne doit pas effacer son activité : la réponse lente ne coupe pas
+    t._last_activity = time.monotonic() - 99
+    t._live.clear()
+    t._live["assistant"] = ""
+    t._close_turn("assistant")
+    assert t.idle_for() < 1
 
 
 if __name__ == "__main__":
