@@ -50,7 +50,7 @@ import sounddevice as sd
 import loquivox.config as config_module
 from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
-from loquivox.services.talk import _strip_marker, echo_note, user_said_done
+from loquivox.services.talk import _strip_marker, echo_note, user_said_done, user_said_stop
 from loquivox.services.vad import EchoGate
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
@@ -404,6 +404,16 @@ class LiveTalk:
         # "vas-y, écris ça" is the model's cue to call the write tool.
         if self._session.write and user_said_done(text):
             self.done = True
+        self._stop_if_asked(text)
+
+    @staticmethod
+    def _stop_if_asked(text: str) -> None:
+        """Companion only: "tais-toi" closes the session, unanswered."""
+        if not STATE.companion_session or not user_said_stop(text):
+            return
+        # grep -c "faux déclenchement" counts the misfires; never quote the user.
+        print("🫧 Companion: faux déclenchement (voix)")
+        STATE.talk_click.put("cancel")
 
     def _on_assistant_said(self, text: str) -> None:
         """Record a spoken reply, stripping the end-of-briefing marker."""

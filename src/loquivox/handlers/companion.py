@@ -89,6 +89,7 @@ class Companion:
         STATE.presence_mode = mode
         print(f"🫧 Companion: {mode}")
         if STATE.companion_session:
+            print("🫧 Companion: faux déclenchement (touche)")
             STATE.talk_click.put("cancel")   # the session's own exit restores the rest
             return
         if not self.presence_on():
