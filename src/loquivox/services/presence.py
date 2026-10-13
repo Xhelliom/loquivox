@@ -40,6 +40,8 @@ WAKE_MODEL: str = "hey_jarvis"
 WAKE_THRESHOLD: float = 0.5
 #: after a wake, ignore further ones for this long (seconds)
 REFRACTORY: float = 2.0
+#: longest stretch kept after a wake word (seconds)
+TAIL_MAX: int = 30
 
 
 class Presence:
@@ -58,6 +60,8 @@ class Presence:
         self._lock = threading.Lock()
         #: True while someone is talking (energy VAD), whatever the wake word says
         self.speaking = False
+        #: audio heard since the wake word, handed to the cloud session by take_tail()
+        self._tail: Optional[list] = None
 
     @property
     def listening(self) -> bool:
@@ -97,10 +101,16 @@ class Presence:
             stream.close()
         self.speaking = False
 
+    def take_tail(self) -> list:
+        """What was said since the wake word (float32 blocks); empties the buffer."""
+        tail, self._tail = self._tail or [], None
+        return tail
+
     def resume(self) -> None:
         with self._lock:
             if self._stream is not None:
                 return
+            self._tail = None
             if self._model is not None:
                 self._model.reset()
             self._vad = VoiceActivityDetector(RATE)
@@ -112,6 +122,9 @@ class Presence:
         if self._vad.ended:   # one detector per utterance: start over
             self._vad = VoiceActivityDetector(RATE)
         self._vad.feed(block)
+        # ponytail: capped at TAIL_MAX seconds; the session opens in a few
+        if self._tail is not None and len(self._tail) < TAIL_MAX * RATE // BLOCK:
+            self._tail.append(block.copy())
         self.speaking = self._vad.speech_started and not self._vad.ended
         if self._model is None:
             return
@@ -121,6 +134,7 @@ class Presence:
         if (max(scores.values(), default=0.0) >= self.threshold
                 and now - self._last_wake >= REFRACTORY):
             self._last_wake = now
+            self._tail = []
             threading.Thread(target=self.on_wake, daemon=True).start()
 
 

@@ -53,10 +53,15 @@ def _look(session) -> None:
     ModeHandler._talk_look(session)
 
 
-def _converse(session) -> None:
+def _converse(session, prefix=()) -> None:
     from loquivox.handlers.mode import ModeHandler
     from loquivox.services.live_talk import LiveTalk
-    ModeHandler._talk_converse_server(session, _NoKeys(), LiveTalk, "Live")
+
+    def engine(s):
+        talk = LiveTalk(s)
+        talk.prefix = list(prefix)
+        return talk
+    ModeHandler._talk_converse_server(session, _NoKeys(), engine, "Live")
 
 
 class Companion:
@@ -86,10 +91,10 @@ class Companion:
         if STATE.companion_session:
             STATE.talk_click.put("cancel")   # the session's own exit restores the rest
             return
-        if self.presence_on():
-            self.presence.resume()
-        else:
+        if not self.presence_on():
             self.presence.release()
+        elif not STATE.talk_active:   # F4/F6 hold the mic; resume_after_talk reopens it
+            self.presence.resume()
         self.bubble.set_state(self._standby())
 
     def toggle_silence(self) -> None:
@@ -113,6 +118,7 @@ class Companion:
         STATE.talk_active = STATE.companion_session = True
         session = TalkSession(write=False)
         STATE.talk_session = session
+        previous_mode = STATE.current_mode
         STATE.current_mode, STATE.talk_engine = "ai", "live"
         STATE.echo_advised = False
         self.bubble.set_state("cloud")     # red from the capture on: the cost is visible
@@ -120,11 +126,12 @@ class Companion:
             self._look(session)            # before the mic is released and the cloud opens
             self.presence.release()
             print("🫧 Companion: session open")
-            self._converse(session)
+            self._converse(session, self.presence.take_tail())
         except Exception as e:
             print(f"⚠️  Companion session failed: {e}")
         finally:
             STATE.vad, STATE.talk_engine, STATE.talk_session = None, "cascade", None
+            STATE.current_mode = previous_mode
             session.desks.close()
             STATE.talk_active = STATE.companion_session = False
             while not STATE.talk_click.empty():     # a click meant for this session

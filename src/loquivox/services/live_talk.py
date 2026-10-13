@@ -165,6 +165,8 @@ class LiveTalk:
                  instructions: str = "") -> None:
         cfg = config_module.CFG
         self._session = session
+        #: float32 blocks sent ahead of the microphone (companion: the wake-word tail)
+        self.prefix: List[np.ndarray] = []
         self._model = model or cfg.TALK_LIVE_MODEL
         self._voice = voice or cfg.TALK_LIVE_VOICE
         self._instructions = ((instructions or session.system_prompt())
@@ -257,6 +259,8 @@ class LiveTalk:
                                    device=resolve_input_device(),
                                    callback=self._on_audio)
         self._mic.start()
+        for block in self.prefix:   # what was said before the session was open
+            self._send_block(block)
         # The speakers after the microphone, never before: on a Bluetooth
         # headset the microphone is what switches it to HFP, and a speaker
         # stream opened first sits on the A2DP sink that switch tears down.
@@ -724,12 +728,15 @@ class LiveTalk:
         # a barge-in replays the held audio on top, a moment ahead of real time
         # — the model catches up.
         for chunk in self._mic_chunks(mono):
-            pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    self._conn.session.input_audio.append(audio=pcm), self._loop)
-            except Exception:
-                pass  # the loop is closing — the session is on its way out
+            self._send_block(chunk)
+
+    def _send_block(self, chunk: np.ndarray) -> None:
+        pcm = base64.b64encode(float32_to_pcm16(chunk)).decode("ascii")
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._conn.session.input_audio.append(audio=pcm), self._loop)
+        except Exception:
+            pass  # the loop is closing — the session is on its way out
 
     # --- session → speakers ------------------------------------------------
 

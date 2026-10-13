@@ -24,6 +24,7 @@ class _Presence:
     def release(self): self.log.append("release")
     def resume(self): self.log.append("resume")
     def start(self): self.log.append("start")
+    def take_tail(self): return ["tail"]
 
 
 class _Bubble:
@@ -35,7 +36,7 @@ def _make(*, session=None):
     log = []
     c = comp.Companion(_Presence(log), _Bubble(log),
                        look=lambda s: log.append("look"),
-                       converse=session or (lambda s: log.append("converse")))
+                       converse=session or (lambda s, prefix=(): log.append("converse")))
     STATE.presence_mode = "active"
     return c, log
 
@@ -87,7 +88,7 @@ def test_no_session_while_another_talk_runs():
 def test_silence_during_session_ends_it_and_stays_silent():
     seen = {}
 
-    def converse(session):
+    def converse(session, prefix=()):
         c.toggle_silence()                       # pressed mid-conversation
         seen["click"] = STATE.talk_click.get_nowait()
 
@@ -141,6 +142,71 @@ def test_idle_for_counts_from_last_activity():
     t._live["assistant"] = ""
     t._close_turn("assistant")
     assert t.idle_for() < 1
+
+
+def test_silence_key_during_f4_session_does_not_reopen_mic():
+    c, log = _make()
+    STATE.presence_mode = "silent"
+    STATE.talk_active = True
+    try:
+        c.set_mode("active")
+    finally:
+        STATE.talk_active = False
+    assert "resume" not in log, log
+
+
+def test_pause_and_resume_after_talk():
+    c, log = _make()
+    comp._companion = c
+    comp.pause_for_talk()
+    assert log == ["release"], log
+    comp.resume_after_talk()
+    assert log == ["release", "resume"], log
+    STATE.presence_mode = "silent"
+    del log[:]
+    comp.pause_for_talk(); comp.resume_after_talk()
+    assert log == [], "silent mode must keep the mic closed"
+    STATE.presence_mode = "active"
+    STATE.companion_session = True
+    try:
+        comp.resume_after_talk()
+    finally:
+        STATE.companion_session = False
+    assert log == []
+
+
+def test_wake_restores_current_mode():
+    c, _ = _make()
+    STATE.current_mode = "dictation"
+    c.wake()
+    assert STATE.current_mode == "dictation"
+
+
+def test_wake_tail_reaches_the_live_engine():
+    got = {}
+    c, _ = _make(session=lambda s, prefix=(): got.update(prefix=list(prefix)))
+    c.wake()
+    assert got["prefix"] == ["tail"]
+
+
+def test_presence_keeps_audio_after_wake():
+    import numpy as np
+    from loquivox.services.presence import Presence, BLOCK
+    class M:
+        def __init__(s): s.score = 0.0
+        def predict(s, pcm): return {"w": s.score}
+        def reset(s): pass
+    m = M()
+    p = Presence(lambda: None, model=m)
+    blk = np.zeros((BLOCK, 1), dtype="float32")
+    p._on_audio(blk, BLOCK, None, None)
+    assert p.take_tail() == []
+    m.score = 1.0
+    p._on_audio(blk, BLOCK, None, None)
+    m.score = 0.0
+    for _ in range(3):
+        p._on_audio(blk, BLOCK, None, None)
+    assert len(p.take_tail()) == 3 and p.take_tail() == []
 
 
 if __name__ == "__main__":
