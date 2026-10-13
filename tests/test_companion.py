@@ -209,6 +209,46 @@ def test_presence_keeps_audio_after_wake():
     assert len(p.take_tail()) == 3 and p.take_tail() == []
 
 
+def test_stop_phrase_matcher():
+    from loquivox.services.talk import user_said_stop
+    for yes in ("Tais-toi", "je ne te parlais pas", "Je ne te parlais pas.",
+                "c'est pas à toi que je parle", "c’est pas à toi que je parle"):
+        assert user_said_stop(yes), yes
+    for no in ("", "Merci", "Peux-tu m'expliquer pourquoi je ne te parlais pas "
+               "hier alors que tu répondais quand même à tout ce que je disais ?",
+               "Dis-moi ce que veut dire tais-toi en anglais, s'il te plaît"):
+        assert not user_said_stop(no), no
+
+
+def test_spoken_stop_cancels_and_is_logged(capsys=None):
+    import io, contextlib
+    from loquivox.services.live_talk import LiveTalk
+    STATE.companion_session = True
+    while not STATE.talk_click.empty():
+        STATE.talk_click.get_nowait()
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        LiveTalk._stop_if_asked("je ne te parlais pas")
+        LiveTalk._stop_if_asked("bonjour")
+    STATE.companion_session = False
+    assert STATE.talk_click.get_nowait() == "cancel" and STATE.talk_click.empty()
+    assert out.getvalue().count("faux déclenchement") == 1, out.getvalue()
+    assert "parlais" not in out.getvalue()
+
+
+def test_silence_key_mid_session_is_logged():
+    import io, contextlib
+    c, _ = _make()
+    STATE.companion_session = True
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        c.set_mode("silent")
+    STATE.companion_session = False
+    while not STATE.talk_click.empty():
+        STATE.talk_click.get_nowait()
+    assert out.getvalue().count("faux déclenchement") == 1
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

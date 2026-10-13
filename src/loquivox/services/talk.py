@@ -178,6 +178,16 @@ def user_said_done(text: str, max_words: int = 6) -> bool:
     return _short_match(text, cfg.TALK_FINISH_PHRASES, max_words)
 
 
+def user_said_stop(text: str, max_words: int = 8) -> bool:
+    """
+    True when the user tells the companion it was not being spoken to.
+
+    Short utterances only: a long question that merely quotes "je ne te
+    parlais pas" is addressed to the model and must get an answer.
+    """
+    return _short_match(text, config_module.CFG.COMPANION_STOP_PHRASES, max_words)
+
+
 def _short_match(text: str, phrases, max_words: int) -> bool:
     """Whether a SHORT utterance contains one of the phrases."""
     normalized = _normalize(text)

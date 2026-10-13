@@ -142,6 +142,9 @@ enabled = true
 click_mode = "silent"
 # Seconds of silence that end a conversation and send it back to standby.
 idle_timeout = 12.0
+# Short phrases ("tais-toi", "je ne te parlais pas"…) that close the session
+# with no reply. Each one logs "faux déclenchement" (grep -c to count them).
+# stop_phrases = ["tais-toi", "je ne te parlais pas"]
 
 [talk]
 # Talk mode (F6): a spoken conversation with the AI that ends in ONE generated

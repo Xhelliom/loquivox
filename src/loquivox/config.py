@@ -418,6 +418,14 @@ class Config:
     #: Presence mode a single click on the bubble switches to ("active" is the
     #: other one; a second click goes back).
     COMPANION_CLICK_MODE: str = "silent"
+    #: Said to the companion, these (short, whole-utterance) close the cloud
+    #: session with no reply. Accents and punctuation are ignored.
+    COMPANION_STOP_PHRASES: Tuple[str, ...] = (
+        "tais-toi", "tais toi", "je ne te parlais pas", "je te parlais pas",
+        "je ne te parle pas", "c'est pas a toi que je parle",
+        "ce n'est pas a toi que je parle", "pas a toi que je parle",
+        "shut up", "i wasn't talking to you", "not talking to you",
+    )
     #: Seconds of silence, both ways, that end a companion conversation.
     COMPANION_IDLE_TIMEOUT: float = 12.0
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
@@ -852,6 +860,10 @@ def _build_config() -> Config:
         overrides["COMPANION_CLICK_MODE"] = str(companion["click_mode"]).strip().lower()
     if "idle_timeout" in companion:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
+    if "stop_phrases" in companion:
+        overrides["COMPANION_STOP_PHRASES"] = tuple(
+            str(p).strip().lower() for p in companion["stop_phrases"] if str(p).strip()
+        )
 
     talk = data.get("talk", {})
     if "vad" in talk:
