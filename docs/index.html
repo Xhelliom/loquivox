@@ -666,7 +666,7 @@ footer .links { display: flex; gap: 22px; justify-content: center; margin-bottom
         <div class="kkey mapped" data-key="F4">F4</div>
         <div class="kkey">F5</div>
         <div class="kkey mapped" data-key="F6">F6</div>
-        <div class="kkey">F7</div>
+        <div class="kkey mapped" data-key="F7">F7</div>
         <div class="kkey">F8</div>
         <div class="kkey mapped" data-key="F9">F9</div>
         <div class="kkey mapped" data-key="F10">F10</div>
@@ -925,6 +925,7 @@ const ACTIONS = {
   F3:  { icon: '🎙️', title: 'Dictate',  desc: 'Hold the floor. Your speech lands as text at the cursor, in whatever app has focus.' },
   F4:  { icon: '💬', title: 'Chat',     desc: 'Talk about what is on screen — the selected text comes along. Say “write it” and the text lands at your cursor, and the conversation carries on.' },
   F6:  { icon: '🗣️', title: 'Talk',     desc: 'Converse with the AI about what you need — no key to hold, it searches the web as it goes — then turn the whole conversation into one finished text. Select text first and it is the text to rework.' },
+  F7:  { icon: '🫧', title: 'Companion', desc: 'Toggle silence mode. The companion bubble listens locally for the wake word and opens a cloud conversation only when you speak to it — it turns red while it does. Silence closes the microphone.' },
   F9:  { icon: '📌', title: 'Pin',      desc: 'Nail the chat overlay on top of everything. Unpin when you need your screen back.' },
   F10: { icon: '🔊', title: 'Voice feedback', desc: 'Let the AI talk back. OpenAI, Groq Orpheus or a local Piper voice reads answers aloud — toggle anytime.' },
   Escape: { icon: '✖️', title: 'Cancel', desc: 'Bail out of a recording mid-sentence — nothing gets transcribed or inserted.' }

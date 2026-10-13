@@ -115,6 +115,7 @@ network, no key, API error.
 | `R-Alt` / `F3` | **Dictate** | Transcribe your voice to text at the cursor |
 | `F4` | **Chat** | Talk about what's on screen and the text you selected — say *"write it"* to turn it into a text |
 | `F6` | **Talk** | Talk it through with the AI, then get the text it was all about — select text first to rework it, or press `T` mid-conversation to send a selection |
+| `F7` | **Companion** | Toggle silence mode of the always-present companion bubble: it listens locally for the wake word and opens a cloud conversation (red bubble, no transcript on screen) only when spoken to. Click the bubble to switch mode, right-click for the menu |
 | `F9` | **Pin** | Toggle "always on top" for the chat overlay |
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
 | `Esc` | **Cancel** | Abort the active recording / transcription (nothing inserted) |

@@ -220,6 +220,14 @@ class LiveTalk:
         #: once ``close()`` has asked
         self._closed = False
         self._close_deadline: Optional[float] = None
+        self._opened = time.monotonic()
+
+    def idle_for(self) -> float:
+        """Seconds since anyone last said or heard anything (audible audio, transcript)."""
+        if self._live:
+            return 0.0
+        return time.monotonic() - max(self._opened, self._last_audio,
+                                      *self._last_delta.values())
 
     # --- lifecycle ---------------------------------------------------------
 

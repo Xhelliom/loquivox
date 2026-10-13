@@ -58,6 +58,25 @@ def _warm_webkit() -> bool:
     return False
 
 
+def _start_companion() -> bool:
+    """Bubble + local listener. No cloud session until the wake word."""
+    try:
+        from loquivox.handlers import companion
+        from loquivox.services.presence import Presence
+        from loquivox.ui.companion_bubble import CompanionBubble
+
+        holder = []
+        bubble = CompanionBubble(
+            on_click=lambda: holder[0].click(),
+            modes=[(label, lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES])
+        presence = Presence(lambda: holder[0].on_wake())
+        holder.append(companion.install(presence, bubble))
+        holder[0].start()
+    except Exception as e:  # no mic, no layer-shell…: the app runs without it
+        print(f"⚠️  Companion unavailable: {e}")
+    return False
+
+
 def main() -> None:
     """Application entry point: flags first, the app itself otherwise."""
     argv = sys.argv[1:]
@@ -118,6 +137,9 @@ def _run() -> None:
     HotkeyBar.start()
 
     GLib.idle_add(_warm_webkit, priority=GLib.PRIORITY_LOW)
+
+    if CFG.COMPANION_ENABLED:
+        GLib.idle_add(_start_companion)
 
     # Run GTK main loop (blocks)
     TrayManager.start()
