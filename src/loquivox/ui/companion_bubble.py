@@ -24,6 +24,7 @@ import cairo
 from loquivox.config import CFG
 from loquivox.decorators import run_on_main_thread
 from loquivox.platform import SESSION_TYPE
+from loquivox.state import SettingsManager
 from loquivox.ui.recording_overlay import HAS_LAYER_SHELL
 
 import gi
@@ -50,24 +51,17 @@ STATES = {
 }
 
 
-def load_position(path: Path = None) -> Tuple[int, int]:
+def load_position() -> Tuple[int, int]:
     try:
-        x, y = json.loads((path or CFG.SETTINGS_FILE).read_text())[SETTINGS_KEY]
+        x, y = SettingsManager.load()[SETTINGS_KEY]
         return int(x), int(y)
     except Exception:
         return DEFAULT_POSITION
 
 
-def save_position(pos: Tuple[int, int], path: Path = None) -> None:
-    path = path or CFG.SETTINGS_FILE
+def save_position(pos: Tuple[int, int]) -> None:
     try:
-        try:
-            data = json.loads(path.read_text())
-        except Exception:
-            data = {}
-        data[SETTINGS_KEY] = [int(pos[0]), int(pos[1])]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=4))
+        SettingsManager.update(SETTINGS_KEY, [int(pos[0]), int(pos[1])])
     except Exception as e:
         print(f"⚠️ Failed to save companion position: {e}")
 

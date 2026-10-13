@@ -23,15 +23,21 @@ assert not any(r2 > 0.7 and g2 < 0.4 and b2 < 0.4
                for k, (r2, g2, b2) in cb.STATES.items() if k != "cloud"), "only cloud is red"
 
 # The position survives a restart, and saving it keeps the other settings.
+from loquivox.state import SettingsManager, AppState
+
 with tempfile.TemporaryDirectory() as d:
     f = Path(d) / "settings.json"
-    assert cb.load_position(f) == cb.DEFAULT_POSITION
+    object.__setattr__(cb.CFG, "SETTINGS_FILE", f)   # CFG is frozen
+    assert cb.load_position() == cb.DEFAULT_POSITION
     f.write_text(json.dumps({"color_scheme": "x"}))
-    cb.save_position((12, 345), f)
-    assert cb.load_position(f) == (12, 345)
+    cb.save_position((12, 345))
+    assert cb.load_position() == (12, 345)
     assert json.loads(f.read_text())["color_scheme"] == "x"
+    # SettingsManager.save (every settings toggle) must not wipe the position.
+    SettingsManager.save(AppState())
+    assert cb.load_position() == (12, 345), "SettingsManager.save erased the position"
     f.write_text("{not json")
-    assert cb.load_position(f) == cb.DEFAULT_POSITION
+    assert cb.load_position() == cb.DEFAULT_POSITION
 
 # A drag cannot push the bubble off screen.
 assert cb.clamp((-50, 9999), (1920, 1080)) == (0, 1080 - cb.SIZE)
