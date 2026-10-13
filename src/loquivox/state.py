@@ -51,6 +51,7 @@ class SettingsManager:
         try:
             CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             data = {
+                **SettingsManager.load(),   # keys owned by other modules (e.g. the companion's position)
                 "color_scheme": state.color_scheme,
                 "overlay_style": state.overlay_style,
                 "show_hints": state.show_hints,
