@@ -1813,7 +1813,7 @@ class SettingsDialog:
 
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
-                " (installs onnxruntime)" if cls._semantic_needs_onnx() else ""))
+                " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         cls._talk_semantic_check.set_tooltip_text(
