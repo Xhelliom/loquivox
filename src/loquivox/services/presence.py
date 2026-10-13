@@ -1,0 +1,131 @@
+"""
+Presence — the always-on, strictly local listener behind the companion mode.
+
+It keeps one microphone stream open outside any session, watches it for a wake
+word with openwakeword and for voice with the energy VAD, and tells the caller
+when someone is addressing the assistant. Nothing is recorded, nothing leaves
+the machine: the cloud session (``services/live_talk.py``) opens only after
+``on_wake`` fires.
+
+openwakeword is optional (``pip install -e '.[wake]'``). Without it — or without
+its model files, fetched once with ``openwakeword.utils.download_models()`` —
+the listener still runs, says so once, and only the hotkey starts a session.
+
+The microphone is shared with nobody: ``LiveTalk.start`` opens its own
+``sd.InputStream`` (and waits for a Bluetooth headset to switch profile), so
+the caller must ``release()`` the device first and ``resume()`` afterwards.
+``release`` really closes the stream; ``resume`` reopens it and clears the wake
+model's memory so the phrase that woke us cannot fire a second time.
+
+Threading: the PortAudio callback does the cheap work only; ``on_wake`` runs on
+its own thread, so it may block (and call ``release``).
+"""
+from __future__ import annotations
+
+import threading
+import time
+from typing import Callable, Optional
+
+import numpy as np
+import sounddevice as sd
+
+from loquivox.services.audio import resolve_input_device
+from loquivox.services.vad import VoiceActivityDetector
+
+RATE: int = 16000
+#: openwakeword scores 80 ms frames
+BLOCK: int = 1280
+#: built-in openwakeword model; the French phrase is the owner's call (phase 1)
+WAKE_MODEL: str = "hey_jarvis"
+WAKE_THRESHOLD: float = 0.5
+#: after a wake, ignore further ones for this long (seconds)
+REFRACTORY: float = 2.0
+
+
+class Presence:
+    def __init__(self, on_wake: Callable[[], None], *, model=None,
+                 wake_model: str = WAKE_MODEL, threshold: float = WAKE_THRESHOLD,
+                 stream_factory=None) -> None:
+        self.on_wake = on_wake
+        self.wake_model = wake_model
+        self.threshold = threshold
+        self._model = model
+        self._warned = False
+        self._stream_factory = stream_factory or self._open_input
+        self._stream = None
+        self._vad = VoiceActivityDetector(RATE)
+        self._last_wake = -REFRACTORY
+        self._lock = threading.Lock()
+        #: True while someone is talking (energy VAD), whatever the wake word says
+        self.speaking = False
+
+    @property
+    def listening(self) -> bool:
+        return self._stream is not None
+
+    @staticmethod
+    def _open_input(callback):
+        return sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
+                              blocksize=BLOCK, device=resolve_input_device(),
+                              callback=callback)
+
+    def _load_model(self):
+        try:
+            from openwakeword.model import Model
+            return Model(wakeword_models=[self.wake_model], inference_framework="onnx")
+        except Exception as exc:  # missing package or missing model files
+            if not self._warned:
+                print(f"⚠️  Presence: openwakeword unavailable ({exc}) — "
+                      "wake word off, hotkey only")
+                self._warned = True
+            return None
+
+    def start(self) -> None:
+        if self._model is None:
+            self._model = self._load_model()
+        self.resume()
+
+    def stop(self) -> None:
+        self.release()
+
+    def release(self) -> None:
+        """Close the microphone for real, so another InputStream can open."""
+        with self._lock:
+            stream, self._stream = self._stream, None
+        if stream is not None:
+            stream.stop()
+            stream.close()
+        self.speaking = False
+
+    def resume(self) -> None:
+        with self._lock:
+            if self._stream is not None:
+                return
+            if self._model is not None:
+                self._model.reset()
+            self._vad = VoiceActivityDetector(RATE)
+            self._stream = self._stream_factory(self._on_audio)
+            self._stream.start()
+
+    def _on_audio(self, indata, frames, time_info, status) -> None:
+        block = np.asarray(indata, dtype=np.float32).reshape(-1)
+        if self._vad.ended:   # one detector per utterance: start over
+            self._vad = VoiceActivityDetector(RATE)
+        self._vad.feed(block)
+        self.speaking = self._vad.speech_started and not self._vad.ended
+        if self._model is None:
+            return
+        pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)
+        scores = self._model.predict(pcm)
+        now = time.monotonic()
+        if (max(scores.values(), default=0.0) >= self.threshold
+                and now - self._last_wake >= REFRACTORY):
+            self._last_wake = now
+            threading.Thread(target=self.on_wake, daemon=True).start()
+
+
+if __name__ == "__main__":
+    import runpy
+    from pathlib import Path
+    runpy.run_path(str(Path(__file__).resolve().parents[3] / "tests" / "test_presence.py"),
+                   run_name="__main__")
