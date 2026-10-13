@@ -165,6 +165,7 @@ class SettingsDialog:
             ("Models", cls._build_models_section),
             ("Talk", cls._build_talk_section),
             ("Plugins", cls._build_plugin_sections),
+            ("Companion", cls._build_companion_section),
             ("Refinement", cls._build_postprocess_section),
             ("Hotkeys", cls._build_hotkeys_section),
             ("Appearance & comfort", cls._build_appearance_page),
@@ -442,6 +443,107 @@ class SettingsDialog:
         cls._build_transcription_section(vbox, labels)   # slot 1 — the ears
         cls._build_chat_section(vbox, labels)            # slot 2 — the brain
         cls._build_voice_section(vbox, labels)           # slot 3 — the mouth
+
+    # -----------------------------------------------------------------
+    # Companion tab: the always-present bubble
+    # -----------------------------------------------------------------
+    _WAKE_WORDS = ("hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy",
+                   "timer", "weather")
+    _CLICK_MODES = (("silent", "Silence the companion"),
+                    ("active", "Wake the companion"))
+
+    @classmethod
+    def _build_companion_section(cls, vbox: Gtk.Box) -> None:
+        cfg = config_module.CFG
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        body = cls._group(
+            vbox, "Companion",
+            "A small bubble that listens for its wake word on this machine and "
+            "opens the cloud conversation only when spoken to.")
+
+        cls._comp_enabled = Gtk.CheckButton(label="Start listening when Loquivox launches")
+        cls._comp_enabled.set_active(bool(cfg.COMPANION_ENABLED))
+        cls._field(body, "Startup", cls._comp_enabled, labels)
+
+        cls._comp_wake = Gtk.ComboBoxText()
+        words = list(cls._WAKE_WORDS)
+        if cfg.COMPANION_WAKE_WORD not in words:
+            words.append(cfg.COMPANION_WAKE_WORD)
+        for w in words:
+            cls._comp_wake.append(w, w)
+        cls._comp_wake.set_active_id(cfg.COMPANION_WAKE_WORD)
+        cls._comp_install = Gtk.Button(label="Install openwakeword")
+        cls._comp_install.connect("clicked", cls._on_install_wake)
+        cls._comp_install.set_visible(not cls._module_installed("openwakeword"))
+        cls._comp_install.set_no_show_all(True)
+        cls._field(body, "Wake word", cls._comp_wake, labels, extra=cls._comp_install)
+
+        cls._comp_click = Gtk.ComboBoxText()
+        for cid, label in cls._CLICK_MODES:
+            cls._comp_click.append(cid, label)
+        cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
+        cls._field(body, "Single click", cls._comp_click, labels)
+
+        cls._note(body, "The silence key is set in the <b>Hotkeys</b> tab "
+                        "(<i>Companion</i>); it applies right away.")
+        cls._comp_status = Gtk.Label()
+        cls._actions(body, cls._on_apply_companion, cls._comp_status)
+
+    @classmethod
+    def _on_install_wake(cls, btn: Gtk.Button) -> None:
+        """Install openwakeword and fetch its model files, off the GTK thread."""
+        import threading
+
+        btn.set_sensitive(False)
+        btn.set_label("Installing…")
+
+        def work():
+            ok, msg = cls._pip_install("openwakeword>=0.6")
+            if ok:
+                try:
+                    from openwakeword.utils import download_models
+                    download_models()
+                except Exception as e:
+                    ok, msg = False, str(e)
+
+            def done():
+                btn.set_sensitive(True)
+                if ok:
+                    btn.set_visible(False)
+                    cls._comp_status.set_markup(
+                        "<small>✓ openwakeword installed — Apply to load it.</small>")
+                else:
+                    btn.set_label("Install openwakeword")
+                    cls._comp_status.set_markup(
+                        f"<small>❌ install failed: {GLib.markup_escape_text(msg)}</small>")
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @classmethod
+    def _on_apply_companion(cls, _btn) -> None:
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        old_wake = config_module.CFG.COMPANION_WAKE_WORD
+        wake = cls._comp_wake.get_active_id()
+        try:
+            update_section("companion", {
+                "enabled": cls._comp_enabled.get_active(),
+                "wake_word": wake,
+                "click_mode": cls._comp_click.get_active_id(),
+            })
+        except ConfigWriteError as e:
+            cls._comp_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        config_module.reload_config()
+        if wake != old_wake:
+            from loquivox.handlers import companion
+            companion.set_wake_word(wake)
+        cls._comp_status.set_markup(
+            "<small>✓ Saved — the wake word and the click apply now, "
+            "the startup choice at the next launch.</small>")
 
     # -----------------------------------------------------------------
     # Plugins tab: what the conversation can reach beyond the models

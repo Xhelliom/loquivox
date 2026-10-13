@@ -61,6 +61,7 @@ def _warm_webkit() -> bool:
 def _start_companion() -> bool:
     """Bubble + local listener. No cloud session until the wake word."""
     try:
+        from loquivox import config as config_module
         from loquivox.handlers import companion
         from loquivox.services.presence import Presence
         from loquivox.ui.companion_bubble import CompanionBubble
@@ -69,7 +70,8 @@ def _start_companion() -> bool:
         bubble = CompanionBubble(
             on_click=lambda: holder[0].click(),
             modes=[(label, lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES])
-        presence = Presence(lambda: holder[0].on_wake())
+        presence = Presence(lambda: holder[0].on_wake(),
+                             wake_model=config_module.CFG.COMPANION_WAKE_WORD)
         holder.append(companion.install(presence, bubble))
         holder[0].start()
     except Exception as e:  # no mic, no layer-shell…: the app runs without it

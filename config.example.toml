@@ -138,6 +138,10 @@ companion  = ["F7"]
 # engine) only when spoken to. Silence key: [hotkeys] companion (F7).
 # Start listening when the app launches.
 enabled = true
+# Wake word: an openwakeword built-in model ("hey_jarvis", "alexa",
+# "hey_mycroft", "hey_rhasspy", "timer", "weather"). Needs openwakeword
+# (Settings → Companion offers to install it); applied live from Settings.
+wake_word = "hey_jarvis"
 # Mode a single click on the bubble switches to ("silent" or "active").
 click_mode = "silent"
 # Seconds of silence that end a conversation and send it back to standby.

@@ -415,6 +415,8 @@ class Config:
     TALK_MAX_TURNS: int = 30
     #: Companion: start listening (locally) when the app launches.
     COMPANION_ENABLED: bool = True
+    #: openwakeword built-in model that wakes the companion.
+    COMPANION_WAKE_WORD: str = "hey_jarvis"
     #: Presence mode a single click on the bubble switches to ("active" is the
     #: other one; a second click goes back).
     COMPANION_CLICK_MODE: str = "silent"
@@ -861,6 +863,8 @@ def _build_config() -> Config:
         overrides["COMPANION_ENABLED"] = bool(companion["enabled"])
     if str(companion.get("click_mode", "")).strip().lower() in ("active", "silent"):
         overrides["COMPANION_CLICK_MODE"] = str(companion["click_mode"]).strip().lower()
+    if str(companion.get("wake_word", "")).strip():
+        overrides["COMPANION_WAKE_WORD"] = str(companion["wake_word"]).strip()
     if "idle_timeout" in companion:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "stop_phrases" in companion:

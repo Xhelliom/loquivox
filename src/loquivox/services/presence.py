@@ -84,6 +84,12 @@ class Presence:
                 self._warned = True
             return None
 
+    def set_wake_model(self, name: str) -> None:
+        """Swap the wake word without closing the microphone."""
+        self.wake_model = name
+        self._warned = False
+        self._model = self._load_model()
+
     def start(self) -> None:
         if self._model is None:
             self._model = self._load_model()
