@@ -301,6 +301,19 @@ def test_companion_settings_apply_without_editing_toml():
     print("✓ companion settings apply live and are documented")
 
 
+def test_conversation_settings_say_where_they_apply():
+    """Each Conversation setting names its mode, and the cascade-only one greys elsewhere."""
+    cls = SettingsDialog
+    assert "F6" in _label_before(cls._talk_depth).get_text()
+    assert "cascade" in cls._talk_semantic_check.get_label().lower()
+    for engine, on in (("realtime", False), ("live", False), ("cascade", True)):
+        cls._engine_combo.set_active_id(engine)
+        cls._on_talk_engine_changed(cls._engine_combo)
+        assert cls._talk_semantic_check.get_sensitive() is on, engine
+        assert cls._talk_depth.get_sensitive(), "depth reads for F6 on every engine"
+    print("✓ Conversation settings name their mode; cascade-only one greys elsewhere")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -311,5 +324,6 @@ if __name__ == "__main__":
     test_greying_a_control_greys_its_label()
     test_wheel_over_a_control_scrolls_the_page()
     test_companion_settings_apply_without_editing_toml()
+    test_conversation_settings_say_where_they_apply()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")

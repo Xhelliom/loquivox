@@ -826,6 +826,7 @@ class SettingsDialog:
                      and resolve_delegation(cls._live_delegation.get_active_id())
                      == "responses")
         for widget, on in (
+                (cls._talk_semantic_check, engine == "cascade"),
                 (cls._realtime_model, engine == "realtime"),
                 (cls._realtime_voice, engine == "realtime"),
                 (cls._realtime_test, engine == "realtime"),
@@ -1767,7 +1768,7 @@ class SettingsDialog:
         ("deep", "Deep — pushes the reasoning further"),
     )
 
-    _SEMANTIC_LABEL_BASE = "End my turns on meaning, not on silence"
+    _SEMANTIC_LABEL_BASE = "End my turns on meaning, not on silence (cascade)"
 
     @classmethod
     def _semantic_needs_onnx(cls) -> bool:
@@ -1795,20 +1796,29 @@ class SettingsDialog:
         body = cls._group(
             vbox, "Conversation",
             f"How talk mode behaves once {config_module.CFG.HOTKEY_DEFS['talk'][0]} "
-            "opens a session. Which engine holds it is on the Models tab.")
+            "opens a session. Which engine holds it is on the Models tab. "
+            "Each setting below says which mode and engine it applies to.")
 
         cls._talk_depth = Gtk.ComboBoxText()
         for depth_id, label in cls._TALK_DEPTHS:
             cls._talk_depth.append(depth_id, label)
         cls._talk_depth.set_active_id(
             config_module.CFG.TALK_DEPTH if config_module.CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
-        cls._field(body, "How far it digs", cls._talk_depth, labels)
+        cls._talk_depth.set_tooltip_text(
+            "F6 only: the briefing ends in a written text, and this is how hard "
+            "the assistant questions you before writing. F4 is an open chat and "
+            "never reads it. Applies on every engine.")
+        cls._field(body, "How far it digs (F6)",
+                   cls._talk_depth, labels)
 
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
-                " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
+                " (installs onnxruntime)" if cls._semantic_needs_onnx() else ""))
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
+        cls._talk_semantic_check.set_tooltip_text(
+            "Read by the cascade engine alone. The Realtime and Live engines "
+            "close your turns on their own server, so this does nothing there.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)
 
         cls._talk_speak_check = Gtk.CheckButton(
