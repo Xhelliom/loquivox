@@ -1796,7 +1796,7 @@ class SettingsDialog:
         body = cls._group(
             vbox, "Conversation",
             f"How talk mode behaves once {config_module.CFG.HOTKEY_DEFS['talk'][0]} "
-            "opens a session. Which engine holds it is on the Models tab. "
+            f"or {config_module.CFG.HOTKEY_DEFS['ai'][0]} opens a session. Which engine holds it is on the Models tab. "
             "Each setting below says which mode and engine it applies to.")
 
         cls._talk_depth = Gtk.ComboBoxText()
@@ -1817,7 +1817,7 @@ class SettingsDialog:
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         cls._talk_semantic_check.set_tooltip_text(
-            "Read by the cascade engine alone. The Realtime and Live engines "
+            "Cascade engine, F4 and F6. The Realtime and Live engines "
             "close your turns on their own server, so this does nothing there. "
             "If onnxruntime is missing, ticking asks before installing it.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)

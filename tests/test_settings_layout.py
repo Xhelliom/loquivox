@@ -306,6 +306,8 @@ def test_conversation_settings_say_where_they_apply():
     cls = SettingsDialog
     assert "F6" in _label_before(cls._talk_depth).get_text()
     assert "cascade" in cls._talk_semantic_check.get_label().lower()
+    tip = cls._talk_semantic_check.get_tooltip_text()
+    assert "Cascade engine, F4 and F6" in tip
     for engine, on in (("realtime", False), ("live", False), ("cascade", True)):
         cls._engine_combo.set_active_id(engine)
         cls._on_talk_engine_changed(cls._engine_combo)
