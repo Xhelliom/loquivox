@@ -46,11 +46,20 @@ class SettingsManager:
             return {}
 
     @staticmethod
+    def update(key: str, value: Any) -> None:
+        """Merge one key into the settings file, leaving the others alone."""
+        CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        data = {**SettingsManager.load(), key: value}   # read before "w" truncates
+        with open(CFG.SETTINGS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+
+    @staticmethod
     def save(state: "AppState") -> None:
         """Save current relevant state to JSON file."""
         try:
             CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
             data = {
+                **SettingsManager.load(),   # keys owned by other modules (e.g. the companion's position)
                 "color_scheme": state.color_scheme,
                 "overlay_style": state.overlay_style,
                 "show_hints": state.show_hints,
