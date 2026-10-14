@@ -439,3 +439,58 @@ chat_auto_hide = 3
 #
 # [mcp.servers.home]             # streamable HTTP (no custom headers yet)
 # url = "http://127.0.0.1:8123/mcp"
+
+# ---------------------------------------------------------------------------
+# Rules: an event of Loquivox → one or more actions on an MCP server above.
+# Nothing is built in: every rule is written here. Actions go straight to the
+# server (no model, no spoken yes: you wrote them), on their own thread — the
+# voice never waits. Per rule, a burst of events keeps only the last one while
+# a call runs, with at least 0.2 s between two calls; an absent server or a
+# failing tool is ONE warning in the log, and Settings → Plugins → Rules shows
+# each rule's last result.
+#
+#   when = an event (below)            if = { key = "value" }   equality on the
+#   do   = one table or a list, run in order: { server, tool, args }
+#   name = optional label, enabled = false to switch a rule off.
+#   {key} inside `args` is replaced by the event's value.
+#
+# EVENTS (and their data)
+#   companion.state            state: idle | cloud | listening | speaking | silent
+#   companion.session_opened   cause: wake_word | key | notification
+#   companion.session_closed   cause: how it had been opened
+#   notification.received      source: the plugin's name, title: first line
+#   talk.started / talk.ended  mode: talk (F6) | ai (F4)
+#   dictation.done             chars: length of the typed text
+#
+# FOR AN AGENT writing these (no GTK needed, run both from a terminal):
+#   loquivox --rules-catalog   the events with their data, and for each declared
+#                              server its tools with their argument schemas;
+#   loquivox --rules-check     validates every rule (event known, `if` keys real,
+#                              server declared and reachable, tool existing,
+#                              args matching the schema, {keys} real); exit code
+#                              1 if one is wrong. Write, check, fix, repeat.
+#
+# Example — a light follows the companion, and goes back as it was (the server
+# here is any MCP server that can call a smart-home service):
+#
+# [[rules]]
+# name = "save the lights"
+# when = "companion.session_opened"
+# do = { server = "home", tool = "call_service", args = { domain = "scene", service = "create", data = { scene_id = "before_loquivox", snapshot_entities = ["light.desk_lamp", "light.desk_strip"] } } }
+#
+# [[rules]]
+# name = "blue while it speaks"
+# when = "companion.state"
+# if = { state = "speaking" }
+# do = { server = "home", tool = "call_service", args = { domain = "light", service = "turn_on", entity_id = "light.desk", data = { rgb_color = [0, 80, 255] } } }
+#
+# [[rules]]
+# name = "back as before"
+# when = "companion.session_closed"
+# do = { server = "home", tool = "call_service", args = { domain = "scene", service = "turn_on", entity_id = "scene.before_loquivox" } }
+# # Snapshot the lights themselves, never a light *group* (light.desk made of
+# # the two above): Home Assistant cannot restore a scene made from a group and
+# # answers an error. Tried for real on a group of WLED and Hue lamps: the
+# # snapshot of its members brought colour, brightness and effect back; the
+# # snapshot of the group failed (HTTP 500). If a lamp still cannot be restored,
+# # use turn_on with explicit rgb_color / brightness instead.

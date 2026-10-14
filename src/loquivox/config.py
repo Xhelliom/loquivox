@@ -554,6 +554,9 @@ class Config:
     #: ``[mcp.servers.<name>]`` in config.toml: name → its table
     #: (command/args/env or url, enabled). Empty: Loquivox is no MCP client.
     MCP_SERVERS: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    #: ``[[rules]]`` of config.toml (services/rules.py): an event → MCP actions.
+    #: Kept as the raw tables; ``rules.normalize`` reads them.
+    RULES: List[Dict[str, Any]] = field(default_factory=list)
 
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
@@ -919,6 +922,8 @@ def _build_config() -> Config:
 
     if mcp_servers_from(data):
         overrides["MCP_SERVERS"] = mcp_servers_from(data)
+    if isinstance(data.get("rules"), list):
+        overrides["RULES"] = [dict(r) for r in data["rules"] if isinstance(r, dict)]
 
     talk = data.get("talk", {})
     if "vad" in talk:

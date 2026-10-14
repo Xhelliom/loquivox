@@ -420,6 +420,15 @@ an on/off switch.
 
 ---
 
+### Event rules (a light follows the companion…)
+
+`[[rules]]` in `config.toml` bind an event (`companion.state`, `companion.session_opened`,
+`notification.received`, `talk.ended`, `dictation.done`…) to calls on your MCP servers, with no model
+and no spoken confirmation — you wrote them. Format, event list and a worked example (a light turns
+blue while the companion speaks, and goes back afterwards) are in `config.example.toml`.
+`loquivox --rules-catalog` lists the events and each server's tools; `loquivox --rules-check`
+validates your rules (exit code 1 if one is wrong). Settings → Plugins → Rules shows each rule's last result.
+
 ## 🐛 Reporting a bug
 
 Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it would

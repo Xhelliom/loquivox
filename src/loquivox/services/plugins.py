@@ -37,6 +37,7 @@ _MODULES: Tuple[str, ...] = (
     "loquivox.services.write",
     "loquivox.services.look",
     "loquivox.services.mcp_tools",
+    "loquivox.services.rules",
 )
 
 #: most tools one ``Desks.find`` query loads
@@ -249,6 +250,10 @@ class Desk:
     def put(self, message: Dict[str, str]) -> None:
         """Queue an answer nobody asked for — a source's way in."""
         self._results.put(message)
+        from loquivox.services import events
+        content = (message.get("content") or "").strip()
+        events.emit("notification.received", source=self.plugin.name,
+                    title=content.splitlines()[0][:120] if content else "")
 
     def ask(self, arguments: str) -> None:
         """Start the work for one tool call. Never blocks, never raises."""

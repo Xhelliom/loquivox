@@ -48,7 +48,6 @@ from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.plugins import _REGISTRY, Plugin, register
-from loquivox.state import STATE
 
 #: seconds a server gets to start and list its tools, and a call to answer
 CONNECT_TIMEOUT = 15.0
@@ -193,6 +192,31 @@ def _call(s: _Server, tool: str, args: Dict[str, Any]) -> str:
     return text or "(no output)"
 
 
+def call_tool(server: str, tool: str, args: Dict[str, Any]) -> str:
+    """
+    Call one tool directly — the event rules' way in, no model and no spoken
+    yes: the user wrote this action in their own config. Waits for a server
+    still connecting; raises (with the reason) on anything but a clean answer.
+    """
+    s = _servers.get(server)
+    if s is None:
+        raise RuntimeError(f"MCP server {server!r} is not declared or not enabled")
+    s.ready.wait(CONNECT_TIMEOUT)
+    if s.state != "up":
+        raise RuntimeError(f"MCP server {server!r} is {s.state}" + (f": {s.error}" if s.error else ""))
+    result = _submit(s.client.call_tool(tool, args), _loop).result(CALL_TIMEOUT)
+    text = "\n".join(getattr(b, "text", None) or f"[{b.type}]" for b in result.content)[:MAX_RESULT]
+    if result.is_error:
+        raise RuntimeError(text or "the tool reported an error")
+    return text
+
+
+def describe(server: str) -> Optional[List[Any]]:
+    """The tools a server lists (name, description, input_schema), None if it is not up."""
+    s = _servers.get(server)
+    return list(s.tools) if s and s.state == "up" else None
+
+
 def _plugin(s: _Server, tool: Any) -> Plugin:
     acting = acts(tool)
     params = json.loads(json.dumps(tool.input_schema or {"type": "object"}))
@@ -207,6 +231,7 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
         confirmed = bool(args.pop("confirmed", False))
         if acting:
             key = (s.name, tool.name, json.dumps(args, sort_keys=True, default=str))
+            from loquivox.state import STATE   # lazy: the rules CLI runs without GTK
             session = STATE.talk_session
             asked = _pending.setdefault(session, {}) if session is not None else {}
             spoken = session.user_turns if session is not None else 0
@@ -252,6 +277,7 @@ def _deferred_servers() -> Dict[str, int]:
 
 
 def _find_tools(args: Dict[str, Any]) -> str:
+    from loquivox.state import STATE
     session = STATE.talk_session       # what a plugin cannot be handed in its arguments
     if session is None:
         return ""
