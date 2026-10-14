@@ -75,4 +75,13 @@ log["entries"][:0] = [e(5, now - 3_000_000), e(6, now - 1000)]
 said = session()
 assert len(said) == 1 and "x" in said[0]["content"], said
 assert not session(), "a stale entry came back"
+
+# Read at the keyboard, or its card has moved on: the cursor advances, nothing is said.
+now += 1000
+log["entries"][:0] = [e(8, now - 200, read=True),
+                      e(7, now - 300, cardId="moved", cardStatus="review")]
+board._get = lambda path: log if "notifications" in path else {"card": {"status": "done"}}
+assert not session(), "a read or no-longer-true entry was said"
+board._get = lambda path: log if "notifications" in path else {"card": {"status": "review"}}
+assert not session(), "a skipped entry came back once its card looked standing again"
 print("✓ board cursor OK")
