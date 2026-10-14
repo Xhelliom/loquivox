@@ -329,6 +329,42 @@ def test_silence_key_mid_session_is_logged():
     assert out.getvalue().count("faux déclenchement") == 1
 
 
+def _cut(fn, turns):
+    """Run fn with a companion session that already holds `turns` user turns."""
+    import io, contextlib
+    from loquivox.services.talk import TalkSession
+    session = TalkSession(write=False)
+    for i in range(turns):
+        session.add_user(f"tour {i}")
+    STATE.companion_session, STATE.talk_session = True, session
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            fn()
+    finally:
+        STATE.companion_session, STATE.talk_session = False, None
+        while not STATE.talk_click.empty():
+            STATE.talk_click.get_nowait()
+    return out.getvalue()
+
+
+def test_key_cut_after_a_user_turn_is_not_a_misfire():
+    c, _ = _make()
+    out = _cut(lambda: c.set_mode("silent"), 1)
+    assert "faux déclenchement" not in out and "fin de session (touche)" in out, out
+    c, _ = _make()
+    assert "faux déclenchement (touche)" in _cut(lambda: c.set_mode("silent"), 0)
+
+
+def test_spoken_stop_is_a_misfire_only_if_it_is_the_only_turn():
+    from loquivox.services.live_talk import LiveTalk
+    # the stop phrase is already recorded as a turn when _stop_if_asked runs
+    out = _cut(lambda: LiveTalk._stop_if_asked("je ne te parlais pas"), 1)
+    assert "faux déclenchement (voix)" in out, out
+    out = _cut(lambda: LiveTalk._stop_if_asked("je ne te parlais pas"), 3)
+    assert "faux déclenchement" not in out and "fin de session (voix)" in out, out
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
