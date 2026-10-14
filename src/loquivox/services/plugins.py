@@ -196,10 +196,13 @@ def stop_sources() -> None:
 
 
 def sources_waiting() -> bool:
-    """Whether a standing source has a message that still holds (stale ones are dropped)."""
-    for desk in list(_standing.values()):
+    """Whether an enabled standing source has a message that still holds (stale ones are dropped)."""
+    # A source switched off after start keeps its watch and its queue, but
+    # Desks() will not open it: counting it would wake the companion for nothing.
+    desks = [d for d in list(_standing.values()) if d.plugin.enabled()]
+    for desk in desks:
         desk.prune()
-    return any(desk.ready() for desk in list(_standing.values()))
+    return any(desk.ready() for desk in desks)
 
 
 def _arguments(raw: str) -> Dict[str, Any]:

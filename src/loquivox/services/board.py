@@ -233,7 +233,8 @@ def advance(entries: List[Dict[str, Any]], cursor: Optional[Dict[str, Any]],
 
 def _watch(put: Callable[[Dict[str, str]], None], stop: threading.Event) -> None:
     """
-    Poll the log for the length of the session, putting what is new on the desk.
+    Poll the log until ``stop`` is set — the companion's life, or the
+    session's when it is off — putting what is new on the desk.
 
     The cursor lives in settings.json, so it outlives the session and the
     process: two sessions never say the same notification, and one opening an

@@ -23,7 +23,7 @@ from loquivox.services import plugins  # noqa: E402
 from loquivox.services.plugins import Plugin  # noqa: E402
 from loquivox.state import STATE  # noqa: E402
 
-HOLDS = {"ok": True}
+HOLDS = {"ok": True, "on": True}
 FEED: list = []          # what the test's source will announce next
 
 
@@ -60,9 +60,10 @@ def _wait(predicate, timeout: float = 3.0) -> bool:
 
 def _setup():
     FEED.clear()
-    HOLDS["ok"] = True
+    HOLDS["ok"] = HOLDS["on"] = True
     plugins.register(Plugin(name="beacon", watch=_watch,
-                            still_true=lambda m: HOLDS["ok"]))
+                            still_true=lambda m: HOLDS["ok"],
+                            enabled=lambda: HOLDS["on"]))
     plugins.start_sources()
     said: list = []
 
@@ -159,6 +160,18 @@ def test_a_message_that_no_longer_holds_is_not_said_nor_wakes_anyone():
     print("✓ a stale message wakes nobody")
 
 
+def test_a_source_switched_off_after_start_wakes_nobody():
+    c, said = _setup()
+    try:
+        _fed(c, "ping")
+        HOLDS["on"] = False                  # off in Settings
+        assert not plugins.sources_waiting()
+        assert not c.announce_if_due() and not said, "woke for a disabled source"
+    finally:
+        _teardown()
+    print("✓ a source disabled after start wakes nobody")
+
+
 def test_a_session_open_already_shares_the_queue():
     c, said = _setup()
     try:
@@ -189,6 +202,7 @@ if __name__ == "__main__":
     test_it_waits_for_the_user_to_stop_talking()
     test_silence_mode_and_busy_states_keep_the_queue()
     test_a_message_that_no_longer_holds_is_not_said_nor_wakes_anyone()
+    test_a_source_switched_off_after_start_wakes_nobody()
     test_a_session_open_already_shares_the_queue()
     test_the_companion_names_no_plugin()
     print("\n✓ sources live with the companion")
