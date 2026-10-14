@@ -177,6 +177,8 @@ class LiveTalk:
         #: delta for it arrived. There is no end-of-turn event, so this pair is
         #: the whole turn machinery (see ``tick``).
         self._live: Dict[str, str] = {}
+        session.settle = self._settle
+        self._consulted_turns = 0
         self._last_delta: Dict[str, float] = {}
         #: the jitter buffer, all under ``_audio_lock``: output chunks as
         #: (PCM, audible), how far into the first one playback is, the bytes in
@@ -361,6 +363,41 @@ class LiveTalk:
         for role in ("user", "assistant"):
             if role in self._live and now - self._last_delta.get(role, now) >= gap:
                 self._close_turn(role)
+
+    #: the user's turn is "finished" once no delta came for this long
+    SETTLE_QUIET = 0.5
+    SETTLE_MAX = 4.0
+    #: how long a delegation waits for a sentence whose transcription has not
+    #: even begun (no end-of-input-transcription event exists to wait for)
+    SETTLE_FIRST = 3.0
+
+    def _settle(self, expect_new: bool = False) -> None:
+        """
+        Record the user's sentence before anything reads ``turns``.
+
+        ``session.delegation.created`` can land before the request has finished
+        transcribing — or before its first delta. Flushing at once leaves it out
+        of the brief and the writing pass writes something generic. So wait
+        (bounded) while deltas are still arriving; and with ``expect_new`` (a
+        delegation answers an utterance) also wait for the first delta if no
+        user turn was recorded since the previous delegation.
+        """
+        now = time.monotonic
+        start = now()
+        deadline = start + self.SETTLE_MAX
+        while now() < deadline:
+            with self._lock:
+                last = self._last_delta.get("user") if "user" in self._live else None
+            if last is not None:
+                if now() - last >= self.SETTLE_QUIET:
+                    break
+            elif (not expect_new or self._session.user_turns > self._consulted_turns
+                  or now() - start >= self.SETTLE_FIRST):
+                break
+            time.sleep(0.05)
+        self._flush_turns()
+        if expect_new:
+            self._consulted_turns = self._session.user_turns
 
     def _flush_turns(self) -> None:
         """Close whatever is still open — the session is ending or delegating."""
@@ -548,7 +585,7 @@ class LiveTalk:
         from loquivox.managers.chat import ChatManager
 
         try:
-            self._flush_turns()
+            self._settle(expect_new=True)
             ChatManager.add_message("note", "🧠 Thinking…")
             started = time.time()
             answer = self._session.consult()
