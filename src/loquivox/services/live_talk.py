@@ -258,7 +258,7 @@ class LiveTalk:
             raise self.error
         if self._conn is None or not self._started.is_set():
             raise RuntimeError("Live session did not start in time")
-        media.mic_opened()
+        media.mic_opened(duck=not STATE.companion_session)
         self._mic = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
                                    device=resolve_input_device(),
                                    callback=self._on_audio)

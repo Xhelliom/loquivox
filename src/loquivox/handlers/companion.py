@@ -22,7 +22,7 @@ import time
 from typing import Callable, Optional
 
 import loquivox.config as config_module
-from loquivox.services import plugins
+from loquivox.services import media, plugins
 from loquivox.state import STATE
 
 #: the bubble menu is this list
@@ -56,6 +56,9 @@ def _look(session) -> None:
 
 SOURCE_POLL = 0.5     # s between two looks at the sources' queue
 SOURCE_RETRY = 30.0   # s before a message a session left unsaid may wake it again
+DUCK_ROOM_MARGIN = 2.0   # speech must be this many times louder than the room (music included)
+DUCK_CALIBRATION = 6     # mic blocks (~0.6 s) that only measure the room at session start
+DUCK_CONFIRM = 3         # consecutive loud blocks that make it speech, not a click
 SPEAK_HOLD = 0.8   # s; same order as live_talk.AUDIO_IDLE (1.0), shorter so listening comes back fast
 
 
@@ -82,6 +85,11 @@ class Companion:
         self._voice = None   # "listening" / "speaking" last posted to the bubble
         self._heard = float("-inf")   # monotonic time of the last word heard in standby
         self._retry = float("-inf")   # no source wake before this
+        self._ducking = False         # the music is down because someone speaks
+        self._user_run = 0            # consecutive mic blocks above the speech bar
+        self._user_last = float("-inf")   # monotonic time of the last confirmed user speech
+        self._room = 0.0              # loudest mic level heard WITHOUT speech, music included
+        self._room_blocks = 0
         presence.on_level = self._mic_level
 
     # ------------------------------------------------------------------ modes
@@ -151,10 +159,52 @@ class Companion:
                 self._loud = now
         speaking = now - self._loud < SPEAK_HOLD
         self.bubble.set_level(self._out if speaking and who != "out" else level)
+        self._duck(who, level, now)
         voice = "speaking" if speaking else "listening"
         if voice != self._voice:
             self._voice = voice
             self.bubble.set_state(voice)
+
+    def _user_speaking(self, level: float, now: float) -> bool:
+        """
+        Real speech from the user, never the music coming back into the mic.
+        The bar is the speech threshold or ``DUCK_ROOM_MARGIN`` times the room,
+        whichever is higher, and the room is only learned while the music is up
+        and nothing speaks: ducking lowers the music, so a bar that followed the
+        mic down would be crossed by the music coming back — the pumping.
+        The first ``DUCK_CALIBRATION`` blocks only measure.
+        """
+        bar = max(config_module.CFG.TALK_VAD_THRESHOLD * 6, self._room * DUCK_ROOM_MARGIN)
+        if self._room_blocks < DUCK_CALIBRATION:
+            self._room_blocks += 1
+            self._room = max(self._room, level)
+            return False
+        if level >= bar:
+            self._user_run += 1
+            if self._user_run >= DUCK_CONFIRM:
+                self._user_last = now
+        else:
+            self._user_run = 0
+            if not self._ducking:
+                self._room = max(level, self._room * 0.99)
+        return now - self._user_last < config_module.CFG.COMPANION_DUCK_HOLD_SEC
+
+    def _duck(self, who: str, level: float, now: float) -> None:
+        """Music down while the companion speaks and/or the user does, up ``duck_hold`` after."""
+        cfg = config_module.CFG
+        assistant = cfg.COMPANION_DUCK_ON_ASSISTANT and now - self._loud < cfg.COMPANION_DUCK_HOLD_SEC
+        user = False
+        if who == "in":   # the assistant's own echo is not the user
+            if now - self._loud < SPEAK_HOLD:
+                self._user_run = 0
+            else:
+                user = self._user_speaking(level, now)
+        else:
+            user = now - self._user_last < cfg.COMPANION_DUCK_HOLD_SEC
+        want = assistant or (cfg.COMPANION_DUCK_ON_USER and user)
+        if want != self._ducking:
+            self._ducking = want
+            media.duck_voice(want)
 
     def wake(self, force: bool = False) -> None:
         """Wake word heard (on its own thread): run one conversation, block until over.
@@ -170,6 +220,8 @@ class Companion:
         STATE.current_mode, STATE.talk_engine = "ai", "live"
         STATE.echo_advised = False
         self._out, self._loud, self._voice = 0.0, float("-inf"), None
+        self._ducking, self._user_run, self._user_last = False, 0, float("-inf")
+        self._room, self._room_blocks = 0.0, 0
         self.bubble.pulse()                # heard: "I'm listening"
         self.bubble.set_state("cloud")     # red from the capture on: the cost is visible
         try:

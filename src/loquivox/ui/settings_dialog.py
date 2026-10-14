@@ -491,6 +491,15 @@ class SettingsDialog:
         cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
         cls._field(body, "Bubble style", cls._comp_style, labels)
 
+        cls._comp_duck_ai = Gtk.CheckButton(label="Lower the music when the companion speaks")
+        cls._comp_duck_ai.set_active(bool(cfg.COMPANION_DUCK_ON_ASSISTANT))
+        cls._field(body, "Music", cls._comp_duck_ai, labels)
+        cls._comp_duck_user = Gtk.CheckButton(label="Lower the music when I speak")
+        cls._comp_duck_user.set_active(bool(cfg.COMPANION_DUCK_ON_USER))
+        cls._field(body, "", cls._comp_duck_user, labels)
+
+        cls._note(body, "The music is only lowered with <i>media = duck</i> "
+                        "(Appearance tab).")
         cls._note(body, "The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>); it applies right away.")
         cls._comp_status = Gtk.Label()
@@ -555,6 +564,8 @@ class SettingsDialog:
                 "wake_word": wake,
                 "click_mode": cls._comp_click.get_active_id(),
                 "bubble_style": cls._comp_style.get_active_id(),
+                "duck_on_assistant": cls._comp_duck_ai.get_active(),
+                "duck_on_user": cls._comp_duck_user.get_active(),
             })
         except ConfigWriteError as e:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")
