@@ -196,12 +196,12 @@ question at a time and still knows when to stop.
 **Cut it off whenever you like.** Start talking while it is still speaking and it
 stops mid-sentence and listens — your first words are kept as the start of your turn,
 not lost to the interruption. It works out how loudly it can hear itself by listening
-to its own reply, so a headset normally needs no setting; if interrupting still
-needs shouting on one (typically USB — your own voice lands in the calibration
-window and becomes the bar), tick *The reply plays in my headset's earpieces* in
-Settings → Talk (`headset = true`). On speakers with the volume up,
-`libpipewire-module-echo-cancel` keeps it from cutting itself off. Turn it off with
-`barge_in = false`.
+to its own reply, so a headset normally needs no setting. If it ignores you or
+you cannot get a word in on a headset, set *Anti-echo* to **Off (headset)** in
+Settings → Talk (`echo_guard = "off"`): nothing holds the microphone back any more,
+and talking over the reply still stops it. *Headset, no calibration*
+(`"headset"`) only skips the measurement. On speakers with the volume up, keep
+*Speakers* and use `libpipewire-module-echo-cancel` so it does not cut itself off.
 
 **It listens like an editor, not a dictaphone.** What it gets is a *transcript* —
 spoken language that wanders, backtracks, and where the recognizer mishears a name or a

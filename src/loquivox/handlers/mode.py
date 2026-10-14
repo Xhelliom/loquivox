@@ -943,7 +943,7 @@ class ModeHandler:
         from loquivox.services.vad import EchoGate
 
         cfg = config_module.CFG
-        if not cfg.TALK_BARGE_IN:
+        if not cfg.TALK_BARGE_IN and cfg.TALK_ECHO_GUARD != "off":
             # Blocking on purpose: the next turn starts recording the moment
             # this returns, and must not capture the assistant's own voice.
             TTSService.speak(text, wait=True, force=cfg.TALK_SPEAK_REPLIES)
@@ -965,7 +965,7 @@ class ModeHandler:
             gate = STATE.vad = EchoGate(STATE.capture_rate,
                                         threshold=cfg.TALK_VAD_THRESHOLD,
                                         margin=cfg.TALK_BARGE_IN_MARGIN,
-                                        headset=cfg.TALK_HEADSET)
+                                        headset=cfg.TALK_ECHO_GUARD != "speakers")  # "off" = headset, no calibration
         needed = cfg.TALK_BARGE_IN_MS / 1000.0
         while speaker.is_alive():
             vad = STATE.vad
