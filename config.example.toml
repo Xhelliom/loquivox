@@ -148,14 +148,18 @@ wake_word = "hey_jarvis"
 click_mode = "silent"
 # Silence while the screen is locked; unlocking brings back the mode you had
 # (never written as a preference). Lock = logind Lock/Unlock signals only
-# (LockedHint is ignored: stuck at "yes" on niri + Noctalia).
+# (LockedHint is ignored: stuck at "yes" on niri + Noctalia). The chosen route
+# is `loginctl lock-session`, which emits Lock (Noctalia obeys it, seen in its
+# log): bind it in niri (`Mod+L { spawn "loginctl" "lock-session"; }`, instead
+# of Super+L straight to Noctalia) and make Noctalia's idle action run
+# `loginctl lock-session` too. A lock done any other way is invisible here.
 silence_on_lock = true
 # Same silence after this many minutes without keyboard/mouse input (Wayland,
 # via swayidle); 0 = off. Read at startup. Any input brings the mode back.
-# 10 = Noctalia's own idle lock: it only sets logind's LockedHint and never
-# emits Lock, so this is what catches its lock. A manual lock is caught only
-# if bound to `loginctl lock-session` (emits Lock; whether Noctalia then locks
-# too is untested).
+# Never cuts a conversation in progress (talking touches neither keyboard nor
+# mouse) — only the lock closes a session. WARNING: with voice alone, the
+# wake word is also cut after this delay; raise it or set 0 if you use it.
+# Fallback for a lock that emits no Lock signal (10 = Noctalia's idle lock).
 silence_idle_min = 10
 # Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
 # Applied live from Settings → Companion.

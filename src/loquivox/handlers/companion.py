@@ -127,10 +127,24 @@ class Companion:
     def _watch_away(self) -> None:
         from loquivox.platform import get_away
         away = get_away()
-        away.watch_lock(   # CFG is read per event: Settings rebinds it
-            lambda locked: config_module.CFG.COMPANION_SILENCE_ON_LOCK and self.set_away("lock", locked))
+        away.watch_lock(self._on_lock)
         if config_module.CFG.COMPANION_SILENCE_IDLE_MIN > 0:
-            away.watch_idle(config_module.CFG.COMPANION_SILENCE_IDLE_MIN * 60, lambda idle: self.set_away("idle", idle))
+            away.watch_idle(config_module.CFG.COMPANION_SILENCE_IDLE_MIN * 60, self._on_idle)
+
+    def _on_lock(self, locked: bool) -> None:
+        # CFG is read per event (Settings rebinds it). An Unlock always goes through:
+        # the box unticked during a lock must not leave the silence stuck until F7.
+        if not locked or config_module.CFG.COMPANION_SILENCE_ON_LOCK:
+            self.set_away("lock", locked)
+
+    def _on_idle(self, idle: bool) -> None:
+        # Talking touches neither keyboard nor mouse: idleness must never cut a
+        # conversation. Only the lock closes a session.
+        # ponytail: dropped, not deferred — the edge does not repeat, so a user who
+        # stays idle after the conversation is not silenced until the next activity cycle.
+        if idle and (STATE.companion_session or STATE.talk_active):
+            return
+        self.set_away("idle", idle)
 
     def set_away(self, reason: str, on: bool) -> None:
         """Silence for a reason that is not a choice: nothing is persisted, and the

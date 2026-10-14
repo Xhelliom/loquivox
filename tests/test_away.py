@@ -165,6 +165,36 @@ def test_stuck_lockedhint_never_silences_the_companion():
         assert STATE.presence_mode == chosen and not c._away
 
 
+def test_unlock_goes_through_when_the_box_is_unticked_during_a_lock():
+    c, _ = _make()
+    c._on_lock(True)
+    assert STATE.presence_mode == "silent"
+    cfg = comp.config_module.CFG
+    comp.config_module.CFG = type("C", (), {"COMPANION_SILENCE_ON_LOCK": False})()
+    try:
+        c._on_lock(False)
+        c._on_lock(True)                      # unticked: a new lock is ignored
+    finally:
+        comp.config_module.CFG = cfg
+    assert STATE.presence_mode == "active" and not c._away
+
+
+def test_idle_never_cuts_a_conversation():
+    c, _ = _make()
+    while not STATE.talk_click.empty():
+        STATE.talk_click.get_nowait()
+    STATE.companion_session = True
+    c._on_idle(True)
+    assert STATE.talk_click.empty() and not c._away and STATE.presence_mode == "active"
+    STATE.companion_session = False
+    STATE.talk_active = True
+    c._on_idle(True)
+    STATE.talk_active = False
+    assert not c._away
+    c._on_idle(True)                          # no conversation: idle silences as before
+    assert STATE.presence_mode == "silent"
+
+
 def test_swayidle_lines():
     seen = []
     wayland.WaylandAway._idle_line("idle\n", seen.append)
