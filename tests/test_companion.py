@@ -60,6 +60,14 @@ def test_wake_runs_the_loop_in_order():
     assert not STATE.companion_session and not STATE.talk_active
 
 
+def test_notification_wake_does_not_look():
+    for cause, looks in (("notification", False), ("wake_word", True), ("key", True)):
+        c, log = _make()
+        c.wake(force=True, cause=cause)
+        assert ("look" in log) == looks, (cause, log)
+        assert "converse" in log
+
+
 def test_session_levels_set_listening_and_speaking():
     c, log = _make()
     STATE.companion_session = True
