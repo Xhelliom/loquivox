@@ -560,6 +560,8 @@ class SettingsDialog:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
+        from loquivox.handlers import companion
+        companion.restyle()
         saved = ("<small>✓ Saved — the wake word and the click apply now, "
                  "the startup choice at the next launch.</small>")
         # Loading the model is slow and every Apply runs every tab's writer:

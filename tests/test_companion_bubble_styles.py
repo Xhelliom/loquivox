@@ -84,4 +84,23 @@ for value, want in (("radar", "radar"), ("goutte-plus", "goutte"), ("nope", "gou
     cfgmod.CFG = cfgmod._build_config()
     assert st.current_style() == want, (value, st.current_style())
 
+# --demo --style goutte must force the default, not fall back to config.toml
+cfgmod._load_user_toml = lambda: {"companion": {"bubble_style": "radar"}}
+cfgmod.CFG = cfgmod._build_config()
+st.set_style("goutte")
+assert st.current_style() == "goutte"
+st._style = None
+
+# Apply repaints the live bubble even when it has no timer (silent)
+from loquivox.handlers import companion as comp
+kicked = []
+class _Bubble:
+    def _kick(self): kicked.append(1)
+comp._companion = comp.Companion.__new__(comp.Companion)
+comp._companion.bubble = _Bubble()
+comp.restyle()
+assert kicked, "restyle() must repaint the bubble"
+src = (Path(__file__).parent.parent / "src/loquivox/ui/settings_dialog.py").read_text()
+assert "companion.restyle()" in src.split("def _on_apply_companion")[1].split("def ")[0]
+
 print("✓ companion bubble styles OK")

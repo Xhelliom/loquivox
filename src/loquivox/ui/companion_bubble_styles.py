@@ -5,7 +5,7 @@ Same frame as the bubble (``SIZE`` window, ``DROP`` body, the same ``Look`` fed
 by the same springs), so a style is a drop-in for ``paint``. The shipped look,
 ``goutte``, stays the default until the operator picks another one:
 
-    LOQUIVOX_BUBBLE_STYLE=reacteur loquivox            #
+    LOQUIVOX_BUBBLE_STYLE=reacteur loquivox
     python -m loquivox.ui.companion_bubble --demo --style radar [--state idle]
     python -m loquivox.ui.companion_bubble --gallery   # the four side by side (goutte included)
     python -m loquivox.ui.companion_bubble --frames DIR  # PNG frames for the GIFs
@@ -240,7 +240,7 @@ def current_style() -> str:
 
 def set_style(name: str) -> None:
     global _style
-    _style = name if name in STYLES else None
+    _style = name if name in STYLES or name == DEFAULT_STYLE else None
 
 
 def draw(name: str, cr, look: Look, rig: Rig, t: float) -> None:

@@ -211,6 +211,12 @@ def set_wake_word(name: str) -> None:
             raise RuntimeError(_companion.presence.wake_error)
 
 
+def restyle() -> None:
+    """Settings changed the bubble's style: repaint it now (a silent bubble has no timer)."""
+    if _companion is not None:
+        _companion.bubble._kick()
+
+
 def toggle_silence() -> None:
     if _companion is not None:
         _companion.toggle_silence()
