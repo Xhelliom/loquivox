@@ -331,6 +331,54 @@ def test_the_writing_pass_sees_a_request_still_being_transcribed():
     print("✓ the writing pass waits for the sentence being transcribed")
 
 
+def _capture_generate(session, instruction=""):
+    from loquivox.services import ai as ai_module
+    seen = []
+    real = ai_module.AIService.complete
+    ai_module.AIService.complete = staticmethod(
+        lambda messages, **kw: seen.append(messages) or "ok")
+    try:
+        session.generate(instruction)
+    finally:
+        ai_module.AIService.complete = real
+    return seen[0]
+
+
+def test_a_delegation_before_the_first_delta_still_gets_the_request():
+    """Dictated paragraph → delegation.created → (late) first delta → generate()."""
+    from loquivox.services.live_talk import LiveTalk
+
+    session = TalkSession()
+    talk = LiveTalk(session)
+    talk.SETTLE_QUIET = 0.1
+    # Nothing is open yet: the transcription has not begun.
+    for i, piece in enumerate(["écris un mail à Marie ", "pour lui dire merci"]):
+        threading.Timer(0.3 + 0.05 * i, talk._on_delta, ("user", piece)).start()
+    started = time.monotonic()
+    talk._settle(expect_new=True)               # what _consult does first
+    assert time.monotonic() - started >= 0.3, "returned before the sentence arrived"
+    sent = " ".join(m["content"] for m in _capture_generate(session) if m["role"] == "user")
+    assert "mail à Marie pour lui dire merci" in sent, sent
+    # No new utterance ever comes: bounded, not stuck.
+    talk.SETTLE_FIRST = 0.2
+    started = time.monotonic()
+    talk._settle(expect_new=True)
+    assert time.monotonic() - started < 1.0
+    print("✓ a delegation ahead of the first transcript delta waits for it")
+
+
+def test_plus_court_reaches_the_writing_pass_with_the_previous_text():
+    session = TalkSession()
+    session.add_user("écris un mail à Marie pour lui dire merci")
+    session.turns.append({"role": "system", "content": "TEXT WRITTEN\n---\nBonjour Marie, merci pour tout.\n---"})
+    session.add_user("plus court")
+    msgs = _capture_generate(session, "plus court")
+    joined = " | ".join(m["content"] for m in msgs)
+    assert "Bonjour Marie, merci pour tout." in joined, "the previous text is missing"
+    assert msgs[-1]["role"] == "user" and msgs[-1]["content"].endswith("plus court"), msgs[-1]
+    print("✓ « plus court » reaches the writing pass with the previous text")
+
+
 def test_an_mcp_server_reaches_all_three_engines():
     """
     The MCP client adds no engine branch either: a tool of a real stdio server
@@ -469,6 +517,8 @@ if __name__ == "__main__":
     test_a_native_tool_stands_down_only_what_it_replaces()
     test_an_answer_is_rechecked_when_it_is_handed_back()
     test_the_writing_pass_sees_a_request_still_being_transcribed()
+    test_a_delegation_before_the_first_delta_still_gets_the_request()
+    test_plus_court_reaches_the_writing_pass_with_the_previous_text()
     test_an_mcp_server_reaches_all_three_engines()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")
