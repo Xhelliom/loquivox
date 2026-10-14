@@ -31,4 +31,14 @@ for guard in ("off", "headset", "speakers"):
     assert read({"echo_guard": guard}).TALK_ECHO_GUARD == guard
 assert read({"echo_guard": "off", "headset": True}).TALK_ECHO_GUARD == "off", "new key wins"
 assert read({"echo_guard": "bogus"}).TALK_ECHO_GUARD == "speakers", "garbage accepted"
+
+# cascade (handlers/mode.py _talk_speak): same logic, as pure functions
+from loquivox.services.vad import calibrates_echo, reply_blocks_mic  # noqa: E402
+
+for barge_in in (True, False):
+    assert not reply_blocks_mic(barge_in, "off"), "off must never close the mic"
+assert reply_blocks_mic(False, "headset") and reply_blocks_mic(False, "speakers")
+assert not reply_blocks_mic(True, "speakers")
+assert not calibrates_echo("off") and not calibrates_echo("headset")
+assert calibrates_echo("speakers")
 print("ok")
