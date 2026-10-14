@@ -437,6 +437,9 @@ class Config:
     )
     #: Seconds of silence, both ways, that end a companion conversation.
     COMPANION_IDLE_TIMEOUT: float = 12.0
+    #: Seconds without a word heard before a source's message may wake the
+    #: companion by itself (standby, active mode only).
+    COMPANION_SOURCE_SILENCE_SEC: float = 2.0
     #: Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
     COMPANION_BUBBLE_STYLE: str = "goutte"
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
@@ -885,6 +888,8 @@ def _build_config() -> Config:
         overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
     if "idle_timeout" in companion:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
+    if "source_silence" in companion:
+        overrides["COMPANION_SOURCE_SILENCE_SEC"] = float(companion["source_silence"])
     if "stop_phrases" in companion:
         overrides["COMPANION_STOP_PHRASES"] = tuple(
             str(p).strip().lower() for p in companion["stop_phrases"] if str(p).strip()
