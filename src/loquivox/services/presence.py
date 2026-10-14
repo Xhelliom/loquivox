@@ -9,7 +9,7 @@ the machine: the cloud session (``services/live_talk.py``) opens only after
 
 openwakeword is optional (``pip install -e '.[wake]'``, or Settings → Companion,
 which installs it ``--no-deps``: its ``tflite-runtime`` requirement has no wheel
-for Python 3.14 and only the ONNX engine is used here). Without it — or without
+for Python 3.12+ and only the ONNX engine is used here). Without it — or without
 its model files, fetched once with ``openwakeword.utils.download_models()`` —
 the listener still runs, says so once, and only the hotkey starts a session.
 

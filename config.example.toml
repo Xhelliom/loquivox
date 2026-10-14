@@ -140,7 +140,7 @@ companion  = ["F7"]
 enabled = true
 # Wake word: an openwakeword built-in model ("hey_jarvis", "alexa",
 # "hey_mycroft", "hey_rhasspy", "timer", "weather"). Needs openwakeword and its
-# ONNX models (Settings → Companion installs both, also on Python 3.14, and says
+# ONNX models (Settings → Companion installs both, also on Python 3.12+, and says
 # what is missing if the word cannot load); applied live from Settings.
 wake_word = "hey_jarvis"
 # Mode a single click on the bubble switches to ("silent" or "active").

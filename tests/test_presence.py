@@ -128,6 +128,21 @@ def test_wake_extra_never_pulls_tflite():
     assert set(presence.WAKE_DEPS) <= {d.split(">")[0] for d in extra}
 
 
+def test_apply_raises_when_the_model_does_not_load():
+    from loquivox.handlers import companion
+    sys.modules["openwakeword"] = sys.modules["openwakeword.model"] = None
+    p = _make([], None)
+    companion.install(p, None)
+    try:
+        companion.set_wake_word("hey_jarvis")
+    except RuntimeError as exc:
+        assert "openwakeword" in str(exc)
+    else:
+        raise AssertionError("Apply must not report a success")
+    finally:
+        companion._companion = None
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
