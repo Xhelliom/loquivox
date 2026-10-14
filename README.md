@@ -394,6 +394,23 @@ back to the built-in default, and a missing or malformed file is simply ignored:
 starts. UI-toggled preferences (voice, color scheme, …) are stored separately in
 `~/.config/loquivox/settings.json`.
 
+### MCP servers (tools for the conversation)
+
+Loquivox is an MCP client: declare a server and its tools are available to the companion, F4 and
+F6 in all three talk engines. Install the extra (`pip install -e '.[mcp]'`), then:
+
+```toml
+[mcp.servers.home]            # stdio: command / args / env — or `url = "http://…/mcp"`
+command = "npx"
+args = ["-y", "some-mcp-server"]
+```
+
+A tool that is not marked read-only by its server (no `readOnlyHint`, or none at all) is
+**confirmed out loud** before it runs, and what a tool returns is treated as data, never as an
+instruction. A server that is missing or crashes is a warning, not a failed start.
+**Settings → Plugins → MCP servers** lists each server, its state and its tools (⚡ = acts), with
+an on/off switch.
+
 ---
 
 ## 🐛 Reporting a bug
@@ -448,7 +465,7 @@ src/loquivox/
 ├── state.py          # AppState + SettingsManager (runtime state & user prefs)
 ├── platform/         # X11 vs Wayland backends behind ABCs (clipboard, typing, screenshot)
 ├── transcription/    # Pluggable STT: factory, dispatcher, groq / whispercpp / streaming
-├── services/         # audio, ai, tts (+ piper), talk, realtime_talk, live_talk, research, vad,
+├── services/         # audio, ai, tts (+ piper), talk, realtime_talk, live_talk, research, mcp_tools, vad,
 │                     # turn_detector, postprocess, clipboard, image, media
 ├── managers/         # history, chat overlay state, recording overlay
 ├── ui/               # recording overlay, WebKit2 chat overlay, settings, tray, hotkey bar

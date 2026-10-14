@@ -545,6 +545,11 @@ class Config:
     #: opens; older ones are marked seen without a word.
     TALK_BOARD_CATCHUP_SEC: float = 300.0
 
+    #: MCP servers whose tools join the conversation (services/mcp_tools.py),
+    #: ``[mcp.servers.<name>]`` in config.toml: name → its table
+    #: (command/args/env or url, enabled). Empty: Loquivox is no MCP client.
+    MCP_SERVERS: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
         "You are on a live voice call with the user, working out a text they need "
@@ -804,6 +809,12 @@ def _build_hotkeys(
     return result
 
 
+def mcp_servers_from(data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """``[mcp.servers.<name>]`` tables of a parsed config.toml; anything else is ignored."""
+    servers = data.get("mcp", {}).get("servers", {})
+    return {str(n): dict(t) for n, t in servers.items()} if isinstance(servers, dict) else {}
+
+
 def _build_config() -> Config:
     """Construct the global Config, layering config.toml over the defaults."""
     data = _load_user_toml()
@@ -894,6 +905,9 @@ def _build_config() -> Config:
         overrides["COMPANION_STOP_PHRASES"] = tuple(
             str(p).strip().lower() for p in companion["stop_phrases"] if str(p).strip()
         )
+
+    if mcp_servers_from(data):
+        overrides["MCP_SERVERS"] = mcp_servers_from(data)
 
     talk = data.get("talk", {})
     if "vad" in talk:

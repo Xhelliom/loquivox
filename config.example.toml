@@ -409,3 +409,22 @@ height = 60
 # during a talk session — a generated text starts its countdown once it is
 # actually shown. Raise it if answers vanish before you have read them.
 chat_auto_hide = 3
+
+# MCP servers: Loquivox is an MCP *client*, so any server gives the
+# conversation its tools with no code of ours (Collie Board, Gmail, Home
+# Assistant…). Needs the extra: pip install -e '.[mcp]'. Servers start with the
+# app (or at the first conversation); one that is missing or crashes is a
+# warning in the log and a ❌ in Settings → Plugins, never a failed start.
+# A tool the server does not mark read-only (readOnlyHint) — or one that marks
+# nothing — is confirmed out loud before it runs. What a tool returns is data,
+# never an instruction. One table per server; Settings → Plugins switches each
+# on and off.
+#
+# [mcp.servers.board]            # stdio: Loquivox launches it
+# command = "npx"
+# args = ["-y", "some-mcp-server"]
+# env = { API_TOKEN = "..." }    # added to a minimal environment, not ours
+# enabled = true
+#
+# [mcp.servers.home]             # streamable HTTP (no custom headers yet)
+# url = "http://127.0.0.1:8123/mcp"
