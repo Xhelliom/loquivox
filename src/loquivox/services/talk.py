@@ -212,6 +212,9 @@ def log_companion_cut(how: str, user_turns: int) -> None:
 
 
 NOT_DONE = "Je n'ai pas pu faire ça."
+UNKNOWN_TOOL = ("There is no tool named {name}. If a tool may exist for this, "
+                "call find_tools to look for it; otherwise say honestly that "
+                "you cannot find that tool.")
 
 
 class TalkSession:
@@ -417,11 +420,19 @@ class TalkSession:
             routed = [(c, desk) for c, desk in
                       ((c, self.desks.get(c["name"])) for c in calls) if desk]
             if calls and not routed and not last:
-                # Calls to tools this session does not hold (a deferred one
-                # not loaded yet): nothing to run, so ask again, in text.
-                answer = AIService.complete(
-                    base + exchange + [{"role": "system", "content": TEXT_ONLY}],
-                    on_delta=stream)
+                # Calls to tools this session does not hold (invented, or a
+                # deferred one that cannot load): tell the model so as that
+                # call's result and go round again WITH the tools — asked in
+                # text only, it calls find_tools anyway and the provider
+                # rejects the whole generation (Groq: tool_use_failed).
+                exchange += [{"role": "assistant", "content": answer or None,
+                              "tool_calls": [{"id": c["id"], "type": "function",
+                                              "function": {"name": c["name"],
+                                                           "arguments": c["arguments"]}}
+                                             for c in calls]}]
+                exchange += [{"role": "tool", "tool_call_id": c["id"],
+                              "content": UNKNOWN_TOOL.format(name=c["name"])} for c in calls]
+                continue
             if not routed or last:
                 break
             for call, desk in routed:

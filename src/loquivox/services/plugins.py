@@ -70,7 +70,9 @@ SOURCE_FRAME = (
 NO_FALSE_DONE = (
     "Never say an action is done, launched or sent unless a tool returned a "
     "success for it in this conversation. If the tool is missing, was not "
-    "called or failed, say what is missing instead.")
+    "called or failed, say what is missing instead. A result starting with "
+    "ÉCHEC means it failed: say so and give the reason, never \"done\" or "
+    "\"sent\".")
 
 
 @dataclass(frozen=True)
