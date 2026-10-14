@@ -8,7 +8,7 @@ that provides concrete implementations of these ABCs.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 
 class ClipboardBackend(ABC):
@@ -92,3 +92,25 @@ class ScreenshotBackend(ABC):
         cropping around the cursor becomes cropping nothing.
         """
         return None
+
+
+class AwayBackend(ABC):
+    """Is the user away from the machine? Two independent signals, either may be absent."""
+
+    @abstractmethod
+    def watch_lock(self, on_locked: Callable[[bool], None]) -> bool:
+        """
+        Call ``on_locked(True/False)`` when the session is locked / unlocked.
+        Transitions only: never the level at startup. ``LockedHint`` is not
+        trustworthy as a level (stuck at "yes" on an unlocked niri + Noctalia
+        session), so a backend must not report it as one.
+        Returns False when the signal cannot be watched.
+        """
+
+    def watch_idle(self, seconds: int, on_idle: Callable[[bool], None]) -> bool:
+        """
+        Call ``on_idle(True)`` after ``seconds`` without keyboard/mouse input and
+        ``on_idle(False)`` at the next input. The fallback for a shell whose lock
+        screen tells nobody. Returns False when the session cannot tell.
+        """
+        return False

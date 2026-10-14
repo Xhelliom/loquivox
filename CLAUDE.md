@@ -692,6 +692,19 @@ written by the single Apply through `memory.replace()` — which keeps an id's
 scope, date and count. The core names no source; `tests/test_memory.py` drives
 one it has never heard of.
 
+### Presence across restarts and absences (`handlers/companion.py`, `platform/`)
+
+`set_mode()` writes `presence_mode` to settings.json and `start_modes()` reads it
+back, so F7 silence survives a restart. A locked screen or a long idle is
+`set_away(reason, on)`: the same silence, `persist=False`, closing a running
+session, with the mode from *before* restored when the last reason goes (a user
+who chose silence stays silent). A mode picked meanwhile forgets the reasons.
+Detection sits behind `AwayBackend` (`platform/base.py`): `LogindAway` (Lock /
+Unlock signals + `LockedHint` *edges* — its **level** is stuck at "yes" on
+niri + Noctalia, never read) and, on Wayland, `watch_idle` through swayidle
+(ext-idle-notify, `[companion] silence_idle_min`, startup-only; X11 has no idle
+fallback). `tests/test_away.py`.
+
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
 The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`

@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from loquivox.platform.base import ClipboardBackend, InputBackend, ScreenshotBackend
+    from loquivox.platform.base import AwayBackend, ClipboardBackend, InputBackend, ScreenshotBackend
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ logger.info("Detected session type: %s", SESSION_TYPE)
 _clipboard: ClipboardBackend | None = None
 _input: InputBackend | None = None
 _screenshot: ScreenshotBackend | None = None
+_away: AwayBackend | None = None
 
 
 def get_clipboard() -> ClipboardBackend:
@@ -95,3 +96,16 @@ def get_screenshot() -> ScreenshotBackend:
             from loquivox.platform.x11 import X11Screenshot
             _screenshot = X11Screenshot()
     return _screenshot
+
+
+def get_away() -> AwayBackend:
+    """Get the platform-specific lock/idle watcher (singleton)."""
+    global _away
+    if _away is None:
+        if SESSION_TYPE == "wayland":
+            from loquivox.platform.wayland import WaylandAway
+            _away = WaylandAway()
+        else:
+            from loquivox.platform.logind import LogindAway   # X11: lock only, no idle
+            _away = LogindAway()
+    return _away
