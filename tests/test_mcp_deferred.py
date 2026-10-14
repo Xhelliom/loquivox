@@ -224,10 +224,10 @@ if __name__ == "__main__":
         test_a_deferred_tool_is_not_callable_before_it_is_loaded()
         test_the_cascade_calls_it_on_the_next_turn()
         test_realtime_pushes_the_new_tools_to_the_session()
-        test_always_as_a_string_is_a_one_item_list_with_exact_names()
         test_live_client_delegation_reads_the_same_list_and_responses_gets_everything()
         test_a_source_that_spoke_loads_its_server()
         test_the_weight_of_the_tool_context()
+        test_always_as_a_string_is_a_one_item_list_with_exact_names()
     finally:
         config_module.CFG = real
         mcp_tools.stop()
