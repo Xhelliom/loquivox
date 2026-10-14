@@ -235,7 +235,8 @@ class Companion:
         self._set_state("cloud")     # red from the capture on: the cost is visible
         opened = False
         try:
-            self._look(session)            # before the mic is released and the cloud opens
+            if cause != "notification":    # a source woke us: the screen has nothing to do with it
+                self._look(session)        # before the mic is released and the cloud opens
             self.presence.release()
             print("🫧 Companion: session open")
             events.emit("companion.session_opened", cause=cause)
