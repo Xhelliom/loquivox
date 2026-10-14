@@ -224,6 +224,8 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
 
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", f"mcp_{s.name}_{tool.name}")[:64]
     always = s.cfg.get("always") or []
+    if isinstance(always, str):     # `always = "x"` is `["x"]`, not a substring test
+        always = [always]
     return Plugin(
         name=safe, group=s.name, deferred="*" not in always and tool.name not in always,
         description=((tool.description or tool.name) + (
@@ -378,7 +380,9 @@ def _settings(dialog, vbox, labels) -> None:
         vbox, "MCP servers",
         "Servers declared under [mcp.servers.&lt;name&gt;] in config.toml give the "
         "conversation their tools. A tool that is not marked read-only is "
-        "confirmed out loud before it runs. Needs the `mcp` extra.")
+        "confirmed out loud before it runs. Needs the `mcp` extra. Under Live with "
+        "OpenAI's backend, the backend's tools are fixed when the session opens: "
+        "every tool is declared, `always` sorting does not apply there.")
     checks = {}
     rows = status()
     if not rows:

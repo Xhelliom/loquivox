@@ -162,6 +162,14 @@ def test_realtime_pushes_the_new_tools_to_the_session():
     print("✓ Realtime: session.update carries the loaded tools")
 
 
+def test_always_as_a_string_is_a_one_item_list_with_exact_names():
+    for always in ("weather", ["weather"]):
+        _servers(fx=_fixture(always=always))
+        names = {n for n in _offered(TalkSession().desks) if n.startswith("mcp_")}
+        assert names == {"mcp_fx_weather"}, (always, names)   # not weather_alerts
+    print("✓ always = \"x\" equals [\"x\"], exact match")
+
+
 def test_live_client_delegation_reads_the_same_list_and_responses_gets_everything():
     from loquivox.services.live_talk import LiveTalk
 
@@ -216,6 +224,7 @@ if __name__ == "__main__":
         test_a_deferred_tool_is_not_callable_before_it_is_loaded()
         test_the_cascade_calls_it_on_the_next_turn()
         test_realtime_pushes_the_new_tools_to_the_session()
+        test_always_as_a_string_is_a_one_item_list_with_exact_names()
         test_live_client_delegation_reads_the_same_list_and_responses_gets_everything()
         test_a_source_that_spoke_loads_its_server()
         test_the_weight_of_the_tool_context()

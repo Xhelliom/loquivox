@@ -658,7 +658,7 @@ plugin declares a server with `Plugin.loads` and `Desks.take()` loads its group 
 (`board` → server `board`; the active-window variant is not done). Per engine: the cascade and
 Live client read the list each call; Realtime re-declares through `RealtimeTalk.push_tools`
 (polled beside `push_context`, `Desks.tools_version`); Live `responses` fixes its tools at open,
-so `_config` does `load_all()` — nothing is deferred there. `tests/test_mcp_deferred.py` pins it
+so `_config` does `load_all()` — nothing is deferred there. This is a known limit, not an oversight: the Live API gives no documented way to amend `delegation.responses.tools` after `session.started` (`delegation.type` and instructions are frozen), so the sorting cannot apply; Settings → Plugins → MCP says so. `always` given as a single string counts as a one-item list; names are compared exactly. `tests/test_mcp_deferred.py` pins it
 and prints the tool-context size before/after. What a tool returns goes through `RESULT_FRAME`
 (data, never an instruction), like a source's text. Settings → Plugins has its
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
