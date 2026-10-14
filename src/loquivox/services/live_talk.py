@@ -415,8 +415,11 @@ class LiveTalk:
         """Companion only: "tais-toi" closes the session, unanswered."""
         if not STATE.companion_session or not user_said_stop(text):
             return
-        # grep -c "faux déclenchement" counts the misfires; never quote the user.
-        print("🫧 Companion: faux déclenchement (voix)")
+        # Never quote the user. The stop phrase is already in the session's turns
+        # (add_user ran first), so it is a misfire only if it is the only one.
+        from loquivox.services.talk import log_companion_cut
+        session = STATE.talk_session
+        log_companion_cut("voix", max(0, (session.user_turns if session else 0) - 1))
         STATE.talk_click.put("cancel")
 
     def _on_assistant_said(self, text: str) -> None:

@@ -98,7 +98,9 @@ class Companion:
         STATE.presence_mode = mode
         print(f"🫧 Companion: {mode}")
         if STATE.companion_session:
-            print("🫧 Companion: faux déclenchement (touche)")
+            from loquivox.services.talk import log_companion_cut
+            session = STATE.talk_session
+            log_companion_cut("touche", session.user_turns if session else 0)
             STATE.talk_click.put("cancel")   # the session's own exit restores the rest
             return
         if not self.presence_on():

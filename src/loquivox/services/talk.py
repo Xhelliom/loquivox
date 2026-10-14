@@ -204,6 +204,13 @@ class TalkReply:
     done: bool
 
 
+def log_companion_cut(how: str, user_turns: int) -> None:
+    """Log a companion session cut short. Only a session the user never spoke in
+    is a misfire: ``grep -c "faux déclenchement"`` is the false-wake rate."""
+    print("🫧 Companion: " + (f"faux déclenchement ({how})" if not user_turns
+                              else f"fin de session ({how})"))
+
+
 class TalkSession:
     """One spoken conversation, and the text it produces."""
 
