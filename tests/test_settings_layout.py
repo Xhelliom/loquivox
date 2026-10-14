@@ -301,6 +301,60 @@ def test_companion_settings_apply_without_editing_toml():
     print("✓ companion settings apply live and are documented")
 
 
+def test_conversation_settings_say_where_they_apply():
+    """Each Conversation setting names its mode, and the cascade-only one greys elsewhere."""
+    cls = SettingsDialog
+    from loquivox import config as config_module
+    ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
+    talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
+    assert talk_key in _label_before(cls._talk_depth).get_text()
+    assert "cascade" in cls._talk_semantic_check.get_label().lower()
+    tip = cls._talk_semantic_check.get_tooltip_text()
+    assert f"Cascade engine, {ai_key} and {talk_key}" in tip
+    for engine, on in (("realtime", False), ("live", False), ("cascade", True)):
+        cls._engine_combo.set_active_id(engine)
+        cls._on_talk_engine_changed(cls._engine_combo)
+        assert cls._talk_semantic_check.get_sensitive() is on, engine
+        assert cls._talk_depth.get_sensitive(), "depth reads for F6 on every engine"
+    # Right after construction, before anyone touches the combo.
+    import dataclasses
+    from loquivox import config as config_module
+    real_cfg = config_module.CFG
+    try:
+        for engine, on in (("realtime", False), ("cascade", True)):
+            config_module.CFG = dataclasses.replace(real_cfg, TALK_ENGINE=engine)
+            win = cls._create_dialog()
+            assert cls._talk_semantic_check.get_sensitive() is on, engine
+            win.destroy()
+    finally:
+        config_module.CFG = real_cfg
+        cls.show()  # widgets on the class point at the dialog again
+
+    # The install thread's completion must not wake the box outside the cascade.
+    import threading
+    from gi.repository import GLib
+    real = (cls._semantic_needs_onnx, cls._pip_install, Gtk.MessageDialog.run)
+    cls._semantic_needs_onnx = classmethod(lambda c: True).__get__(None, cls)
+    cls._pip_install = classmethod(lambda c, pkg: (True, "")).__get__(None, cls)
+    Gtk.MessageDialog.run = lambda self: Gtk.ResponseType.OK
+    try:
+        cls._engine_combo.set_active_id("live")
+        cls._talk_semantic_check.set_active(False)
+        cls._talk_semantic_check.set_active(True)  # runs the install -> done()
+        assert not cls._talk_semantic_check.get_sensitive()  # greyed while installing
+        for _ in range(200):
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            if cls._talk_semantic_check.get_label().endswith("(ready)"):
+                break
+            threading.Event().wait(0.01)
+        assert cls._talk_semantic_check.get_label().endswith("(ready)"), "done() never ran"
+        assert not cls._talk_semantic_check.get_sensitive(), "woken outside the cascade"
+    finally:
+        cls._semantic_needs_onnx, cls._pip_install, Gtk.MessageDialog.run = real
+    print("✓ Conversation settings name their mode; cascade-only one greys elsewhere")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -311,5 +365,6 @@ if __name__ == "__main__":
     test_greying_a_control_greys_its_label()
     test_wheel_over_a_control_scrolls_the_page()
     test_companion_settings_apply_without_editing_toml()
+    test_conversation_settings_say_where_they_apply()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")
