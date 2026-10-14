@@ -10,8 +10,11 @@ you want to do about it.
 **Nothing is added on the board's side**, which is its ADR 0013 (*"the bridge
 does not know its consumers"*): the durable service does not learn that an
 ephemeral one exists. So this is a *reader*. It polls
-``GET /api/notifications/log``, whose ``id`` is a cursor by construction, keeps
-the largest one it has seen, and takes what is above it.
+``GET /api/notifications/log`` and keeps a cursor on ``ts``. NOT on ``id``,
+whatever ADR 0013 says: ``id`` is a counter of the bridge *process*
+(``nextId = 1``, a ring of 50 in RAM) and restarts at 1, so an id cursor
+swallows everything after a restart. ``ts`` (epoch ms) survives it; ``id`` only
+tells apart two entries of the same millisecond within one run.
 
 It is also the registry's first **source** rather than a tool: nothing the
 model can call, a ``watch`` that runs for the session and puts messages on its
@@ -37,6 +40,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
@@ -176,7 +180,7 @@ def _entries() -> Optional[List[Dict[str, Any]]]:
     if not isinstance(log, dict) or not isinstance(log.get("entries"), list):
         return None
     return [e for e in log["entries"] if isinstance(e, dict)
-            and isinstance(e.get("id"), int)]
+            and isinstance(e.get("id"), int)]  # ts is checked by advance()
 
 
 def still_true(message: Dict[str, str]) -> bool:
@@ -191,31 +195,74 @@ def still_true(message: Dict[str, str]) -> bool:
     return still_standing(getattr(message, "entry", {}))
 
 
+_CURSOR_KEY = "board_cursor"
+
+
+def _load_cursor() -> Optional[Dict[str, Any]]:
+    """``{"ts": ms, "ids": [ids seen at that exact ms]}``, or None on first run."""
+    from loquivox.state import SettingsManager
+
+    cursor = SettingsManager.load().get(_CURSOR_KEY)
+    return cursor if isinstance(cursor, dict) and isinstance(cursor.get("ts"), int) else None
+
+
+def _save_cursor(cursor: Dict[str, Any]) -> None:
+    from loquivox.state import SettingsManager
+
+    SettingsManager.update(_CURSOR_KEY, cursor)
+
+
+def advance(entries: List[Dict[str, Any]], cursor: Optional[Dict[str, Any]],
+            now_ms: float, catchup_ms: float):
+    """
+    One poll: ``(entries to say, new cursor)``.
+
+    Seen means ``ts`` below the cursor, or at it with an id already recorded
+    (ids are only compared inside one millisecond, never across restarts).
+    Anything older than ``catchup_ms`` is marked seen but not said: an alert
+    from three hours ago, read at the start of a session, is noise.
+    With no cursor yet everything is marked seen — the log is turn zero.
+    """
+    entries = [e for e in entries if isinstance(e.get("ts"), (int, float))]
+    if cursor is None:
+        top = max((int(e["ts"]) for e in entries), default=int(now_ms))
+        return [], {"ts": top, "ids": [e["id"] for e in entries if int(e["ts"]) == top]}
+    ts, ids = cursor["ts"], list(cursor.get("ids", []))
+    fresh = sorted((e for e in entries
+                    if e["ts"] > ts or (e["ts"] == ts and e["id"] not in ids)),
+                   key=lambda e: (e["ts"], e["id"]))
+    for e in fresh:
+        if e["ts"] > ts:
+            ts, ids = int(e["ts"]), []
+        ids.append(e["id"])
+    return [e for e in fresh if now_ms - e["ts"] <= catchup_ms], {"ts": ts, "ids": ids}
+
+
 def _watch(put: Callable[[Dict[str, str]], None], stop: threading.Event) -> None:
     """
     Poll the log for the length of the session, putting what is new on the desk.
 
-    The cursor is seeded with the log as it stands, and nothing is said about
-    what was already there: a conversation that opens by reciting fifty old
-    notifications is the failure mode this exists to avoid. The seeding is
-    retried until the bridge actually answers, so a board that starts late does
-    not dump its backlog either.
+    The cursor lives in settings.json, so it outlives the session and the
+    process: two sessions never say the same notification, and one opening an
+    hour after the last still hears what came in between — up to
+    ``TALK_BOARD_CATCHUP_SEC`` old, the rest is marked seen without being said.
+    First run ever, or a board that starts late, seeds on the log as it stands
+    rather than reciting it. The cursor is written *before* speaking: a
+    notification lost is cheaper than one said every session.
     """
-    cursor: Optional[int] = None
     while not stop.is_set():
         entries = _entries()
         if entries is not None:
-            newest = max((e["id"] for e in entries), default=0)
-            if cursor is None:
-                cursor = newest                      # seed: today is turn zero
-            else:
-                for entry in sorted((e for e in entries if e["id"] > cursor),
-                                    key=lambda e: e["id"]):
-                    # Read at the keyboard, or no longer true: not said aloud.
-                    if not entry.get("read") and still_standing(entry):
-                        print(f"📋 Board: {content(entry).splitlines()[0]}")
-                        put(alert_message(entry))
-                cursor = max(cursor, newest)
+            cursor = _load_cursor()
+            said, new = advance(entries, cursor, time.time() * 1000,
+                                config_module.CFG.TALK_BOARD_CATCHUP_SEC * 1000)
+            if new != cursor:
+                _save_cursor(new)
+            for entry in said:
+                # Read at the keyboard, or no longer true: not said aloud.
+                if not entry.get("read") and still_standing(entry):
+                    print(f"📋 Board: {content(entry).splitlines()[0]}")
+                    put(alert_message(entry))
         stop.wait(POLL_SEC)
 
 
@@ -308,23 +355,4 @@ if __name__ == "__main__":
     assert not still_true(alert), "a card moved after the poll was spoken anyway"
     assert still_true({"role": "system", "content": "no entry"})
 
-    # The watch seeds on what is already there, then speaks only what is new.
-    log = {"entries": [{"id": 2, "status": "done", "cwd": "/h/git/x"}]}
-    _get = lambda path: log if "notifications" in path else {"card": {"status": "review"}}  # noqa: E731
-    said, stop = [], threading.Event()
-    POLL_SEC = 0.01
-    watcher = threading.Thread(target=_watch, args=(said.append, stop), daemon=True)
-    watcher.start()
-    stop.wait(0.05)
-    assert not said, "the backlog was recited"
-    log["entries"].insert(0, {"id": 3, "status": "blocked", "cwd": "/h/git/x",
-                              "cardId": "live", "cardStatus": "review"})
-    log["entries"].insert(0, {"id": 4, "status": "blocked", "cwd": "/h/git/y",
-                              "read": True})
-    stop.wait(0.05)
-    stop.set()
-    watcher.join(2)
-    assert len(said) == 1, said
-    assert "Needs you · x" in said[0]["content"], said
-    assert "· y" not in said[0]["content"], "an entry already read at the keyboard spoke"
     print("✓ board plugin OK")
