@@ -53,6 +53,9 @@ def _look(session) -> None:
     ModeHandler._talk_look(session)
 
 
+SPEAK_HOLD = 0.8   # s; same order as live_talk.AUDIO_IDLE (1.0), shorter so listening comes back fast
+
+
 def _converse(session, prefix=()) -> None:
     from loquivox.handlers.mode import ModeHandler
     from loquivox.services.live_talk import LiveTalk
@@ -72,6 +75,7 @@ class Companion:
         self.presence, self.bubble = presence, bubble
         self._look, self._converse = look, converse
         self._out = 0.0      # last output level: the companion has the floor above this
+        self._loud = float("-inf")   # monotonic time of the last audible output block
         self._voice = None   # "listening" / "speaking" last posted to the bubble
         presence.on_level = self._mic_level
 
@@ -122,12 +126,18 @@ class Companion:
             self.bubble.set_level(level)
 
     def on_level(self, who: str, level: float) -> None:
-        """Audio thread: feed the bubble's water, and say who has the floor."""
+        """Audio thread: feed the bubble's water, and say who has the floor.
+        The companion keeps it for SPEAK_HOLD after its last audible block, so the
+        gaps between two words do not flip the waves' direction."""
+        now = time.monotonic()
         if who == "out":
             self._out = level
-        self.bubble.set_level(level if who == "out" or self._out < 0.02 else self._out)
-        voice = "speaking" if self._out >= 0.02 else "listening"
-        if voice != self._voice and (who == "out" or self._out < 0.02):
+            if level >= 0.02:
+                self._loud = now
+        speaking = now - self._loud < SPEAK_HOLD
+        self.bubble.set_level(self._out if speaking and who != "out" else level)
+        voice = "speaking" if speaking else "listening"
+        if voice != self._voice:
             self._voice = voice
             self.bubble.set_state(voice)
 
@@ -143,7 +153,7 @@ class Companion:
         previous_mode = STATE.current_mode
         STATE.current_mode, STATE.talk_engine = "ai", "live"
         STATE.echo_advised = False
-        self._out, self._voice = 0.0, None
+        self._out, self._loud, self._voice = 0.0, float("-inf"), None
         self.bubble.pulse()                # heard: "I'm listening"
         self.bubble.set_state("cloud")     # red from the capture on: the cost is visible
         try:

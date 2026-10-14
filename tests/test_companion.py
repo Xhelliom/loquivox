@@ -63,10 +63,44 @@ def test_session_levels_set_listening_and_speaking():
     c.on_level("in", 0.4)
     c.on_level("in", 0.5)                 # unchanged state: not posted twice
     c.on_level("out", 0.3)
-    c.on_level("out", 0.0)
     c.on_level("in", 0.2)
-    assert log == ["bubble:listening", "bubble:speaking", "bubble:listening"], log
-    assert c.bubble.levels[-1] == 0.2
+    assert log == ["bubble:listening", "bubble:speaking"], log   # held: see the next test
+    assert c.bubble.levels[-1] == 0.3
+
+
+def test_short_gap_keeps_speaking_long_gap_listens(monkeypatch=None):
+    now = [100.0]
+    real, comp.time.monotonic = comp.time.monotonic, lambda: now[0]
+    try:
+        c, log = _make()
+        c.on_level("out", 0.3)
+        now[0] += 0.3
+        c.on_level("out", 0.0)            # a blank between two words
+        c.on_level("in", 0.2)
+        assert log == ["bubble:speaking"], log
+        now[0] += comp.SPEAK_HOLD + 0.1
+        c.on_level("out", 0.0)
+        assert log == ["bubble:speaking", "bubble:listening"], log
+    finally:
+        comp.time.monotonic = real
+
+
+def test_converse_wires_on_level():
+    seen = {}
+    class _Talk:
+        def __init__(self, s): seen["talk"] = self
+    import loquivox.services.live_talk as lt
+    from loquivox.handlers.mode import ModeHandler
+    c, _ = _make()
+    saved = (lt.LiveTalk, ModeHandler._talk_converse_server, comp._companion)
+    lt.LiveTalk = _Talk
+    ModeHandler._talk_converse_server = staticmethod(lambda s, k, engine, name: engine(s))
+    comp._companion = c
+    try:
+        comp._converse(object())
+    finally:
+        lt.LiveTalk, ModeHandler._talk_converse_server, comp._companion = saved
+    assert seen["talk"].on_level == c.on_level
 
 
 def test_standby_mic_level_reaches_the_bubble_but_not_a_session():

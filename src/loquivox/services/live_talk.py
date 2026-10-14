@@ -1031,6 +1031,16 @@ if __name__ == "__main__":
     talk._on_play(out, len(out) // 2, None, None)
     assert not any(out) and not talk._primed and talk._audible == 0, \
         "ran dry and kept going instead of refilling"
+    # …and the play callback reports what it played, or the bubble's water
+    # never moves with the assistant's voice.
+    levels = []
+    talk.on_level = lambda who, x: levels.append((who, x))
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._on_play(out, len(out) // 2, None, None)
+    assert levels and levels[-1][0] == "out" and levels[-1][1] > 0, "_on_play reports no output level"
+    talk.on_level = None
+    talk._flush_audio()
     talk._last_audio = 0.0
 
     # While a reply plays the gate holds the microphone back — and the model
