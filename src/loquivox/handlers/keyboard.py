@@ -422,6 +422,13 @@ class KeyboardHandler:
             companion.toggle_silence()
             return
 
+        # The companion's wake key: opens a session like the wake word, or ends
+        # the open one. Above the guard for the same reason as the silence key.
+        if mode == "companion_wake":
+            from loquivox.handlers import companion  # lazy: avoid cycle
+            companion.wake_key()
+            return
+
         # Everything below this line is the session's business, not a global
         # hotkey's: a talk session drives itself from its own key map
         # (talk_listen_keys) and from the bubble's buttons, and it owns the

@@ -132,6 +132,7 @@ talk       = ["F6"]
 pin        = ["F9"]
 tts        = ["F10"]
 companion  = ["F7"]
+companion_wake = ["F8"]     # opens / ends a companion session without the wake word
 
 [companion]
 # The always-present bubble: local wake-word listening, cloud session (Live

@@ -365,6 +365,28 @@ def test_spoken_stop_is_a_misfire_only_if_it_is_the_only_turn():
     assert "faux déclenchement" not in out and "fin de session (voix)" in out, out
 
 
+def test_wake_key_opens_from_silence_and_ends_without_misfire():
+    from loquivox.handlers.keyboard import KeyboardHandler
+    assert CFG.HOTKEY_DEFS["companion_wake"][1] == ["F8"]
+    assert "companion_wake" in config_module.HOTKEY_DESCRIPTIONS
+    c, log = _make()
+    comp._companion = c
+    STATE.presence_mode = "silent"            # wake word ignored, the key is not
+    c.wake()
+    assert "converse" not in log
+    c.wake(force=True)
+    assert "converse" in log and STATE.presence_mode == "silent"
+    assert log[-1] == "bubble:silent", log
+    # pressed during a session: ends it through the same verdict as a click,
+    # and logs nothing (the idle/voice paths own the misfire count)
+    got = []
+    def press():
+        KeyboardHandler._on_press("companion_wake")
+        got.append(STATE.talk_click.get_nowait())
+    out = _cut(press, 0)
+    assert "faux déclenchement" not in out and got == ["finish"], (out, got)
+
+
 def test_idle_clock_waits_for_a_plugin_then_restarts():
     from loquivox.handlers.mode import ModeHandler
     class T:

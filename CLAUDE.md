@@ -23,6 +23,7 @@ shown in a GTK overlay, with optional TTS read-back.
 | `R-Alt` / `F3`   | `dictation`  | Transcribe speech → type at cursor                       |
 | `F4`             | `ai`         | Spoken conversation about the screen + selected text     |
 | `F6`             | `talk`       | Spoken conversation → one generated text (reworks the selection if any) |
+| `F8`             | `companion_wake` | Open a companion session without the wake word, or end it |
 | `F9`             | `pin`        | Toggle chat overlay "always on top"                      |
 | `F10`            | `tts`        | Toggle TTS read-back of AI answers                       |
 | `Esc`            | `cancel`     | Abort active recording / in-flight transcription         |

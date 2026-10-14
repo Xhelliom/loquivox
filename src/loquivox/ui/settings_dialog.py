@@ -2282,6 +2282,7 @@ class SettingsDialog:
         "talk": "Talk", "pin": "Pin Chat", "tts": "TTS Toggle",
         "cancel": "Cancel", "pause": "Pause / Resume",
         "refine": "Stop + choose level",
+        "companion": "Companion silence", "companion_wake": "Companion wake",
     }
 
     @classmethod
