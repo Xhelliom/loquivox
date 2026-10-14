@@ -669,6 +669,26 @@ failed one with the same config stays failed: switch it off and on), cancels one
 `starting` when it stops it, and Settings runs it on a thread — Apply never freezes GTK.
 A pending yes is keyed (session, server, tool, arguments): it never crosses sessions.
 
+`memory` (`services/memory.py`) is what the companion no longer repeats: the
+`stop_repeating` tool (`chat_only`) saves a plain-language rule — "ne me redis
+plus ça", with a `source` scope only when the user clearly named one — and the
+model confirms it in one spoken sentence. Rules live in
+`~/.config/loquivox/memory.toml` (`[[rules]]`: `id`, `text`, `source`, `date`,
+`dropped`; outside git, read afresh on use via mtime, so an edit by hand or in
+Settings applies without a restart). **Applied before a source can wake
+anything**: `Desk.put` asks `memory.discards(source, content)` and a covered
+message is never queued — no wake, no session, nothing said; the rule's
+`dropped` counter goes up and the journal notes it *without quoting* the
+message or the rule. With no rule it costs nothing, otherwise ONE completion on
+the chat model (`memory.JUDGE`, swapped by tests; never the Live session); any
+failure lets the message through. The rules also reach the conversation:
+`memory.clause()` is in `TalkSession.system_prompt()` (all engines) and in the
+Live client-delegation prompt. Settings → Plugins → « Ce que le compagnon ne
+répète plus » lists them (editable text, Supprimer, ajout manuel, count),
+written by the single Apply through `memory.replace()` — which keeps an id's
+scope, date and count. The core names no source; `tests/test_memory.py` drives
+one it has never heard of.
+
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
 The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`
