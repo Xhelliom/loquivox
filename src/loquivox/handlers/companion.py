@@ -156,6 +156,8 @@ class Companion:
         (self._away.add if on else self._away.discard)(reason)
         if on and not was:
             print(f"🫧 Companion: silence ({reason})")
+            if STATE.presence_mode == "silent" and STATE.companion_session:
+                self._cut_session()   # F8 session in silence: set_mode would exit early
             self.set_mode("silent", persist=False)
         elif was and not self._away:
             print(f"🫧 Companion: back to {self._before}")
@@ -174,16 +176,19 @@ class Companion:
             SettingsManager.update("presence_mode", mode)
         print(f"🫧 Companion: {mode}")
         if STATE.companion_session:
-            from loquivox.services.talk import log_companion_cut
-            session = STATE.talk_session
-            log_companion_cut("touche", session.user_turns if session else 0)
-            STATE.talk_click.put("cancel")   # the session's own exit restores the rest
+            self._cut_session()
             return
         if not self.presence_on():
             self.presence.release()
         elif not STATE.talk_active:   # F4/F6 hold the mic; resume_after_talk reopens it
             self.presence.resume()
         self._set_state(self._standby())
+
+    def _cut_session(self) -> None:
+        from loquivox.services.talk import log_companion_cut
+        session = STATE.talk_session
+        log_companion_cut("touche", session.user_turns if session else 0)
+        STATE.talk_click.put("cancel")   # the session's own exit restores the rest
 
     def toggle_silence(self) -> None:
         self.set_mode("active" if STATE.presence_mode == "silent" else "silent")

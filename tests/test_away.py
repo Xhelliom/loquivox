@@ -106,6 +106,18 @@ def test_lock_closes_the_session_in_progress():
     STATE.companion_session = False
 
 
+def test_lock_closes_an_f8_session_opened_in_silence():
+    c, _ = _make()
+    c.set_mode("silent")
+    STATE.companion_session = True
+    while not STATE.talk_click.empty():
+        STATE.talk_click.get_nowait()
+    c.set_away("lock", True)
+    assert STATE.talk_click.get_nowait() == "cancel"
+    assert STATE.talk_click.empty()
+    STATE.companion_session = False
+
+
 def test_no_session_opens_while_away():
     c, log = _make()
     c.set_away("lock", True)
