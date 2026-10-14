@@ -117,6 +117,7 @@ class Look:
     stretch: float = 0.0        # 0..0.08 along ``angle``
     angle: float = 0.0
     speaking: float = 0.0       # 0..1 white inner glow
+    state: str = "idle"         # for the alternative styles (companion_bubble_styles)
 
 
 def paint(cr: cairo.Context, look: Look) -> None:
@@ -483,21 +484,40 @@ class CompanionBubble(Gtk.Window):
             scale=(0.6 + 0.4 * a) * sp["scale"].value * (1 + sp["bump"].value),
             opacity=max(0.0, min(1.0, a)),
             stretch=sp["stretch"].value, angle=self._angle,
-            speaking=max(0.0, min(1.0, sp["glow"].value)))
+            speaking=max(0.0, min(1.0, sp["glow"].value)), state=self._state)
 
     def _on_draw(self, _w, cr: cairo.Context) -> bool:
-        paint(cr, self.look())
+        from loquivox.ui.companion_bubble_styles import draw_current
+        draw_current(cr, self.look())    # the shipped drop unless another style is chosen
         return True
 
 
 if __name__ == "__main__":
+    import argparse
     import itertools
     import random
     import sys
-    # Always the demo: the bubble has no other life outside the app.
+    ap = argparse.ArgumentParser(description="Companion bubble demo (the only life it has outside the app)")
+    ap.add_argument("--demo", action="store_true")
+    ap.add_argument("--style", help="goutte (default), goutte-plus, reacteur, radar, plasma")
+    ap.add_argument("--state", help="pin one state instead of cycling (e.g. idle, to measure CPU)")
+    ap.add_argument("--gallery", action="store_true", help="the four styles side by side")
+    ap.add_argument("--frames", metavar="DIR", help="render PNG frames of every style and exit")
+    args = ap.parse_args()
+    # `-m` runs this file as __main__: share it, or the styles would import a second copy.
+    sys.modules.setdefault("loquivox.ui.companion_bubble", sys.modules["__main__"])
+    from loquivox.ui import companion_bubble_styles as styles
+    if args.frames:
+        styles.render_frames(args.frames)
+        sys.exit()
+    if args.gallery:
+        styles.gallery()
+        sys.exit()
+    if args.style:
+        styles.set_style(args.style)
     bubble = CompanionBubble(on_click=lambda: print("click"),
                              modes=[(m, lambda m=m: print("mode", m)) for m in ("Veille", "Toujours à l'écoute", "Muet")])
-    states = itertools.cycle(("idle", "cloud", "listening", "speaking", "silent"))
+    states = itertools.cycle((args.state,) if args.state else ("idle", "cloud", "listening", "speaking", "silent"))
     clock = [0.0]
 
     def _next():
