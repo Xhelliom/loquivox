@@ -538,6 +538,9 @@ class Config:
     #: (services/board.py). Off by default: it polls a local service most
     #: installations do not run.
     TALK_BOARD: bool = False
+    #: how old a board notification may be and still be said when a session
+    #: opens; older ones are marked seen without a word.
+    TALK_BOARD_CATCHUP_SEC: float = 300.0
 
     # Conversation phase: the model is a partner working out WHAT to write.
     TALK_SYSTEM_PROMPT: str = (
@@ -1020,6 +1023,8 @@ def _build_config() -> Config:
         overrides["TALK_LOOK_TOOL"] = bool(talk["look_tool"])
     if "board" in talk:
         overrides["TALK_BOARD"] = bool(talk["board"])
+    if "board_catchup_sec" in talk:
+        overrides["TALK_BOARD_CATCHUP_SEC"] = float(talk["board_catchup_sec"])
     if "tts" in models:
         overrides["MODEL_TTS"] = str(models["tts"])
 

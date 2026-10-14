@@ -168,6 +168,10 @@ idle_timeout = 12.0
 # carries the same switch, so it can be flipped mid-conversation — and what it
 # is flipped to is written back here.
 free_keyboard = false
+# How old (seconds) a notification may be and still be said when a session
+# opens. Older ones are marked seen without a word. The cursor is a timestamp
+# kept in settings.json, so it survives sessions and bridge restarts.
+board_catchup_sec = 300
 
 # Turn detection, in two layers. The energy VAD hears the pause; the semantic
 # model decides whether that pause actually ends your sentence.

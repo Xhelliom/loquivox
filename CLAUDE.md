@@ -579,8 +579,13 @@ gated by `CFG.TALK_RESEARCH`.
 with another program: Collie Board, the kanban whose cards are started as real
 agents. Its ADR 0013 settles where the code lives — **the bridge never learns
 loquivox exists**, so this is a reader and nothing is added there. It polls
-`GET /api/notifications/log` (whose `id` is a cursor by construction), seeded
-with the log as it stands so a session never opens by reciting the backlog, and
+`GET /api/notifications/log` with a cursor on `ts` (epoch ms), **not** on `id`
+— ADR 0013 calls the id a cursor, but it is `nextId = 1` on a process-local
+ring of 50, so it restarts with the bridge and an id cursor goes deaf. The
+cursor (`{ts, ids seen at that ms}`) is in settings.json (`board_cursor`), so
+two sessions never repeat a notification; first run seeds on the log as it
+stands, and anything older than `CFG.TALK_BOARD_CATCHUP_SEC` is marked seen
+unsaid. `tests/test_board_cursor.py` pins the restart case. It also
 composes nothing: `marker()` / `content()` are the board's own
 `notify-content.ts`, in Python, over the `status` / `cardTitle` / `cwd` /
 `cardStatus` / `subtitle` the entry already carries. The log deliberately keeps
