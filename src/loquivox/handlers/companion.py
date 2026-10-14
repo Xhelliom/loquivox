@@ -60,6 +60,8 @@ def _converse(session, prefix=()) -> None:
     def engine(s):
         talk = LiveTalk(s)
         talk.prefix = list(prefix)
+        if _companion is not None:
+            talk.on_level = _companion.on_level
         return talk
     ModeHandler._talk_converse_server(session, _NoKeys(), engine, "Live")
 
@@ -69,6 +71,8 @@ class Companion:
                  converse: Callable = _converse) -> None:
         self.presence, self.bubble = presence, bubble
         self._look, self._converse = look, converse
+        self._out = 0.0      # last output level: the companion has the floor above this
+        self._voice = None   # "listening" / "speaking" last posted to the bubble
 
     # ------------------------------------------------------------------ modes
     def start(self) -> None:
@@ -110,6 +114,16 @@ class Companion:
             self.set_mode("active" if STATE.presence_mode == target else target)
 
     # ---------------------------------------------------------------- session
+    def on_level(self, who: str, level: float) -> None:
+        """Audio thread: feed the bubble's water, and say who has the floor."""
+        if who == "out":
+            self._out = level
+        self.bubble.set_level(level if who == "out" or self._out < 0.02 else self._out)
+        voice = "speaking" if self._out >= 0.02 else "listening"
+        if voice != self._voice and (who == "out" or self._out < 0.02):
+            self._voice = voice
+            self.bubble.set_state(voice)
+
     def wake(self) -> None:
         """Wake word heard (on its own thread): run one conversation, block until over."""
         if (not self.presence_on() or STATE.talk_active or STATE.recording
@@ -122,6 +136,8 @@ class Companion:
         previous_mode = STATE.current_mode
         STATE.current_mode, STATE.talk_engine = "ai", "live"
         STATE.echo_advised = False
+        self._out, self._voice = 0.0, None
+        self.bubble.pulse()                # heard: "I'm listening"
         self.bubble.set_state("cloud")     # red from the capture on: the cost is visible
         try:
             self._look(session)            # before the mic is released and the cloud opens
@@ -137,6 +153,7 @@ class Companion:
             STATE.talk_active = STATE.companion_session = False
             while not STATE.talk_click.empty():     # a click meant for this session
                 STATE.talk_click.get_nowait()
+            self.bubble.set_level(0.0)
             print("🫧 Companion: session closed")
             if self.presence_on():
                 self.presence.resume()

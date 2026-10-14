@@ -66,6 +66,21 @@ def test_wake_fires_on_callback():
     p.stop()
 
 
+def test_level_follows_the_voice_only():
+    seen = []
+    p = _make([], _Model())
+    p.on_level = seen.append
+    p.start()
+    s = _Stream.opened[-1]
+    for _ in range(40):
+        s.push(0.0)
+    assert not seen or max(seen) == 0.0
+    for _ in range(10):
+        s.push(0.3)
+    assert seen and 0.0 < max(seen) <= 1.0, seen
+    p.stop()
+
+
 def test_release_frees_device_and_resume_reopens():
     woken, m = [], _Model()
     p = _make(woken, m)

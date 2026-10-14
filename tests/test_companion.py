@@ -30,6 +30,8 @@ class _Presence:
 class _Bubble:
     def __init__(self, log): self.log = log
     def set_state(self, s): self.log.append(f"bubble:{s}")
+    def set_level(self, x): self.levels = getattr(self, "levels", []) + [x]
+    def pulse(self): self.pulsed = True
 
 
 def _make(*, session=None):
@@ -54,6 +56,23 @@ def test_wake_runs_the_loop_in_order():
     c.wake()
     assert log == ["bubble:cloud", "look", "release", "converse", "resume", "bubble:idle"], log
     assert not STATE.companion_session and not STATE.talk_active
+
+
+def test_session_levels_set_listening_and_speaking():
+    c, log = _make()
+    c.on_level("in", 0.4)
+    c.on_level("in", 0.5)                 # unchanged state: not posted twice
+    c.on_level("out", 0.3)
+    c.on_level("out", 0.0)
+    c.on_level("in", 0.2)
+    assert log == ["bubble:listening", "bubble:speaking", "bubble:listening"], log
+    assert c.bubble.levels[-1] == 0.2
+
+
+def test_wake_pulses_the_bubble():
+    c, log = _make()
+    c.wake()
+    assert c.bubble.pulsed
 
 
 def test_silence_ignores_wake_and_releases_mic():

@@ -1,21 +1,32 @@
 """
-The companion's bubble: a tiny always-on-top dot, no transcript.
+The companion's bubble: a drop of water on the desktop, no transcript.
 
-One small Cairo window (top-right by default) whose colour is the state of the
-companion — local standby, listening, speaking, cloud session open (RED: the
-cost is visible), silent. Never takes focus. Drag it anywhere with the mouse; the
+A 56 px glass drop (Cairo, no WebView) in an 88 px window that leaves room for
+its shadow. The *water* says the state: light blue on local standby, RED as soon
+as a cloud session is open (the cost is visible), faded grey when silent.
+Colours are crossfaded by springs, never cut. The waves say the voice: their
+height follows the real audio level, rightwards when the user talks, leftwards
+(with a faint white glow) when the companion does, a barely-there sway on
+standby, flat and still when silent. Never takes focus. Drag it anywhere; the
 spot is remembered in settings.json. A click calls ``on_click``, a right click
 pops a menu of presence modes.
+
+Motion: every value is a spring that restarts from what is on screen, so any
+animation can be interrupted. The render timer runs at ~60 fps only while
+something moves, 15 fps for the standby sway, and not at all otherwise. With
+GTK animations off there are no waves and no springs: colour and water level
+alone carry the state.
 
 Wayland: gtk-layer-shell anchored top+right, dragged by changing the margins
 (``begin_move_drag`` only exists on X11). X11: a keep-above POPUP moved by hand.
 
-    python -m loquivox.ui.companion_bubble     # demo: cycles through the states
+    python -m loquivox.ui.companion_bubble --demo   # cycles states, fake audio level
 """
 from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Sequence, Tuple
 
@@ -34,21 +45,148 @@ from gi.repository import Gdk, GLib, Gtk
 if HAS_LAYER_SHELL:
     from gi.repository import GtkLayerShell
 
-SIZE = 36                        # window side, px
+SIZE = 88                        # window side, px: the drop plus its shadow and glow
+DROP = 56                        # the drop's diameter, px (logical: GTK scales it)
 DEFAULT_POSITION = (24, 24)      # (distance from the right edge, from the top)
 SETTINGS_KEY = "companion_position"
-PULSING = ("listening", "speaking", "cloud")   # the only states that animate
 DRAG_THRESHOLD = 4               # px of travel before a press becomes a drag
+SILENT_ALPHA = 0.6               # the grey water of the silent mode
+WATER = 0.55                     # share of the drop filled with water
+LOUD = 0.02                      # level above which the waves count as moving
 
-# state → colour (r, g, b). Shape differs too (see _on_draw) so it never
-# rests on colour alone.
+# state → water colour (r, g, b). Cost reads from colour, who talks from motion.
+_BLUE, _RED, _GREY = (0.353, 0.706, 0.941), (0.898, 0.282, 0.302), (0.55, 0.57, 0.60)
 STATES = {
-    "idle":      (0.45, 0.50, 0.58),   # local standby: dim grey-blue
-    "listening": (0.20, 0.72, 0.45),   # green
-    "speaking":  (0.25, 0.55, 0.95),   # blue
-    "cloud":     (0.90, 0.20, 0.20),   # red: the cloud session is open and billed
-    "silent":    (0.25, 0.25, 0.28),   # dark: muted
+    "idle":      _BLUE,   # local standby
+    "listening": _RED,    # the user talks to an open cloud session
+    "speaking":  _RED,    # the companion talks
+    "cloud":     _RED,    # a cloud session is open and billed
+    "silent":    _GREY,   # muted
 }
+
+
+class Spring:
+    """Damped spring (Apple's response/damping): chases ``target`` from wherever it is."""
+
+    def __init__(self, value: float = 0.0, response: float = 0.3, damping: float = 1.0):
+        self.value = self.target = value
+        self.velocity = 0.0
+        self.response, self.damping = response, damping
+
+    def step(self, dt: float) -> None:
+        w = 2 * math.pi / self.response
+        n = max(1, math.ceil(dt * 120))
+        h = dt / n
+        for _ in range(n):
+            self.velocity += (w * w * (self.target - self.value)
+                              - 2 * self.damping * w * self.velocity) * h
+            self.value += self.velocity * h
+
+    @property
+    def rest(self) -> bool:
+        return abs(self.target - self.value) < 1e-3 and abs(self.velocity) < 1e-2
+
+    def jump(self) -> None:
+        self.value, self.velocity = self.target, 0.0
+
+
+def wave_dir(state: str) -> int:
+    """+1: waves run left to right (the user talks); -1: right to left (the companion)."""
+    return -1 if state == "speaking" else 1
+
+
+def tick_interval(state: str, *, moving: bool, loud: bool, anim: bool, visible: bool) -> int:
+    """Render timer period in ms; 0 = no timer. ``moving``: a spring is still travelling."""
+    if not visible or not anim:
+        return 0
+    if moving or loud or state in ("listening", "speaking"):
+        return 16
+    return 0 if state == "silent" else 66
+
+
+@dataclass
+class Look:
+    """Everything ``paint`` needs, as plain numbers (so it can be drawn offscreen)."""
+    rgb: Tuple[float, float, float]
+    alpha: float = 1.0          # water opacity
+    level: float = 0.0          # smoothed audio level 0..1
+    amp: float = 1.0            # 0 = flat water, 1 = full waves
+    phase: Tuple[float, float] = (0.0, 0.0)
+    scale: float = 1.0
+    opacity: float = 1.0
+    stretch: float = 0.0        # 0..0.08 along ``angle``
+    angle: float = 0.0
+    speaking: float = 0.0       # 0..1 white inner glow
+
+
+def paint(cr: cairo.Context, look: Look) -> None:
+    c, r = SIZE / 2, DROP / 2
+    cr.set_operator(cairo.OPERATOR_SOURCE)
+    cr.set_source_rgba(0, 0, 0, 0)
+    cr.paint()
+    cr.set_operator(cairo.OPERATOR_OVER)
+    cr.push_group()
+    cr.translate(c, c)
+    cr.rotate(look.angle)
+    cr.scale(look.scale * (1 + look.stretch), look.scale / (1 + look.stretch))
+    cr.rotate(-look.angle)
+    # soft drop shadow: a few concentric arcs, so it shows on light and dark alike
+    for i in range(5):
+        cr.set_source_rgba(0, 0, 0, 0.25 / 5)
+        cr.arc(0, 2.5, r + 1 + i * 2.2, 0, 2 * math.pi)
+        cr.fill()
+    # glass body
+    body = cairo.RadialGradient(-r * .3, -r * .3, r * .1, 0, 0, r)
+    body.add_color_stop_rgba(0, 0.95, 0.98, 1, 0.16)
+    body.add_color_stop_rgba(1, 0.80, 0.88, 1, 0.34)
+    cr.set_source(body)
+    cr.arc(0, 0, r, 0, 2 * math.pi)
+    cr.fill()
+    # water: two sines of different phase and speed, clipped to the drop
+    cr.save()
+    cr.arc(0, 0, r - 0.5, 0, 2 * math.pi)
+    cr.clip()
+    top = r - 2 * r * (WATER + 0.12 * look.level)
+    a1 = look.amp * (0.8 + 6.0 * look.level)
+    a2 = a1 * 0.5
+    pts = [(x, top + a1 * math.sin(x * 0.19 + look.phase[0]) + a2 * math.sin(x * 0.33 + look.phase[1]))
+           for x in range(int(-r) - 1, int(r) + 2, 2)]
+    cr.move_to(pts[0][0], r + 1)
+    for x, y in pts:
+        cr.line_to(x, y)
+    cr.line_to(pts[-1][0], r + 1)
+    cr.close_path()
+    cr.set_source_rgba(*look.rgb, 0.85 * look.alpha)
+    cr.fill()
+    cr.move_to(*pts[0])
+    for x, y in pts[1:]:
+        cr.line_to(x, y)
+    cr.set_source_rgba(1, 1, 1, 0.5 * look.alpha)
+    cr.set_line_width(1.2)
+    cr.stroke()
+    if look.speaking > 0.01:            # faint white glow from the rim inwards
+        glow = cairo.RadialGradient(0, 0, r * .55, 0, 0, r)
+        glow.add_color_stop_rgba(0, 1, 1, 1, 0)
+        glow.add_color_stop_rgba(1, 1, 1, 1, 0.30 * look.speaking)
+        cr.set_source(glow)
+        cr.paint()
+    cr.restore()
+    # specular highlight, top left
+    cr.save()
+    cr.translate(-r * .36, -r * .46)
+    cr.rotate(-0.6)
+    cr.scale(r * .34, r * .17)
+    cr.arc(0, 0, 1, 0, 2 * math.pi)
+    cr.restore()
+    cr.set_source_rgba(1, 1, 1, 0.35)
+    cr.fill()
+    # 1 px light rim
+    cr.set_source_rgba(1, 1, 1, 0.25)
+    cr.set_line_width(1)
+    cr.arc(0, 0, r - 0.5, 0, 2 * math.pi)
+    cr.stroke()
+    cr.pop_group_to_source()
+    cr.paint_with_alpha(look.opacity)
 
 
 def load_position() -> Tuple[int, int]:
@@ -82,10 +220,30 @@ class CompanionBubble(Gtk.Window):
         self._on_click = on_click
         self._modes = list(modes)
         self._state = "idle"
-        self._phase = 0.0
         self._pos = load_position()
         self._press = None       # (x, y, pos) while the left button is down
         self._dragging = False
+        self._hover = False
+        self._level = 0.0        # raw level, written from any thread
+        self._loud = False
+        self._phase = [0.0, 0.0]
+        self._last = 0.0         # monotonic µs of the previous tick
+        self._vel = (0.0, 0.0)   # pointer velocity while dragging, px/s
+        self._last_move = 0.0
+        self._timer = self._timer_ms = 0
+
+        r, g, b = STATES["idle"]
+        self._sp = dict(
+            r=Spring(r), g=Spring(g), b=Spring(b), alpha=Spring(1.0),
+            calm=Spring(1.0),                           # 1 = waves, 0 = flat water
+            level=Spring(0.0, response=0.12),
+            scale=Spring(1.0, response=0.25, damping=0.8),
+            bump=Spring(0.0, response=0.25, damping=0.7),   # the wake-word start
+            stretch=Spring(0.0, response=0.4),
+            glow=Spring(0.0),
+            appear=Spring(0.0, response=0.35, damping=0.8),
+        )
+        self._angle = 0.0
 
         self.set_app_paintable(True)
         self.set_decorated(False)
@@ -111,13 +269,18 @@ class CompanionBubble(Gtk.Window):
         self.area.connect("draw", self._on_draw)
         self.add(self.area)
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
-                        | Gdk.EventMask.POINTER_MOTION_MASK)
+                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.ENTER_NOTIFY_MASK
+                        | Gdk.EventMask.LEAVE_NOTIFY_MASK)
         self.connect("button-press-event", self._on_press)
         self.connect("button-release-event", self._on_release)
         self.connect("motion-notify-event", self._on_motion)
-        self._apply_position()
-        self._timer = 0          # redraw timer, alive only while a state pulses
+        self.connect("enter-notify-event", lambda *_: self._set_hover(True))
+        self.connect("leave-notify-event", lambda *_: self._set_hover(False))
+        self.connect("map", self._on_map)
+        self.connect("unmap", lambda *_: self._stop_timer())
         self.connect("destroy", lambda *_: self._stop_timer())
+        self._apply_position()
+        self._recolor()
         self.show_all()
 
     # ----------------------------------------------------------------- state
@@ -126,19 +289,97 @@ class CompanionBubble(Gtk.Window):
         """Thread-safe. Unknown names are ignored."""
         if state in STATES and state != self._state:
             self._state = state
-            self._sync_timer()
-            self.area.queue_draw()   # once more: the last frame of a stopped pulse
+            self._recolor()
+            self._kick()
 
-    def _sync_timer(self) -> None:
-        if self._state in PULSING and not self._timer:
-            self._timer = GLib.timeout_add(50, self._tick)
-        elif self._state not in PULSING:
+    def set_level(self, x: float) -> None:
+        """Thread-safe, cheap: the audio level 0..1 (user's mic, or the companion's voice)."""
+        self._level = max(0.0, min(1.0, float(x)))
+        loud = self._level > LOUD
+        if loud != self._loud:
+            self._loud = loud
+            GLib.idle_add(self._kick)
+
+    @run_on_main_thread
+    def pulse(self) -> None:
+        """Wake word heard: a small jolt of scale, 1 → 1.08 → 1."""
+        self._sp["bump"].target = 0.08
+        self._kick()
+        GLib.timeout_add(110, self._unbump)
+
+    def _unbump(self) -> bool:
+        self._sp["bump"].target = 0.0
+        self._kick()
+        return False
+
+    def _recolor(self) -> None:
+        sp, st = self._sp, self._state
+        sp["r"].target, sp["g"].target, sp["b"].target = STATES[st]
+        sp["alpha"].target = SILENT_ALPHA if st == "silent" else 1.0
+        sp["calm"].target = 0.0 if st == "silent" else 1.0
+        sp["glow"].target = 1.0 if st == "speaking" else 0.0
+
+    def _anim(self) -> bool:
+        s = Gtk.Settings.get_default()
+        return bool(s.get_property("gtk-enable-animations")) if s else True
+
+    # ----------------------------------------------------------------- timer
+    def _moving(self) -> bool:
+        return not all(s.rest for s in self._sp.values())
+
+    def _kick(self) -> bool:
+        """Re-evaluate the render timer (and paint once: the last frame of a stopped animation)."""
+        if not self._anim():
+            for s in self._sp.values():
+                s.jump()
+            self._sp["calm"].value = 0.0
+        want = tick_interval(self._state, moving=self._moving(), loud=self._loud,
+                             anim=self._anim(), visible=self.get_mapped())
+        if want != self._timer_ms:
             self._stop_timer()
+            if want:
+                self._last = GLib.get_monotonic_time()
+                self._timer, self._timer_ms = GLib.timeout_add(want, self._tick), want
+        self.area.queue_draw()
+        return False
 
     def _stop_timer(self) -> None:
         if self._timer:
             GLib.source_remove(self._timer)
-            self._timer = 0
+        self._timer = self._timer_ms = 0
+
+    def _on_map(self, *_) -> None:
+        """The drop falls in: scale 0.6 → 1 and opacity 0 → 1."""
+        a = self._sp["appear"]
+        a.value, a.velocity, a.target = 0.0, 0.0, 1.0
+        if not self._anim():
+            a.jump()
+        self._kick()
+
+    def _tick(self) -> bool:
+        now = GLib.get_monotonic_time()
+        dt = min(0.05, (now - self._last) / 1e6)
+        self._last = now
+        sp = self._sp
+        sp["level"].target = self._level
+        # the stretch eases back once the pointer stops
+        if self._dragging and now / 1e6 - self._last_move > 0.08:
+            sp["stretch"].target = 0.0
+        for s in sp.values():
+            s.step(dt)
+        speed = 1 + 2 * sp["level"].value
+        d = wave_dir(self._state)
+        self._phase[0] -= d * dt * 5.0 * speed
+        self._phase[1] -= d * dt * 3.1 * speed
+        self._phase = [p % (2 * math.pi) for p in self._phase]
+        want = tick_interval(self._state, moving=self._moving(), loud=self._loud,
+                             anim=self._anim(), visible=self.get_mapped())
+        self.area.queue_draw()
+        if want != self._timer_ms:
+            self._timer = 0          # returning False below removes this source
+            self._kick()
+            return False
+        return True
 
     # -------------------------------------------------------------- position
     def _screen_size(self) -> Tuple[int, int]:
@@ -158,9 +399,22 @@ class CompanionBubble(Gtk.Window):
             self.move(g.x + g.width - SIZE - mr, g.y + mt)
 
     # ----------------------------------------------------------------- mouse
+    def _rest_scale(self) -> None:
+        """Press 0.95, hover 1.04, else 1; every change restarts from the shown value."""
+        sc = self._sp["scale"]
+        sc.target = 0.95 if self._press is not None else 1.04 if self._hover else 1.0
+        sc.response, sc.damping = (0.4, 1.0) if self._press is None else (0.25, 0.8)
+        self._kick()
+
+    def _set_hover(self, on: bool) -> bool:
+        self._hover = on
+        self._rest_scale()
+        return False
+
     def _on_press(self, _w, ev) -> bool:
         if ev.button == 1:
             self._press, self._dragging = (ev.x, ev.y, self._pos), False
+            self._rest_scale()
         elif ev.button == 3:
             self._popup_menu(ev)
         return True
@@ -178,12 +432,29 @@ class CompanionBubble(Gtk.Window):
         self._pos = (mr - dx, mt + dy)
         self._apply_position()
         self._press = (px, py, self._pos)
+        self._stretch_toward(dx, dy)
         return True
+
+    def _stretch_toward(self, dx: float, dy: float) -> None:
+        """Lean into the motion: up to 8 % along the direction of travel."""
+        now = GLib.get_monotonic_time() / 1e6
+        dt = max(now - self._last_move, 1e-3) if self._last_move else 0.016
+        self._last_move = now
+        speed = math.hypot(dx, dy) / dt
+        if speed > 1:
+            self._angle = math.atan2(dy, dx)
+        sp = self._sp["stretch"]
+        sp.response, sp.damping = 0.12, 1.0
+        sp.target = min(0.08, speed / 12000)
+        self._kick()
 
     def _on_release(self, _w, ev) -> bool:
         if ev.button != 1 or self._press is None:
             return False
         self._press = None
+        sp = self._sp["stretch"]
+        sp.target, sp.response, sp.damping = 0.0, 0.4, 1.0
+        self._rest_scale()
         if self._dragging:
             save_position(self._pos)
         elif self._on_click:
@@ -200,48 +471,50 @@ class CompanionBubble(Gtk.Window):
         menu.popup_at_pointer(ev)
 
     # ----------------------------------------------------------------- paint
-    def _tick(self) -> bool:
-        self._phase = (self._phase + 0.08) % (2 * math.pi)
-        self.area.queue_draw()
-        return True
+    def look(self) -> Look:
+        sp, anim = self._sp, self._anim()
+        a = sp["appear"].value
+        return Look(
+            rgb=tuple(max(0.0, min(1.0, sp[k].value)) for k in "rgb"),
+            alpha=max(0.0, min(1.0, sp["alpha"].value)),
+            level=max(0.0, min(1.0, sp["level"].value)),
+            amp=max(0.0, sp["calm"].value) if anim else 0.0,
+            phase=tuple(self._phase),
+            scale=(0.6 + 0.4 * a) * sp["scale"].value * (1 + sp["bump"].value),
+            opacity=max(0.0, min(1.0, a)),
+            stretch=sp["stretch"].value, angle=self._angle,
+            speaking=max(0.0, min(1.0, sp["glow"].value)))
 
     def _on_draw(self, _w, cr: cairo.Context) -> bool:
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.paint()
-        cr.set_operator(cairo.OPERATOR_OVER)
-        c, s = SIZE / 2, self._state
-        pulse = 0.5 + 0.5 * math.sin(self._phase)
-        r = SIZE * (0.26 + {"listening": 0.06, "speaking": 0.05, "cloud": 0.04}.get(s, 0) * pulse)
-        cr.set_source_rgba(*STATES[s], 0.25)                 # halo
-        cr.arc(c, c, r + 5, 0, 2 * math.pi)
-        cr.fill()
-        cr.set_source_rgba(*STATES[s], 0.95)
-        cr.arc(c, c, r, 0, 2 * math.pi)
-        if s in ("idle", "silent"):                          # hollow = not engaged
-            cr.set_line_width(2.5)
-            cr.stroke()
-            if s == "silent":                                # + slash
-                cr.move_to(c - r * .7, c + r * .7)
-                cr.line_to(c + r * .7, c - r * .7)
-                cr.stroke()
-        else:
-            cr.fill()
+        paint(cr, self.look())
         return True
 
 
 if __name__ == "__main__":
     import itertools
+    import random
+    import sys
+    # Always the demo: the bubble has no other life outside the app.
     bubble = CompanionBubble(on_click=lambda: print("click"),
                              modes=[(m, lambda m=m: print("mode", m)) for m in ("Veille", "Toujours à l'écoute", "Muet")])
-    states = itertools.cycle(STATES)
+    states = itertools.cycle(("idle", "cloud", "listening", "speaking", "silent"))
+    clock = [0.0]
 
     def _next():
         s = next(states)
         print("state:", s)
         bubble.set_state(s)
+        bubble.pulse() if s == "cloud" else None
         return True
 
-    GLib.timeout_add(1500, _next)
+    def _audio():
+        clock[0] += 0.05
+        s = bubble._state
+        talking = s in ("listening", "speaking")
+        bubble.set_level(abs(math.sin(clock[0] * 3)) * random.uniform(0.4, 1.0) if talking else 0.0)
+        return True
+
+    GLib.timeout_add(3000, _next)
+    GLib.timeout_add(50, _audio)
     bubble.connect("destroy", Gtk.main_quit)
     Gtk.main()

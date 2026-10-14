@@ -60,6 +60,8 @@ class Presence:
         self._lock = threading.Lock()
         #: True while someone is talking (energy VAD), whatever the wake word says
         self.speaking = False
+        #: called from the audio callback with the voice level 0..1 (0 when quiet)
+        self.on_level: Optional[Callable[[float], None]] = None
         #: audio heard since the wake word, handed to the cloud session by take_tail()
         self._tail: Optional[list] = None
 
@@ -132,6 +134,9 @@ class Presence:
         if self._tail is not None and len(self._tail) < TAIL_MAX * RATE // BLOCK:
             self._tail.append(block.copy())
         self.speaking = self._vad.speech_started and not self._vad.ended
+        if self.on_level:
+            rms = float(np.sqrt(np.mean(block ** 2))) if block.size else 0.0
+            self.on_level(min(1.0, rms * 6) if self.speaking else 0.0)
         if self._model is None:
             return
         pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)
