@@ -1,10 +1,12 @@
 """
 Lock/unlock from logind, on the system bus — shared by X11 and Wayland.
 
-Two things reach us: the ``Lock`` / ``Unlock`` signals (``loginctl lock-session``,
-what a shell's lock button usually listens to) and ``PropertiesChanged`` on
-``LockedHint`` — the *edge* of it, since its level is not reliable (see
-``AwayBackend.watch_lock``). Callbacks arrive on the GLib main loop.
+Only the ``Lock`` / ``Unlock`` signals (``loginctl lock-session``, what a shell's
+lock button usually listens to) are used: paired by construction. ``LockedHint``
+is deliberately ignored, edges included — on niri + Noctalia it sticks at "yes"
+with the screen unlocked, so a true edge with no false one would keep the
+companion silent until F7. A shell that emits neither signal is covered by the
+idle fallback (``watch_idle``). Callbacks arrive on the GLib main loop.
 """
 from __future__ import annotations
 
@@ -36,11 +38,5 @@ class LogindAway(AwayBackend):
         return True
 
     def _signal(self, member: str, args) -> None:
-        if member in ("Lock", "Unlock"):
-            locked = member == "Lock"
-        elif member == "PropertiesChanged" and args and args[0] == SESSION and "LockedHint" in args[1]:
-            locked = bool(args[1]["LockedHint"])
-        else:
-            return
-        if self._on_lock:
-            self._on_lock(locked)
+        if member in ("Lock", "Unlock") and self._on_lock:
+            self._on_lock(member == "Lock")

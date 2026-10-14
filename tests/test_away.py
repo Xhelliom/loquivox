@@ -123,7 +123,23 @@ def test_logind_reads_edges_not_levels():
     w._signal("PropertiesChanged", ("org.freedesktop.login1.Session", {"LockedHint": True}, []))
     w._signal("PropertiesChanged", ("org.freedesktop.login1.Session", {"LockedHint": False}, []))
     w._signal("PropertiesChanged", ("org.freedesktop.login1.Session", {"IdleHint": True}, []))
-    assert seen == [True, False, True, False], seen
+    assert seen == [True, False], seen       # LockedHint: ignored, edges too
+
+
+def test_stuck_lockedhint_never_silences_the_companion():
+    """LockedHint goes true and never returns (niri + Noctalia): nothing happens,
+    so there is nothing to get stuck — silence chosen stays, active stays."""
+    for chosen in ("active", "silent"):
+        c, _ = _make()
+        if chosen == "silent":
+            c.set_mode("silent")
+        w = logind.LogindAway()
+        w._on_lock = lambda locked: c.set_away("lock", locked)
+        w._signal("PropertiesChanged", ("org.freedesktop.login1.Session", {"LockedHint": True}, []))
+        assert not c._away and STATE.presence_mode == chosen
+        c.set_away("idle", True)              # idle fallback still works, and comes back
+        c.set_away("idle", False)
+        assert STATE.presence_mode == chosen and not c._away
 
 
 def test_swayidle_lines():

@@ -101,9 +101,9 @@ class AwayBackend(ABC):
     def watch_lock(self, on_locked: Callable[[bool], None]) -> bool:
         """
         Call ``on_locked(True/False)`` when the session is locked / unlocked.
-        Transitions only: never the level at startup. ``LockedHint`` is not
-        trustworthy as a level (stuck at "yes" on an unlocked niri + Noctalia
-        session), so a backend must not report it as one.
+        Transitions only, from paired signals (Lock/Unlock). ``LockedHint`` is not
+        trustworthy, level or edge (stuck at "yes" on an unlocked niri + Noctalia
+        session, so a true edge may never be followed by a false one): don't use it.
         Returns False when the signal cannot be watched.
         """
 

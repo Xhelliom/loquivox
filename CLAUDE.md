@@ -700,10 +700,14 @@ back, so F7 silence survives a restart. A locked screen or a long idle is
 session, with the mode from *before* restored when the last reason goes (a user
 who chose silence stays silent). A mode picked meanwhile forgets the reasons.
 Detection sits behind `AwayBackend` (`platform/base.py`): `LogindAway` (Lock /
-Unlock signals + `LockedHint` *edges* — its **level** is stuck at "yes" on
-niri + Noctalia, never read) and, on Wayland, `watch_idle` through swayidle
+Unlock signals **only**: paired by construction. `LockedHint` is ignored, edges
+included — on niri + Noctalia it sticks at "yes" unlocked, so a true edge with
+no false one would leave the "lock" reason, and the silence, stuck until F7) and, on Wayland, `watch_idle` through swayidle
 (ext-idle-notify, `[companion] silence_idle_min`, startup-only; X11 has no idle
-fallback). `tests/test_away.py`.
+fallback). `tests/test_away.py`. **Not verified on the real machine**: the
+niri + Noctalia trial is the operator's to do — run `busctl --system monitor
+org.freedesktop.login1` through a lock then an unlock to see which signals
+Noctalia really emits; if it emits no Lock/Unlock, only the idle fallback works.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

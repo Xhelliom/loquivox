@@ -147,8 +147,8 @@ wake_word = "hey_jarvis"
 # Mode a single click on the bubble switches to ("silent" or "active").
 click_mode = "silent"
 # Silence while the screen is locked; unlocking brings back the mode you had
-# (never written as a preference). Lock = logind Lock/Unlock signals and the
-# LockedHint *transitions* (its level is stuck at "yes" on niri + Noctalia).
+# (never written as a preference). Lock = logind Lock/Unlock signals only
+# (LockedHint is ignored: stuck at "yes" on niri + Noctalia).
 silence_on_lock = true
 # Same silence after this many minutes without keyboard/mouse input (Wayland,
 # via swayidle); 0 = off. Read at startup. Any input brings the mode back.
