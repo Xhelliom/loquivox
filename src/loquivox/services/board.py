@@ -301,6 +301,7 @@ PLUGIN = Plugin(
     name="board",
     enabled=lambda: bool(config_module.CFG.TALK_BOARD),
     watch=_watch,
+    loads="board",      # the MCP server of the same name: its tools are what a notification calls for
     still_true=still_true,
     result_note="📋 Notification du board",
     settings=_settings,

@@ -648,7 +648,18 @@ annotation = acts) gets a `confirmed` argument; the first call only answers
 `ASK` ("nothing was done, ask"), and a later one runs only if
 `TalkSession.user_turns` has grown since — the user *spoke*, whatever the model
 claims — for the same tool and arguments; the yes is spent by that one action
-and no session means no yes. What a tool returns goes through `RESULT_FRAME`
+and no session means no yes. **Most tools wait**: a tool is offered at the start only if the server lists it under
+`always` (`["*"]` = all), the rest are `Plugin.deferred` (with `group` = the server). The
+model sees `find_tools(query | server)` instead, whose description lists the servers with their
+`description` line (re-declared by `_refresh_finder` on every `sync`); its `run` calls
+`Desks.find`, which loads the tools for that session (`Desks._offered` is the one filter behind
+`chat_tools`, `realtime_tools`, `get`), and its answer says what is now callable. A source
+plugin declares a server with `Plugin.loads` and `Desks.take()` loads its group when it speaks
+(`board` → server `board`; the active-window variant is not done). Per engine: the cascade and
+Live client read the list each call; Realtime re-declares through `RealtimeTalk.push_tools`
+(polled beside `push_context`, `Desks.tools_version`); Live `responses` fixes its tools at open,
+so `_config` does `load_all()` — nothing is deferred there. `tests/test_mcp_deferred.py` pins it
+and prints the tool-context size before/after. What a tool returns goes through `RESULT_FRAME`
 (data, never an instruction), like a source's text. Settings → Plugins has its
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
 `config_io.update_section` takes dotted sections for the nested table). Not

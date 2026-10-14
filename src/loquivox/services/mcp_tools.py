@@ -24,6 +24,14 @@ session's own turns, not on the model's word, so a model that sets
 ``confirmed=true`` straight away still waits. A yes covers one action (same
 tool, same arguments), and is spent by it.
 
+**Most tools wait.** A server with dozens of tools slows the voice and loses the
+model, so a tool is offered from the start only if the server lists it under
+``always`` (``["*"]`` for all); the others are *deferred*. The model sees one
+tool, ``find_tools(query | server)``, whose description lists the servers with
+the line each declares (``description``); calling it puts the matching tools on
+the table for the rest of the session. A source plugin that declares a server as
+its own (``Plugin.loads``) loads it the moment it speaks.
+
 **What a tool returns is data**, framed as such (``RESULT_FRAME``) like a
 source's text: the server speaks for whoever wrote the mail, the page, the card.
 """
@@ -39,7 +47,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
-from loquivox.services.plugins import Plugin, register
+from loquivox.services.plugins import _REGISTRY, Plugin, register
 from loquivox.state import STATE
 
 #: seconds a server gets to start and list its tools, and a call to answer
@@ -60,6 +68,13 @@ ASK = (
     "you are about to do ({what}) and ask whether to go ahead. Only after the "
     "user clearly says yes, call {tool} again with the SAME arguments and "
     "confirmed=true.")
+
+
+FOUND = (
+    "These tools are now loaded and callable: you can use them from your next "
+    "turn on. Do not announce it. Carry on with what the user asked, calling "
+    "the right one.\n{tools}")
+NOT_FOUND = "No tool matches. Servers: {servers}. Try another word, or give a server name."
 
 
 class _Ask(str):
@@ -152,6 +167,7 @@ async def _serve(s: _Server) -> None:
         s.client, s.tools, s.state, s.error = client, tools, "up", ""
         for tool in tools:
             register(_plugin(s, tool))
+        _refresh_finder()
         print(f"🔌 MCP server {s.name}: {len(tools)} tool(s)")
         s.ready.set()
         await s.stop.wait()
@@ -207,8 +223,9 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
         return {"role": "system", "content": content}
 
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", f"mcp_{s.name}_{tool.name}")[:64]
+    always = s.cfg.get("always") or []
     return Plugin(
-        name=safe,
+        name=safe, group=s.name, deferred="*" not in always and tool.name not in always,
         description=((tool.description or tool.name) + (
             " This tool ACTS on the outside world: the user is asked to confirm first."
             if acting else "")),
@@ -220,6 +237,54 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
         note=lambda args: f"🔧 {s.name} · {tool.name}",
         result_note=f"🔧 {tool.name}",
     )
+
+
+def _deferred_servers() -> Dict[str, int]:
+    """The running, wanted servers that have tools waiting: name → how many."""
+    counts: Dict[str, int] = {}
+    for p in list(_REGISTRY.values()):
+        s = _servers.get(p.group)
+        if p.deferred and s and s.state == "up" and _wanted(s.name):
+            counts[s.name] = counts.get(s.name, 0) + 1
+    return counts
+
+
+def _find_tools(args: Dict[str, Any]) -> str:
+    session = STATE.talk_session       # what a plugin cannot be handed in its arguments
+    if session is None:
+        return ""
+    found = session.desks.find(str(args.get("query") or ""), str(args.get("server") or ""))
+    if not found:
+        return NOT_FOUND.format(servers=", ".join(_deferred_servers()) or "none")
+    return FOUND.format(tools="\n".join(
+        f"- {p.name}: {(p.description or '').splitlines()[0][:120]}" for p in found))
+
+
+def _refresh_finder() -> None:
+    """(Re)declare ``find_tools`` with the servers it can reach, one line each."""
+    servers = _deferred_servers()
+    lines = []
+    for name, count in servers.items():
+        cfg = config_module.CFG.MCP_SERVERS.get(name, {})
+        blurb = cfg.get("description") or ", ".join(
+            p.name.split(name + "_", 1)[-1] for p in list(_REGISTRY.values())
+            if p.group == name)[:100]
+        lines.append(f"- {name} ({count} tools): {blurb}")
+    register(Plugin(
+        name="find_tools",
+        description=("Load more tools. Only a few tools are on the table; these servers have "
+                     "others, not loaded yet. Call this with a server name or a few words "
+                     "describing what you need, then use the tools it loads on your next "
+                     "turn.\n" + "\n".join(lines)),
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string", "description": "words describing the tool needed"},
+            "server": {"type": "string", "description": "load this server's tools"}}},
+        started="Tools are being loaded: say in a few words that you are looking, "
+                "and never claim the action is done — the tools follow.",
+        run=_find_tools,
+        message=lambda args, result: {"role": "system", "content": result},
+        enabled=lambda: bool(_deferred_servers()),
+        note=lambda args: f"🔎 {args.get('server') or args.get('query') or 'tools'}"))
 
 
 def _wanted(name: str) -> bool:
@@ -253,6 +318,7 @@ def sync(timeout: float = 0.0) -> None:
         started.append(s)
     for s in [s for s in _servers.values() if s.state == "starting"]:
         s.ready.wait(max(0.0, timeout))
+    _refresh_finder()
 
 
 def _launch(loop, s: _Server):

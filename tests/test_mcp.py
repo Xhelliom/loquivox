@@ -33,7 +33,7 @@ from loquivox.services import mcp_tools, plugins  # noqa: E402
 from loquivox.services.talk import TalkSession  # noqa: E402
 from loquivox.state import STATE  # noqa: E402
 
-FIXTURE = {"command": sys.executable, "args": [str(ROOT / "tests/mcp_fixture_server.py")],
+FIXTURE = {"command": sys.executable, "args": [str(ROOT / "tests/mcp_fixture_server.py")], "always": ["*"],
            # the child gets an allow-listed environment, not ours
            "env": {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}}
 

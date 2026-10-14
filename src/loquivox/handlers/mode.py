@@ -681,6 +681,7 @@ class ModeHandler:
                     talk.tick()
                     if talk.push_context():
                         print(f"👁️  Screen context handed to the {label} session")
+                    getattr(talk, "push_tools", lambda: False)()   # Realtime only
                     talk.push_result()
                     if pressed == "screen":
                         ModeHandler._talk_look(session)
