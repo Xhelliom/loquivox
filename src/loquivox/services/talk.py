@@ -392,23 +392,33 @@ class TalkSession:
         it and what it *says* is what lands in the conversation — so the caller
         decides what becomes of the text rather than this deciding for it.
         """
-        calls: List[Dict[str, str]] = []
-        answer = AIService.complete(base, on_delta=stream,
-                                    tools=self.desks.chat_tools or None,
-                                    tool_calls_out=calls)
-        routed = [(c, desk) for c, desk in
-                  ((c, self.desks.get(c["name"])) for c in calls) if desk]
-        if routed:
+        # ponytail: a few rounds, not unbounded — a model that keeps calling
+        # tools instead of answering is cut off by the last, tool-less, one.
+        tools = self.desks.chat_tools or None
+        exchange: List[Dict[str, Any]] = []
+        answer = None
+        for round_ in range(3):
+            calls: List[Dict[str, str]] = []
+            last = round_ == 2
+            # The follow-up offers the tools too: its context is full of tool
+            # calls and the model calls one again, which a request without
+            # tools makes the provider reject (Groq: tool_use_failed).
+            answer = AIService.complete(base + exchange, on_delta=stream,
+                                        tools=None if last else tools,
+                                        tool_calls_out=calls)
+            routed = [(c, desk) for c, desk in
+                      ((c, self.desks.get(c["name"])) for c in calls) if desk]
+            if not routed or last:
+                break
             for call, desk in routed:
                 desk.ask(call["arguments"])
-            exchange = [{"role": "assistant", "content": answer or None,
-                         "tool_calls": [{"id": c["id"], "type": "function",
-                                         "function": {"name": c["name"],
-                                                      "arguments": c["arguments"]}}
-                                        for c, _ in routed]}]
+            exchange += [{"role": "assistant", "content": answer or None,
+                          "tool_calls": [{"id": c["id"], "type": "function",
+                                          "function": {"name": c["name"],
+                                                       "arguments": c["arguments"]}}
+                                         for c, _ in routed]}]
             exchange += [{"role": "tool", "tool_call_id": c["id"],
                           "content": desk.plugin.started} for c, desk in routed]
-            answer = AIService.complete(base + exchange, on_delta=stream)
         return answer
 
     def consult(self) -> Optional[str]:
