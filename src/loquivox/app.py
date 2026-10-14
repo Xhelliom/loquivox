@@ -16,6 +16,10 @@ import warnings
 # Suppress libEGL warnings by forcing software rendering for GTK/WebKit
 os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
 os.environ["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+# Our audio streams carry a name of our own, so "lower everything else" can
+# tell them from the music (services/media.py). Before any stream opens.
+os.environ.update(PULSE_PROP="application.name=Loquivox application.id=loquivox",
+                  PIPEWIRE_PROPS="{ application.name=Loquivox application.id=loquivox }")
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Specified provider 'CUDAExecutionProvider'.*")

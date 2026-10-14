@@ -1,8 +1,6 @@
 """
-Ducking acts on the player's audio stream, never on its MPRIS volume; the
-companion ducks on who is speaking; a mic reopened mid-restore keeps the
-original volume.
-
+Ducking lowers every stream but Loquivox's and restores each exactly; the companion
+ducks on who is speaking; a mic reopened mid-restore keeps the original volume.
     python tests/test_media_duck.py
 """
 from __future__ import annotations
@@ -22,20 +20,22 @@ from loquivox.services import media  # noqa: E402
 from loquivox.state import STATE  # noqa: E402
 
 PLAYER = "io_music_assistant_companion"
+OURS = {"application.name": "Loquivox"}
 
 
 class FakeAudio:
-    """pactl + playerctl: one Music Assistant stream at 80%, one other app's."""
+    """pactl + playerctl: music at 80%/70% (balance), a Flatpak player, our own voice."""
 
-    def __init__(self, with_stream=True):
-        self.vol = {7: 80, 9: 100}
+    def __init__(self):
+        self.vol = {7: [52428, 45875], 9: [65536, 65536], 11: [65536, 65536]}
+        self.props = {7: {"application.name": "PipeWire ALSA [music-assistant-companion]"},
+                      9: {"application.name": "Plexamp"}, 11: OURS}
         self.calls = []
-        self.with_stream = with_stream
 
     def pactl(self, *a):
         self.calls.append(("pactl",) + a)
         if a[0] == "set-sink-input-volume":
-            self.vol[int(a[1])] = int(a[2].rstrip("%"))
+            self.vol[int(a[1])] = [int(v) for v in a[2:]]
         return ""
 
     def playerctl(self, *a):
@@ -43,19 +43,17 @@ class FakeAudio:
         return f"{PLAYER}\tPlaying\n" if a[0] == "-a" else ""
 
     def run(self, cmd, **kw):
-        inputs = [{"index": 9, "properties": {"application.name": "Firefox"},
-                   "volume": {"front-left": {"value_percent": "100%"}}}]
-        if self.with_stream:
-            inputs.append({"index": 7, "properties": {"application.name": "Music Assistant Companion"},
-                           "volume": {"front-left": {"value_percent": f"{self.vol[7]}%"},
-                                      "front-right": {"value_percent": "70%"}}})
+        chans = ("front-left", "front-right")
+        inputs = [{"index": i, "properties": self.props[i],
+                   "volume": {c: {"value": v} for c, v in zip(chans, vs)}}
+                  for i, vs in self.vol.items()]
         return subprocess.CompletedProcess(cmd, 0, json.dumps(inputs), "")
 
 
 def _install(fake, **cfg):
     config_module.CFG = replace(config_module.CFG, MEDIA="duck", MEDIA_DUCK_VOLUME=0.2,
                                 MEDIA_GRACE_S=0.05, **cfg)
-    media._playing.clear(); media._pending.clear(); media._warned.clear()
+    media._ducked.clear(); media._playing.clear()
     media._timer, media._voice_duck = None, False
     media._pactl, media._playerctl = fake.pactl, fake.playerctl
     media.subprocess = type("S", (), {"run": staticmethod(fake.run),
@@ -63,38 +61,54 @@ def _install(fake, **cfg):
     media._headset_profile_active = lambda: False
 
 
-def test_ducks_the_stream_not_the_mpris_volume():
+T = int(0.2 * 65536)
+
+
+def test_ducks_everything_but_ourselves_and_restores_exactly():
+    f = FakeAudio(); _install(f); before = {k: list(v) for k, v in f.vol.items()}
+    media.mic_opened()
+    assert f.vol[11] == before[11]                       # our voice is never lowered
+    assert f.vol[9] == [T, T] and f.vol[7][0] == T       # any source, by stream
+    assert f.vol[7][1] == 45875 * T // 52428             # balance kept
+    assert not any(c[:2] == ("pactl", "set-sink-input-volume") and c[2] == "11" for c in f.calls)
+    assert not any(c[0] == "pactl" and c[1] in ("set-sink-volume", "set-sink-mute") for c in f.calls)
+    media.mic_closed(); time.sleep(0.4)
+    assert f.vol == before, f.vol                        # volume AND balance
+    assert ("playerctl", "-p", PLAYER, "play") in f.calls
+
+
+def test_new_stream_untouched_and_gone_stream_ignored():
     f = FakeAudio(); _install(f)
     media.mic_opened()
-    assert f.vol == {7: 20, 9: 100}, f.vol           # only the player's stream
-    assert not any(c[:3] == ("playerctl", "-p", PLAYER) and "volume" in c for c in f.calls)
+    f.vol[20] = [65536, 65536]; f.props[20] = {"application.name": "Game"}   # appears while ducked
+    del f.vol[9]; del f.props[9]                                              # leaves meanwhile
     media.mic_closed(); time.sleep(0.4)
-    assert f.vol == {7: 80, 9: 100}, f.vol           # back to what it was
-
-
-def test_stream_not_found_ducks_nothing_and_warns_once(capsys=None):
-    f = FakeAudio(with_stream=False); _install(f)
-    media.mic_opened(); media._timer.cancel() if media._timer else None
-    media._playing.clear(); media.mic_opened()
-    assert not [c for c in f.calls if c[0] == "pactl" and c[1] == "set-sink-input-volume"]
-    assert media._warned == {PLAYER}
+    assert f.vol[20] == [65536, 65536] and 9 not in f.vol
+    assert f.vol[7] == [52428, 45875]
+    assert not any(c[:3] == ("pactl", "set-sink-input-volume", "20") for c in f.calls)
 
 
 def test_mic_reopened_during_restore_keeps_the_original():
     f = FakeAudio(); _install(f)
-    waits = iter([True, True])
     media._PROFILE_WAIT_S = 1.0
     media._headset_profile_active = lambda: (time.sleep(0.05) or True)  # HFP: restore waits
     media.mic_opened()
     media.mic_closed()
     time.sleep(0.2)                       # grace over, _restore is waiting for A2DP
-    media.mic_opened()                    # reopened: the stream still reads 20%
+    media.mic_opened()                    # reopened: streams still ducked
     time.sleep(1.3)                       # the old restore wakes up
-    assert f.vol[7] == 20, f.vol          # still ducked: the mic is open
+    assert f.vol[7][0] == T, f.vol        # still ducked: the mic is open
     media._headset_profile_active = lambda: False
     media.mic_closed(); time.sleep(0.4)
-    assert f.vol[7] == 80, f.vol          # the ORIGINAL, not the ducked 20
+    assert f.vol[7] == [52428, 45875], f.vol   # the ORIGINAL, not the ducked one
     media._PROFILE_WAIT_S = 8.0
+
+
+def test_our_identity_is_recognised():
+    assert media.is_ours({"application.name": "Loquivox"})
+    assert media.is_ours({"application.id": "loquivox"})
+    assert media.is_ours({"application.process.id": str(__import__("os").getpid())})
+    assert not media.is_ours({"application.name": "PipeWire ALSA [python3.14]"})
 
 
 class _P:
