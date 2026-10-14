@@ -365,6 +365,28 @@ def test_spoken_stop_is_a_misfire_only_if_it_is_the_only_turn():
     assert "faux déclenchement" not in out and "fin de session (voix)" in out, out
 
 
+def test_idle_clock_waits_for_a_plugin_then_restarts():
+    from loquivox.handlers.mode import ModeHandler
+    class T:
+        idle = 50.0
+        def idle_for(self): return self.idle
+    class D:
+        busy = True
+        def coming(self): return self.busy
+    class S:
+        desks = D()
+    t, s, since = T(), S(), [float("-inf")]
+    assert ModeHandler._companion_idle(t, s, since) == 0.0   # answer on its way
+    s.desks.busy = False                                       # answer handed over, not yet said
+    assert ModeHandler._companion_idle(t, s, since) < 1
+    since[0] = time.monotonic() - 20                          # then 12 s+ of real silence
+    assert ModeHandler._companion_idle(t, s, since) >= 20
+    t.idle = 3.0                                               # it spoke: clock follows it
+    assert ModeHandler._companion_idle(t, s, since) == 3.0
+    # no plugin ever: plain idle_for
+    assert ModeHandler._companion_idle(t, s, [float("-inf")]) == 3.0
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
