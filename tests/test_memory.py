@@ -155,11 +155,60 @@ def test_editing_in_settings_takes_effect_at_once():
     memory.add("Dependabot")
     memory.discards("beacon", "Copilot again")
     # the Settings writer: keep id, change text; drop one; add one
-    memory.replace([(a["id"], "Review bots"), (None, "Nightly build")])
+    memory.replace([(a["id"], "Review bots"), (None, "Nightly build")],
+                   shown=[r["id"] for r in memory.rules()])
     assert [r["text"] for r in memory.rules()] == ["Review bots", "Nightly build"]
     assert memory.rules()[0]["dropped"] == 1, "editing a rule lost its count"
     assert not memory.discards("beacon", "Dependabot bump"), "a deleted rule still applied"
     print("✓ edit / delete / add apply without restart, counts kept")
+
+
+def test_a_rule_learned_while_settings_is_open_survives_apply():
+    _reset()
+    a = memory.add("Copilot reviews")
+    shown = [r["id"] for r in memory.rules()]  # what the dialog captured
+    late = memory.add("Dependabot")            # learned by voice meanwhile
+    memory.replace([(a["id"], "Copilot reviews")], shown)
+    assert [r["text"] for r in memory.rules()] == ["Copilot reviews", "Dependabot"]
+    memory.replace([(a["id"], "")], shown)     # an explicit delete still works
+    assert [r["id"] for r in memory.rules()] == [late["id"]]
+    print("✓ Apply keeps rules the dialog never showed")
+
+
+def test_the_same_apply_twice_adds_one_rule():
+    _reset()
+    memory.replace([(None, "Nightly build")], [])
+    memory.replace([(None, "")], [])  # the dialog clears `new` after Apply
+    assert [r["text"] for r in memory.rules()] == ["Nightly build"]
+    print("✓ a manual addition is not duplicated")
+
+
+def test_the_settings_card_applies_through_the_dialog():
+    try:
+        from gi.repository import Gtk
+        Gtk.Entry()
+    except Exception:
+        print("- settings card test skipped (no GTK)")
+        return
+    _reset()
+    a = memory.add("Copilot reviews")
+    fields, actions = [], []
+
+    class Dlg:
+        def _group(self, *args): return Gtk.Box()
+        def _field(self, body, label, widget, labels, extra=None): fields.append(widget)
+        def _actions(self, body, apply, status): actions.append(apply)
+
+    memory._settings(Dlg(), None, None)
+    late = memory.add("Dependabot")
+    fields[-1].set_text("Nightly build")
+    actions[0]()
+    actions[0]()  # second Apply: the add field was emptied
+    texts = [r["text"] for r in memory.rules()]
+    assert texts == ["Copilot reviews", "Dependabot", "Nightly build"], texts
+    assert any(r["id"] == late["id"] for r in memory.rules())
+    assert a["id"] in [r["id"] for r in memory.rules()]
+    print("✓ the card shows, adds once and keeps late rules")
 
 
 def test_the_conversation_model_is_told_the_rules():

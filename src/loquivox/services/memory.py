@@ -88,25 +88,29 @@ def add(text: str, source: str = "") -> Dict[str, Any]:
     return rule
 
 
-def replace(items: Sequence[Tuple[Optional[str], str]]) -> None:
+def replace(items: Sequence[Tuple[Optional[str], str]],
+            shown: Optional[Sequence[str]] = None) -> None:
     """
-    Settings' writer: ``(id or None, text)`` for every rule that should exist.
-    An id keeps its scope, date and count (the count may have moved since the
-    dialog opened); a missing one is a manual addition; an empty text or an
-    absent id is a deletion.
+    Settings' writer: ``(id or None, text)`` per row. An id keeps its scope,
+    date and count; ``None`` is a manual addition; an empty text deletes.
+    Only the ids in ``shown`` (what the dialog displayed) may be deleted: a rule
+    learned by voice while it was open is not in the list and is kept.
+    ``shown`` defaults to the ids in ``items``.
     """
     with _lock:
-        by_id = {r["id"]: r for r in rules()}
+        texts = {rid: text.strip() for rid, text in items if rid is not None}
+        shown = set(texts if shown is None else shown)
         kept = []
+        for r in rules():
+            if r["id"] not in shown:
+                kept.append(r)
+            elif texts.get(r["id"]):
+                kept.append({**r, "text": texts[r["id"]]})
         for rid, text in items:
-            text = text.strip()
-            if not text:
-                continue
-            if rid in by_id:
-                kept.append({**by_id[rid], "text": text})
-            else:
-                kept.append({"id": uuid.uuid4().hex[:8], "text": text, "source": "",
-                             "date": date.today().isoformat(), "dropped": 0})
+            if rid is None and text.strip():
+                kept.append({"id": uuid.uuid4().hex[:8], "text": text.strip(),
+                             "source": "", "date": date.today().isoformat(),
+                             "dropped": 0})
         _save(kept)
 
 
@@ -204,10 +208,11 @@ def _settings(dialog, vbox, labels) -> None:
         items = [(rid, "" if drop.get_active() else e.get_text()) for rid, e, drop in rows]
         items.append((None, new.get_text()))
         try:
-            replace(items)
+            replace(items, [rid for rid, _e, _d in rows])
         except OSError as e:
             status.set_markup(f"<small>❌ {e}</small>")
             return
+        new.set_text("")
         status.set_markup("<small>✓ Mémoire enregistrée — effective tout de suite.</small>")
 
     dialog._actions(body, _apply, status)
