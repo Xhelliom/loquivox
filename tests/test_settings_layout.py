@@ -304,10 +304,13 @@ def test_companion_settings_apply_without_editing_toml():
 def test_conversation_settings_say_where_they_apply():
     """Each Conversation setting names its mode, and the cascade-only one greys elsewhere."""
     cls = SettingsDialog
-    assert "F6" in _label_before(cls._talk_depth).get_text()
+    from loquivox import config as config_module
+    ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
+    talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
+    assert talk_key in _label_before(cls._talk_depth).get_text()
     assert "cascade" in cls._talk_semantic_check.get_label().lower()
     tip = cls._talk_semantic_check.get_tooltip_text()
-    assert "Cascade engine, F4 and F6" in tip
+    assert f"Cascade engine, {ai_key} and {talk_key}" in tip
     for engine, on in (("realtime", False), ("live", False), ("cascade", True)):
         cls._engine_combo.set_active_id(engine)
         cls._on_talk_engine_changed(cls._engine_combo)

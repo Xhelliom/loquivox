@@ -1793,11 +1793,12 @@ class SettingsDialog:
         """Talk-mode knobs: who may end the briefing, and how it converses."""
         labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
+        ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
+        talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
         body = cls._group(
             vbox, "Conversation",
-            f"How {config_module.CFG.HOTKEY_DEFS['ai'][0]} and "
-            f"{config_module.CFG.HOTKEY_DEFS['talk'][0]} conversations behave. "
-            f"\"How far it digs\" only applies to {config_module.CFG.HOTKEY_DEFS['talk'][0]}; "
+            f"How {ai_key} and {talk_key} conversations behave. "
+            f"\"How far it digs\" only applies to {talk_key}; "
             "\"End my turns on meaning\" only to the cascade engine.")
 
         cls._talk_depth = Gtk.ComboBoxText()
@@ -1806,10 +1807,10 @@ class SettingsDialog:
         cls._talk_depth.set_active_id(
             config_module.CFG.TALK_DEPTH if config_module.CFG.TALK_DEPTH in dict(cls._TALK_DEPTHS) else "normal")
         cls._talk_depth.set_tooltip_text(
-            "F6 only: the briefing ends in a written text, and this is how hard "
-            "the assistant questions you before writing. F4 is an open chat and "
+            f"{talk_key} only: the briefing ends in a written text, and this is how hard "
+            f"the assistant questions you before writing. {ai_key} is an open chat and "
             "never reads it. Applies on every engine.")
-        cls._field(body, "How far it digs (F6)",
+        cls._field(body, f"How far it digs ({talk_key})",
                    cls._talk_depth, labels)
 
         cls._talk_semantic_check = Gtk.CheckButton(
@@ -1818,7 +1819,7 @@ class SettingsDialog:
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         cls._talk_semantic_check.set_tooltip_text(
-            "Cascade engine, F4 and F6. The Realtime and Live engines "
+            f"Cascade engine, {ai_key} and {talk_key}. The Realtime and Live engines "
             "close your turns on their own server, so this does nothing there. "
             "If onnxruntime is missing, ticking asks before installing it.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)
