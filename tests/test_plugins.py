@@ -323,7 +323,7 @@ def test_an_mcp_server_reaches_all_three_engines():
     cfg = config_module.CFG
     config_module.CFG = cfg.__class__(**{**cfg.__dict__, "MCP_SERVERS": {"fx": {
         "command": sys.executable, "args": [str(ROOT / "tests/mcp_fixture_server.py")],
-        "env": {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}}}})
+        "env": {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}, "always": ["*"]}}})
     try:
         mcp_tools.sync(timeout=20)
         MCP_CASE.started = next(p for p in plugins.all_plugins()

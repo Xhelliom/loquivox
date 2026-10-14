@@ -867,6 +867,9 @@ class LiveTalk:
             # The Responses wire shape for a function is the flat one the
             # Realtime sessions use, so the plugin's existing definition serves
             # both and nothing is written a third time.
+            # The backend's tools are fixed when the session opens, so nothing
+            # can be deferred here: everything MCP offers is declared up front.
+            self._session.desks.load_all()
             tools = self._session.desks.realtime_tools_except(native)
             # Nothing here executes a native tool: it runs on OpenAI's side and
             # never comes back as a function call to answer.

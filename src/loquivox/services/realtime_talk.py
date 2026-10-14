@@ -82,6 +82,7 @@ class RealtimeTalk:
         #: the text rather than a flag: S starts a fresh capture mid-session,
         #: and a flag would silently swallow the new one.
         self._context_pushed = ""
+        self._tools_pushed = 0
         #: the server heard speech and has not yet heard it stop
         self._user_speaking = False
         #: set once the briefing is over — a finish phrase or the model's marker
@@ -214,6 +215,29 @@ class RealtimeTalk:
                 self._loop)
         except Exception as e:
             print(f"⚠️  Screen context not sent to the Realtime session: {e}")
+            return False
+        return True
+
+    def push_tools(self) -> bool:
+        """
+        Declare to the server the tools loaded since it opened.
+
+        The session declares its tools once, so a deferred tool loaded later
+        (a tool loaded on demand) only exists for the server
+        after a ``session.update``. Polled like ``push_context``; a partial
+        update, so nothing else is touched. True when it was just sent.
+        """
+        desks = self._session.desks
+        if self._conn is None or self._stop or desks.tools_version == self._tools_pushed:
+            return False
+        self._tools_pushed = desks.tools_version
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._conn.session.update(session={
+                    "type": "realtime", "tools": desks.realtime_tools}),
+                self._loop)
+        except Exception as e:
+            print(f"⚠️  Tools not sent to the Realtime session: {e}")
             return False
         return True
 

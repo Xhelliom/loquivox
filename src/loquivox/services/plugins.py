@@ -24,9 +24,10 @@ from __future__ import annotations
 import importlib
 import json
 import queue
+import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 #: the in-tree plugin modules, imported once on first use. Each one calls
 #: ``register()`` at import. This tuple is the whole "discovery".
@@ -37,6 +38,9 @@ _MODULES: Tuple[str, ...] = (
     "loquivox.services.look",
     "loquivox.services.mcp_tools",
 )
+
+#: most tools one ``Desks.find`` query loads
+MAX_FOUND = 8
 
 _REGISTRY: Dict[str, "Plugin"] = {}
 _loaded = False
@@ -124,6 +128,17 @@ class Plugin:
     #: kept talking. A message this answers False to is dropped in silence.
     #: ``None`` means an answer never goes stale.
     still_true: Optional[Callable[[Dict[str, str]], bool]] = None
+    #: a family of tools (an MCP server) this one belongs to. Only what
+    #: ``deferred`` and ``loads`` match on.
+    group: str = ""
+    #: not offered until ``Desks.load`` / ``Desks.find`` put it on the table:
+    #: dozens of tools slow the voice and lose the model, so most of a big
+    #: family waits for ``find_tools``.
+    deferred: bool = False
+    #: a source's link to a ``group``: once it has spoken, that family's tools
+    #: are on the table for the rest of the session, because the notification
+    #: is what they will be used for.
+    loads: str = ""
 
     @property
     def is_tool(self) -> bool:
@@ -344,6 +359,10 @@ class Desks:
         self._desks: Dict[str, Desk] = {p.name: _standing.get(p.name) or Desk(p)
                                         for p in enabled_plugins()
                                         if chat or not p.chat_only}
+        #: the deferred tools put on the table so far, and a counter an engine
+        #: that declares its tools once (Realtime) polls to know they changed
+        self._loaded: Set[str] = set()
+        self.tools_version = 0
         #: set when the session ends — the one thing a source watches for
         self.closed = threading.Event()
         for desk in self._desks.values():
@@ -361,13 +380,18 @@ class Desks:
         """End the session's sources. Idempotent; called from the talk worker."""
         self.closed.set()
 
+    def _offered(self) -> List[Desk]:
+        """The desks whose tool is on the table: a tool, and not still deferred."""
+        return [d for d in self._desks.values()
+                if d.plugin.is_tool and (not d.plugin.deferred or d.plugin.name in self._loaded)]
+
     @property
     def chat_tools(self) -> List[Dict[str, Any]]:
-        return [d.plugin.chat_tool for d in self._desks.values() if d.plugin.is_tool]
+        return [d.plugin.chat_tool for d in self._offered()]
 
     @property
     def realtime_tools(self) -> List[Dict[str, Any]]:
-        return [d.plugin.realtime_tool for d in self._desks.values() if d.plugin.is_tool]
+        return [d.plugin.realtime_tool for d in self._offered()]
 
     def realtime_tools_except(self, native: Tuple[str, ...]) -> List[Dict[str, Any]]:
         """
@@ -383,9 +407,39 @@ class Desks:
         switched on, so every plugin that duplicates nothing — which is nearly
         all of them, now and later — is untouched by any of this.
         """
-        return [d.plugin.realtime_tool for d in self._desks.values()
-                if d.plugin.is_tool
-                and (not d.plugin.provides or d.plugin.provides not in native)]
+        return [d.plugin.realtime_tool for d in self._offered()
+                if not d.plugin.provides or d.plugin.provides not in native]
+
+    def load(self, names: List[str]) -> None:
+        """Put deferred tools on the table, from the next completion on."""
+        new = {n for n in names if n in self._desks} - self._loaded
+        if new:
+            self._loaded |= new
+            self.tools_version += 1
+
+    def load_all(self) -> None:
+        self.load([n for n, d in self._desks.items() if d.plugin.deferred])
+
+    def find(self, query: str = "", server: str = "", limit: int = MAX_FOUND) -> List[Plugin]:
+        """
+        Load the deferred tools of ``server``, or those best matching ``query``
+        (words found in a tool's name, description or family; at most ``limit``),
+        and return them. ``server`` narrows a query rather than replacing it.
+        """
+        words = [w for w in re.split(r"\W+", query.lower()) if len(w) > 1]
+        scored = []
+        for d in self._desks.values():
+            p = d.plugin
+            if not p.deferred or (server and p.group != server):
+                continue
+            text = f"{p.name} {p.group} {p.description}".lower()
+            hits = sum(w in text for w in words)
+            if hits or (server and not words):
+                scored.append((-hits, p))
+        found = [p for _, p in sorted(scored, key=lambda x: x[0])]
+        found = found if server and not words else found[:limit]
+        self.load([p.name for p in found])
+        return found
 
     def get(self, name: str) -> Optional[Desk]:
         """
@@ -393,10 +447,11 @@ class Desks:
 
         A source's desk answers None here even though it exists: it was never
         on the table, so a call naming it is a hallucination, and routing one
-        into a plugin with no ``run`` is how that becomes a crash.
+        into a plugin with no ``run`` is how that becomes a crash. The same
+        goes for a deferred tool nobody loaded.
         """
         desk = self._desks.get(name)
-        return desk if desk is not None and desk.plugin.is_tool else None
+        return desk if desk in self._offered() else None
 
     def ready(self) -> bool:
         return any(desk.ready() for desk in self._desks.values())
@@ -418,6 +473,9 @@ class Desks:
         for desk in self._desks.values():
             found = desk.take()
             if found is not None:
+                if desk.plugin.loads:       # the notification is what these tools are for
+                    self.load([n for n, d in self._desks.items()
+                               if d.plugin.group == desk.plugin.loads])
                 return desk.plugin, found
         return None
 

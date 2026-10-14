@@ -403,7 +403,14 @@ F6 in all three talk engines. Install the extra (`pip install -e '.[mcp]'`), the
 [mcp.servers.home]            # stdio: command / args / env — or `url = "http://…/mcp"`
 command = "npx"
 args = ["-y", "some-mcp-server"]
+description = "Lights and heating"   # the one line the model sees about this server
+always = ["turn_on"]                 # offered from the start; ["*"] = all of them
 ```
+
+Tools are **loaded on demand**: only the `always` ones (and a `find_tools` tool listing the servers)
+are offered at first, so dozens of tools do not slow the voice. The model calls `find_tools` with a
+server name or a few words, and the matching tools are callable from its next turn. The Collie Board
+source loads the MCP server named `board` as soon as it announces something.
 
 A tool that is not marked read-only by its server (no `readOnlyHint`, or none at all) is
 **confirmed out loud** before it runs, and what a tool returns is treated as data, never as an
