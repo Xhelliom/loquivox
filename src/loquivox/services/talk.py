@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
 from loquivox.services.ai import TEXT_ONLY, AIService
+from loquivox.services import memory
 from loquivox.services.plugins import NO_FALSE_DONE, Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
@@ -332,6 +333,7 @@ class TalkSession:
                          "style guidance above:\n" + cfg.TALK_INSTRUCTIONS.strip())
         if self.desks.chat_tools:
             parts.append(NO_FALSE_DONE)
+        parts.append(memory.clause())
         if self.write:
             parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
             parts.append(_finish_prompt(bool(cfg.TALK_FINISH_ON_PHRASE),
@@ -466,7 +468,8 @@ class TalkSession:
         """
         cfg = config_module.CFG
         base = ([{"role": "system",
-                  "content": cfg.TALK_LIVE_BACKEND_PROMPT + "\n\n" + NO_FALSE_DONE}]
+                  "content": "\n\n".join(
+                      [cfg.TALK_LIVE_BACKEND_PROMPT, NO_FALSE_DONE, memory.clause()]).strip()}]
                 + self._context_messages() + self._spoken_to())
         return self._with_tools(base, None)
 

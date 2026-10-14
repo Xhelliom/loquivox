@@ -38,6 +38,7 @@ _MODULES: Tuple[str, ...] = (
     "loquivox.services.look",
     "loquivox.services.mcp_tools",
     "loquivox.services.rules",
+    "loquivox.services.memory",
 )
 
 #: most tools one ``Desks.find`` query loads
@@ -258,9 +259,12 @@ class Desk:
 
     def put(self, message: Dict[str, str]) -> None:
         """Queue an answer nobody asked for — a source's way in."""
-        self._results.put(message)
-        from loquivox.services import events
+        from loquivox.services import events, memory
         content = (message.get("content") or "").strip()
+        # a rule the user taught covers it: nothing queued, so nothing wakes
+        if memory.discards(self.plugin.name, content):
+            return
+        self._results.put(message)
         events.emit("notification.received", source=self.plugin.name,
                     title=content.splitlines()[0][:120] if content else "")
 

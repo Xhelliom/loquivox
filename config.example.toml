@@ -497,3 +497,11 @@ chat_auto_hide = 3
 # # snapshot of its members brought colour, brightness and effect back; the
 # # snapshot of the group failed (HTTP 500). If a lamp still cannot be restored,
 # # use turn_on with explicit rgb_color / brightness instead.
+
+# ---------------------------------------------------------------------------
+# What the companion no longer repeats — not in this file.
+# Said out loud ("ne me redis plus ça") or added in Settings → Plugins, the
+# rules live in ~/.config/loquivox/memory.toml (one [[rules]] table each:
+# text, optional source, date, dropped). Plain text, outside git, read again
+# at every notification: edit it by hand and it applies without a restart.
+# ---------------------------------------------------------------------------
