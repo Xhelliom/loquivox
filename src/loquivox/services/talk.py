@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
-from loquivox.services.ai import AIService
+from loquivox.services.ai import TEXT_ONLY, AIService
 from loquivox.services.plugins import Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
@@ -209,6 +209,9 @@ def log_companion_cut(how: str, user_turns: int) -> None:
     is a misfire: ``grep -c "faux déclenchement"`` is the false-wake rate."""
     print("🫧 Companion: " + (f"faux déclenchement ({how})" if not user_turns
                               else f"fin de session ({how})"))
+
+
+NOT_DONE = "Je n'ai pas pu faire ça."
 
 
 class TalkSession:
@@ -408,6 +411,12 @@ class TalkSession:
                                         tool_calls_out=calls)
             routed = [(c, desk) for c, desk in
                       ((c, self.desks.get(c["name"])) for c in calls) if desk]
+            if calls and not routed and not last:
+                # Calls to tools this session does not hold (a deferred one
+                # not loaded yet): nothing to run, so ask again, in text.
+                answer = AIService.complete(
+                    base + exchange + [{"role": "system", "content": TEXT_ONLY}],
+                    on_delta=stream)
             if not routed or last:
                 break
             for call, desk in routed:
@@ -419,7 +428,8 @@ class TalkSession:
                                          for c, _ in routed]}]
             exchange += [{"role": "tool", "tool_call_id": c["id"],
                           "content": desk.plugin.started} for c, desk in routed]
-        return answer
+        # Never an empty turn: the user must hear something.
+        return answer if (answer or "").strip() else NOT_DONE
 
     def consult(self) -> Optional[str]:
         """

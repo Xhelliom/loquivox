@@ -53,6 +53,33 @@ def test_without_tools_the_turn_is_asked_again_in_text():
     print("✓ a tool-less call that tried a tool is retried in text")
 
 
+def test_a_call_to_an_unoffered_tool_still_gets_an_answer():
+    from loquivox.services.talk import NOT_DONE, TalkSession
+    import loquivox.services.talk as talk_module
+
+    session = TalkSession()
+    session.add_user("allume le bureau")
+    seen = []
+
+    def stream(messages, model, on_delta, tool_calls_out=None, **extra):
+        seen.append(messages)
+        if len(seen) == 1:
+            raise _Rejected(CALL)       # call_service: a deferred tool, not offered
+        return "Il faut d'abord charger l'outil."
+
+    def run():
+        return session._with_tools([{"role": "user", "content": "x"}], None)
+    def complete(m, model):
+        seen.append(m)
+        return "Il faut d'abord charger l'outil."
+    got = _with(complete, stream, run)
+    assert got and got != "", got
+    assert seen[-1][-1] == {"role": "system", "content": TEXT_ONLY}, seen[-1][-1]
+    # and when even the retry says nothing, a sentence is spoken
+    assert _with(lambda m, model: "", lambda *a, **k: "", run) == NOT_DONE
+    print("✓ an unoffered tool call is retried in text, never silent")
+
+
 def test_other_errors_still_surface():
     def complete(messages, model):
         raise ValueError("boom")
@@ -64,4 +91,5 @@ def test_other_errors_still_surface():
 if __name__ == "__main__":
     test_a_readable_call_is_handed_over_as_a_real_one()
     test_without_tools_the_turn_is_asked_again_in_text()
+    test_a_call_to_an_unoffered_tool_still_gets_an_answer()
     test_other_errors_still_surface()
