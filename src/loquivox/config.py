@@ -666,8 +666,8 @@ class Config:
         # Companion: toggle silence mode (the wake word stops being listened for).
         "companion":  ("F7",  ["F7"]),
         # Companion: open a session without the wake word (also in silence
-        # mode), or end the open one. Unbound by default.
-        "companion_wake": ("(unset)", []),
+        # mode), or end the open one.
+        "companion_wake": ("F8",  ["F8"]),
     })
 
 

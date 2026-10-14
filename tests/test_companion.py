@@ -367,7 +367,8 @@ def test_spoken_stop_is_a_misfire_only_if_it_is_the_only_turn():
 
 def test_wake_key_opens_from_silence_and_ends_without_misfire():
     from loquivox.handlers.keyboard import KeyboardHandler
-    assert "companion_wake" in CFG.HOTKEY_DEFS and "companion_wake" in config_module.HOTKEY_DESCRIPTIONS
+    assert CFG.HOTKEY_DEFS["companion_wake"][1] == ["F8"]
+    assert "companion_wake" in config_module.HOTKEY_DESCRIPTIONS
     c, log = _make()
     comp._companion = c
     STATE.presence_mode = "silent"            # wake word ignored, the key is not
