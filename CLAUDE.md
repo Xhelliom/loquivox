@@ -860,6 +860,42 @@ Every layer degrades to the next one; a missing model is a printed warning, neve
 an error. `services/_whisper_features.py` is vendored from Pipecat (BSD-2) — keep
 it in sync with upstream instead of editing it.
 
+## Event rules (`services/events.py`, `services/rules.py`)
+
+A generic mechanism, with **nothing of an integration in the code**: Loquivox
+publishes events on a bus, and `[[rules]]` in config.toml bind an event to MCP
+tool calls (`do = { server, tool, args }`, one table or a list run in order,
+`if = { key = value }` equality on the event's data, `{key}` in `args` replaced
+by the event's value — a lone placeholder keeps its type). The format and the
+worked example (a light that follows the companion, saved and restored by two
+more rules) are in `config.example.toml`.
+
+Events (`events.EVENTS` is the catalog, the only place to add one, plus an
+`events.emit(name, **data)` where it happens): `companion.state` (`state`:
+idle/cloud/listening/speaking/silent — the bubble's, emitted by
+`Companion._set_state`), `companion.session_opened` / `session_closed`
+(`cause`: wake_word/key/notification), `notification.received` (`source`,
+`title`, from `Desk.put`), `talk.started` / `talk.ended` (`mode`: talk/ai),
+`dictation.done` (`chars`).
+
+Rules to keep: `emit` is called on audio and GTK threads and only *queues* —
+each rule owns a thread and a one-place slot (a burst is one call in flight
+plus the last event; `MIN_GAP` 0.2 s between two runs). Actions call
+`mcp_tools.call_tool` directly: no model, **no spoken yes** (the user wrote them
+in config, unlike a tool the model picks). An absent server or an error is one
+warning per distinct message and a ❌ in Settings → Plugins → Rules (which lists
+each rule and its last result; editing stays in config.toml). "Back to how it
+was" is two rules (snapshot, restore), never code. `tests/test_rules.py` pins
+it with a test server and test rules, and that the two modules name no
+integration.
+
+**For an agent writing rules**: `loquivox --rules-catalog` lists the events and
+each declared MCP server's tools with their argument schemas; `loquivox
+--rules-check` validates every rule (event, `if` keys, server declared and
+reachable, tool, args against the schema, `{keys}`) and exits 1 on a wrong one.
+Both are handled in `app.main` before GTK is imported (so `mcp_tools` imports
+`STATE` lazily): write the rules, run the check, fix, repeat.
+
 ## Logs & the diagnostic report (`diagnostics.py`)
 
 The app logs through `print()`, and `install_log_file()` (called first thing

@@ -2,7 +2,8 @@
 Loquivox — Application entry point.
 
 ``loquivox`` starts the app; ``loquivox --report`` writes the diagnostic
-report and exits, ``--version`` prints the version. The two flags are handled
+report and exits, ``--version`` prints the version, ``--rules-check`` and
+``--rules-catalog`` serve whoever writes the event rules. These flags are handled
 before GTK is imported, because the machine that needs a report is often the
 one where the GTK stack is what is broken.
 """
@@ -24,6 +25,7 @@ from loquivox import __version__
 
 USAGE = """\
 usage: loquivox [--report [PATH] | --export-log [PATH]] [--keep-content] [--version]
+       loquivox --rules-check | --rules-catalog
 
   (no flag)           run the assistant (tray icon + global hotkeys)
   --report [PATH]     write the redacted diagnostic report (default:
@@ -32,6 +34,10 @@ usage: loquivox [--report [PATH] | --export-log [PATH]] [--keep-content] [--vers
                       ~/loquivox-log-<date>.txt; '-' prints it) and exit
   --keep-content      keep transcripts and screen descriptions in either
                       (keys, addresses and names are removed regardless)
+  --rules-check       validate the [[rules]] of config.toml against the events and
+                      the MCP servers' tools; exit 1 if one is wrong (no GTK)
+  --rules-catalog     list the events and each MCP server's tools with their
+                      argument schemas — what a rule can use (no GTK)
   --version           print the version and exit
 """
 
@@ -92,6 +98,9 @@ def main() -> None:
         from loquivox.diagnostics import report_cli
         rest = [a for a in argv if a not in ("--report", "--export-log")]
         sys.exit(report_cli(rest, full_log="--export-log" in argv))
+    if "--rules-check" in argv or "--rules-catalog" in argv:
+        from loquivox.services import rules
+        sys.exit(rules.cli(argv))
     _run()
 
 
@@ -144,6 +153,10 @@ def _run() -> None:
     # first conversation (a slow or dead one is a warning, never a block).
     if CFG.MCP_SERVERS:
         threading.Thread(target=_start_mcp, daemon=True).start()
+
+    if CFG.RULES:
+        from loquivox.services import rules
+        rules.start()
 
     # Screen-edge hotkey cheat sheet (no-op when turned off in Settings).
     HotkeyBar.start()

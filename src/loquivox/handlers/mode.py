@@ -20,6 +20,7 @@ from loquivox.managers.overlay import OverlayManager
 from loquivox.platform import get_clipboard
 from loquivox.services.ai import AIService
 from loquivox.services.audio import AudioService
+from loquivox.services import events
 from loquivox.services.clipboard import ClipboardService
 from loquivox.services.image import ImageService
 from loquivox.services.tts import TTSService
@@ -240,6 +241,7 @@ class ModeHandler:
         # the user is typing into — see ChatManager.add_message.
         ChatManager.add_message("user", f"🎤 {text}", summon=False)
         ClipboardService.type_text(text)
+        events.emit("dictation.done", chars=len(text))
 
     @staticmethod
     def _deliver_response(response: str, *, history_user: str,
@@ -434,6 +436,8 @@ class ModeHandler:
         # conversation itself. services/write.py writes from it.
         STATE.talk_session = session
         STATE.echo_advised = False
+        mode = "talk" if write else "ai"
+        events.emit("talk.started", mode=mode)
         try:
             with GrabbedKeys() as keys:
                 if not keys.alive:
@@ -475,6 +479,7 @@ class ModeHandler:
             STATE.talk_engine = "cascade"
             STATE.talk_session = None
             session.desks.close()        # stop the plugins watching for this session
+            events.emit("talk.ended", mode=mode)
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()
             GLib.idle_add(ModeHandler._talk_finished)

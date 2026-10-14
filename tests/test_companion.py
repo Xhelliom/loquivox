@@ -387,6 +387,23 @@ def test_wake_key_opens_from_silence_and_ends_without_misfire():
     assert "faux déclenchement" not in out and got == ["finish"], (out, got)
 
 
+def test_the_session_publishes_its_events():
+    from loquivox.services import events
+    seen = []
+    sub = lambda name, data: seen.append((name, data))
+    events.subscribe(sub)
+    try:
+        c, _ = _make()
+        c.wake(force=True, cause="key")
+        c.on_level("out", 0.3)      # outside a session: nothing
+    finally:
+        events._subscribers.remove(sub)
+    assert seen == [("companion.state", {"state": "cloud"}),
+                    ("companion.session_opened", {"cause": "key"}),
+                    ("companion.session_closed", {"cause": "key"}),
+                    ("companion.state", {"state": "idle"})], seen
+
+
 def test_idle_clock_waits_for_a_plugin_then_restarts():
     from loquivox.handlers.mode import ModeHandler
     class T:

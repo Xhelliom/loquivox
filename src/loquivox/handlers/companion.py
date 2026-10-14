@@ -22,7 +22,7 @@ import time
 from typing import Callable, Optional
 
 import loquivox.config as config_module
-from loquivox.services import media, plugins
+from loquivox.services import events, media, plugins
 from loquivox.state import STATE
 
 #: the bubble menu is this list
@@ -82,6 +82,7 @@ class Companion:
         self._look, self._converse = look, converse
         self._out = 0.0      # last output level: the companion has the floor above this
         self._loud = float("-inf")   # monotonic time of the last audible output block
+        self._emitted = None  # last state published as an event
         self._voice = None   # "listening" / "speaking" last posted to the bubble
         self._heard = float("-inf")   # monotonic time of the last word heard in standby
         self._retry = float("-inf")   # no source wake before this
@@ -92,11 +93,18 @@ class Companion:
         self._room_blocks = 0
         presence.on_level = self._mic_level
 
+    def _set_state(self, state: str) -> None:
+        """The bubble's state, and the event saying so (once per change)."""
+        self.bubble.set_state(state)
+        if state != self._emitted:
+            self._emitted = state
+            events.emit("companion.state", state=state)
+
     # ------------------------------------------------------------------ modes
     def start(self) -> None:
         if self.presence_on():
             self.presence.start()
-        self.bubble.set_state(self._standby())
+        self._set_state(self._standby())
         plugins.start_sources()
         threading.Thread(target=self._announce_loop, daemon=True).start()
 
@@ -122,7 +130,7 @@ class Companion:
             self.presence.release()
         elif not STATE.talk_active:   # F4/F6 hold the mic; resume_after_talk reopens it
             self.presence.resume()
-        self.bubble.set_state(self._standby())
+        self._set_state(self._standby())
 
     def toggle_silence(self) -> None:
         self.set_mode("active" if STATE.presence_mode == "silent" else "silent")
@@ -163,7 +171,7 @@ class Companion:
         voice = "speaking" if speaking else "listening"
         if voice != self._voice:
             self._voice = voice
-            self.bubble.set_state(voice)
+            self._set_state(voice)
 
     def _user_speaking(self, level: float, now: float) -> bool:
         """
@@ -206,9 +214,10 @@ class Companion:
             self._ducking = want
             media.duck_voice(want)
 
-    def wake(self, force: bool = False) -> None:
+    def wake(self, force: bool = False, cause: str = "wake_word") -> None:
         """Wake word heard (on its own thread): run one conversation, block until over.
-        ``force`` (the wake key) opens it in silence mode too."""
+        ``force`` (the wake key) opens it in silence mode too. ``cause`` says why
+        it opened (wake_word, key, notification), for the events."""
         if (not (force or self.presence_on()) or STATE.talk_active or STATE.recording
                 or STATE.companion_session):
             return
@@ -223,11 +232,12 @@ class Companion:
         self._ducking, self._user_run, self._user_last = False, 0, float("-inf")
         self._room, self._room_blocks = 0.0, 0
         self.bubble.pulse()                # heard: "I'm listening"
-        self.bubble.set_state("cloud")     # red from the capture on: the cost is visible
+        self._set_state("cloud")     # red from the capture on: the cost is visible
         try:
             self._look(session)            # before the mic is released and the cloud opens
             self.presence.release()
             print("🫧 Companion: session open")
+            events.emit("companion.session_opened", cause=cause)
             self._converse(session, self.presence.take_tail())
         except Exception as e:
             print(f"⚠️  Companion session failed: {e}")
@@ -240,9 +250,10 @@ class Companion:
                 STATE.talk_click.get_nowait()
             self.bubble.set_level(0.0)
             print("🫧 Companion: session closed")
+            events.emit("companion.session_closed", cause=cause)
             if self.presence_on():
                 self.presence.resume()
-            self.bubble.set_state(self._standby())
+            self._set_state(self._standby())
 
     def announce_if_due(self) -> bool:
         """A standing source has something and nobody is speaking: open a session
@@ -254,7 +265,7 @@ class Companion:
                 or now - self._heard < config_module.CFG.COMPANION_SOURCE_SILENCE_SEC
                 or not plugins.sources_waiting()):
             return False
-        self.wake()
+        self.wake(cause="notification")
         if plugins.sources_waiting():   # the session ended without saying it: not in a loop
             self._retry = time.monotonic() + SOURCE_RETRY
         return True
@@ -272,7 +283,7 @@ class Companion:
         if STATE.companion_session:
             STATE.talk_click.put("finish")
         else:
-            threading.Thread(target=self.wake, kwargs={"force": True}, daemon=True).start()
+            threading.Thread(target=self.wake, kwargs={"force": True, "cause": "key"}, daemon=True).start()
 
     def on_wake(self) -> None:   # Presence callback
         self.wake()
