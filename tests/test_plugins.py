@@ -22,6 +22,7 @@ from __future__ import annotations
 import _hermetic  # noqa: F401  (must precede any loquivox import)
 
 import re
+import threading
 import sys
 import time
 from pathlib import Path
@@ -307,6 +308,29 @@ def test_client_delegation_reaches_the_plugin_through_our_backend(case=WEATHER_C
     print("✓ client delegation reaches the plugin with no tool name on the wire")
 
 
+def test_the_writing_pass_sees_a_request_still_being_transcribed():
+    """Live: delegation lands mid-transcription; generate() must still get the sentence."""
+    from loquivox.services import ai as ai_module
+    from loquivox.services.live_talk import LiveTalk
+
+    session = TalkSession()
+    talk = LiveTalk(session)
+    talk.SETTLE_QUIET = 0.1
+    talk._on_delta("user", "écris que la capture ")      # open, not closed yet
+    seen = []
+    real = ai_module.AIService.complete
+    ai_module.AIService.complete = staticmethod(
+        lambda messages, **kw: seen.append(messages) or "ok")
+    threading.Timer(0.05, talk._on_delta, ("user", "est inutile")).start()
+    try:
+        assert session.generate("") == "ok"
+    finally:
+        ai_module.AIService.complete = real
+    sent = " ".join(m["content"] for m in seen[0] if m["role"] == "user")
+    assert "écris que la capture est inutile" in sent, seen[0]
+    print("✓ the writing pass waits for the sentence being transcribed")
+
+
 def test_an_mcp_server_reaches_all_three_engines():
     """
     The MCP client adds no engine branch either: a tool of a real stdio server
@@ -444,6 +468,7 @@ if __name__ == "__main__":
     test_client_delegation_reaches_the_plugin_through_our_backend()
     test_a_native_tool_stands_down_only_what_it_replaces()
     test_an_answer_is_rechecked_when_it_is_handed_back()
+    test_the_writing_pass_sees_a_request_still_being_transcribed()
     test_an_mcp_server_reaches_all_three_engines()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")

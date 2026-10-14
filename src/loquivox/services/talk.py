@@ -232,6 +232,9 @@ class TalkSession:
         self.desks = Desks(chat=not write)
         #: the conversation so far, as API messages (user/assistant turns)
         self.turns: List[Dict[str, Any]] = []
+        #: called before the writing pass reads ``turns``: an engine whose last
+        #: user turn is still being transcribed (Live) records it here first.
+        self.settle: Optional[Callable[[], None]] = None
         #: what was on screen when the session started, described once by the
         #: vision model (see CFG.TALK_SCREENSHOT). Set from the capture thread
         #: while the first turn is being spoken; a plain attribute assignment,
@@ -499,6 +502,8 @@ class TalkSession:
         it applies to *this* version, which a transcript buries and a caller
         that was handed it should not have to hope the model digs back out.
         """
+        if self.settle:
+            self.settle()
         if not self.turns:
             return None
         cfg = config_module.CFG
@@ -511,6 +516,9 @@ class TalkSession:
             + self.turns
             + [{"role": "user", "content": request}]
         )
+        # Counts only, never the words (diagnostics.redact).
+        print(f"✍️  Writing pass: {self.user_turns} user turns of {len(self.turns)}, "
+              f"instruction {len(instruction.strip())} chars")
         result = AIService.complete(messages)
         return (result or "").strip() or None
 

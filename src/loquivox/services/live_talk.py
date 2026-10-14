@@ -177,6 +177,7 @@ class LiveTalk:
         #: delta for it arrived. There is no end-of-turn event, so this pair is
         #: the whole turn machinery (see ``tick``).
         self._live: Dict[str, str] = {}
+        session.settle = self._settle
         self._last_delta: Dict[str, float] = {}
         #: the jitter buffer, all under ``_audio_lock``: output chunks as
         #: (PCM, audible), how far into the first one playback is, the bytes in
@@ -361,6 +362,28 @@ class LiveTalk:
         for role in ("user", "assistant"):
             if role in self._live and now - self._last_delta.get(role, now) >= gap:
                 self._close_turn(role)
+
+    #: the user's turn is "finished" once no delta came for this long
+    SETTLE_QUIET = 0.5
+    SETTLE_MAX = 4.0
+
+    def _settle(self) -> None:
+        """
+        Record the user's sentence before anything reads ``turns``.
+
+        ``session.delegation.created`` can land before the request has finished
+        transcribing, so flushing at once leaves it out of the brief — and the
+        writing pass writes something generic. Wait (bounded) while deltas are
+        still arriving, then close the turn.
+        """
+        deadline = time.monotonic() + self.SETTLE_MAX
+        while time.monotonic() < deadline:
+            with self._lock:
+                last = self._last_delta.get("user") if "user" in self._live else None
+            if last is None or time.monotonic() - last >= self.SETTLE_QUIET:
+                break
+            time.sleep(0.05)
+        self._flush_turns()
 
     def _flush_turns(self) -> None:
         """Close whatever is still open — the session is ending or delegating."""
@@ -548,7 +571,7 @@ class LiveTalk:
         from loquivox.managers.chat import ChatManager
 
         try:
-            self._flush_turns()
+            self._settle()
             ChatManager.add_message("note", "🧠 Thinking…")
             started = time.time()
             answer = self._session.consult()
