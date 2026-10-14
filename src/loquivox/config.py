@@ -440,6 +440,11 @@ class Config:
     #: Seconds without a word heard before a source's message may wake the
     #: companion by itself (standby, active mode only).
     COMPANION_SOURCE_SILENCE_SEC: float = 2.0
+    #: With ``media = "duck"``: lower the music while the companion speaks /
+    #: while the user speaks, and bring it back COMPANION_DUCK_HOLD_SEC after.
+    COMPANION_DUCK_ON_ASSISTANT: bool = True
+    COMPANION_DUCK_ON_USER: bool = False
+    COMPANION_DUCK_HOLD_SEC: float = 1.0
     #: Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
     COMPANION_BUBBLE_STYLE: str = "goutte"
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
@@ -890,6 +895,12 @@ def _build_config() -> Config:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "source_silence" in companion:
         overrides["COMPANION_SOURCE_SILENCE_SEC"] = float(companion["source_silence"])
+    if "duck_on_assistant" in companion:
+        overrides["COMPANION_DUCK_ON_ASSISTANT"] = bool(companion["duck_on_assistant"])
+    if "duck_on_user" in companion:
+        overrides["COMPANION_DUCK_ON_USER"] = bool(companion["duck_on_user"])
+    if "duck_hold" in companion:
+        overrides["COMPANION_DUCK_HOLD_SEC"] = float(companion["duck_hold"])
     if "stop_phrases" in companion:
         overrides["COMPANION_STOP_PHRASES"] = tuple(
             str(p).strip().lower() for p in companion["stop_phrases"] if str(p).strip()

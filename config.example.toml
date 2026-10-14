@@ -154,6 +154,13 @@ idle_timeout = 12.0
 # Seconds without a word heard before a plugin source (e.g. a notification)
 # may open a session by itself. Never in silence mode.
 source_silence = 2.0
+# With media = "duck": lower the music while the companion speaks, and/or while
+# you speak (real speech only, never the music coming back into the microphone).
+# The music comes back duck_hold seconds after the last word, so it does not
+# pump between two sentences of one answer. Applied live from Settings.
+duck_on_assistant = true
+duck_on_user = false
+duck_hold = 1.0
 # Short phrases ("tais-toi", "je ne te parlais pas"…) that close the session
 # with no reply. Each one logs "faux déclenchement" (grep -c to count them).
 # stop_phrases = ["tais-toi", "je ne te parlais pas"]

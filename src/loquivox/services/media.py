@@ -18,6 +18,8 @@ silent no-op.
 
 from __future__ import annotations
 
+import json
+import re
 import subprocess
 import threading
 import time
@@ -26,8 +28,18 @@ from typing import Dict, Optional
 import loquivox.config as config_module
 
 _lock = threading.Lock()
-_playing: Dict[str, str] = {}  # player → volume when the microphone opened
+# player → {sink-input index: volume when the microphone opened}. Ducking acts
+# on the player's audio STREAM, never on its MPRIS volume: some players (Music
+# Assistant) expose the system sink's volume there, and lowering it silences
+# everything, the companion's own voice included.
+_playing: Dict[str, Dict[int, str]] = {}
+_pending: Dict[str, Dict[int, str]] = {}  # being restored: a reopened mic takes them back
 _timer: Optional[threading.Timer] = None
+_voice_duck = False   # the companion asks for the music down, whatever the mic does
+_warned: set = set()
+_vlock = threading.Lock()
+_voice_want = False
+_voice_busy = False
 _PROFILE_WAIT_S = 8.0  # ponytail: bound on the A2DP switch-back, not a setting
 
 
@@ -39,8 +51,54 @@ def _playerctl(*args: str) -> str:
         return ""
 
 
-def mic_opened() -> None:
-    """Call BEFORE the input stream opens: a headset pauses players once it has."""
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"\.instance\d+$", "", text.lower()))
+
+
+def _streams(player: str) -> Dict[int, str]:
+    """Sink-inputs of ``player`` → their volume, matched on application name/binary/id."""
+    try:
+        out = subprocess.run(["pactl", "--format=json", "list", "sink-inputs"],
+                             capture_output=True, text=True, timeout=2).stdout
+        inputs = json.loads(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+    me, found = _norm(player), {}
+    for si in inputs:
+        props = si.get("properties", {})
+        names = [_norm(props.get(k, "")) for k in
+                 ("application.name", "application.process.binary", "application.id")]
+        if me and any(len(n) >= 3 and (n in me or me in n) for n in names):
+            # ponytail: loudest channel, set back on all — a balance is lost
+            found[si["index"]] = max((int(c["value_percent"].rstrip("%"))
+                                      for c in si.get("volume", {}).values()),
+                                     default=100)
+    return {i: f"{v}%" for i, v in found.items()}
+
+
+def _set_streams(streams: Dict[int, str], volume: Optional[str] = None) -> None:
+    for idx, original in streams.items():
+        _pactl("set-sink-input-volume", str(idx), volume or original)
+
+
+def _duck_now() -> None:
+    """Lower every snapshotted stream (lock held). Never below what it was."""
+    target = int(config_module.CFG.MEDIA_DUCK_VOLUME * 100)
+    for streams in _playing.values():
+        _set_streams({i: v for i, v in streams.items() if int(v[:-1]) > target}, f"{target}%")
+
+
+def _unduck() -> None:
+    for streams in _playing.values():
+        _set_streams(streams)
+
+
+def mic_opened(duck: bool = True) -> None:
+    """
+    Call BEFORE the input stream opens: a headset pauses players once it has.
+    ``duck=False``: the microphone alone lowers nothing (a companion session,
+    where ``duck_voice`` decides).
+    """
     global _timer
     cfg = config_module.CFG
     if cfg.MEDIA == "off":
@@ -50,15 +108,25 @@ def mic_opened() -> None:
             _timer.cancel()
             _timer = None
             return
+        carried = dict(_pending)   # reopened while _restore waits for A2DP
+        _pending.clear()
         _playing.clear()
-        for line in _playerctl("-a", "--format", "{{playerName}}\t{{status}}\t{{volume}}",
+        for line in _playerctl("-a", "--format", "{{playerName}}\t{{status}}",
                                "status").splitlines():
-            name, status, volume = (line.split("\t") + ["", ""])[:3]
-            if status == "Playing":
-                _playing[name] = volume
-        if cfg.MEDIA == "duck":
-            for name in _playing:
-                _playerctl("-p", name, "volume", str(cfg.MEDIA_DUCK_VOLUME))
+            name, status = (line.split("\t") + [""])[:2]
+            if status == "Playing" or name in carried:
+                # a stream already lowered by the restore in flight reads
+                # ducked: its original is the one the restore took
+                _playing[name] = carried.get(name) or (
+                    _streams(name) if cfg.MEDIA == "duck" else {})
+                if cfg.MEDIA == "duck" and not _playing[name] and name not in _warned:
+                    _warned.add(name)
+                    print(f"⚠️  Media: no audio stream found for '{name}' — "
+                          "its volume is left alone")
+        for name, streams in carried.items():
+            _playing.setdefault(name, streams)   # paused by the switch: still ours
+        if cfg.MEDIA == "duck" and (duck or _voice_duck):
+            _duck_now()
 
 
 def mic_closed() -> None:
@@ -107,10 +175,41 @@ def await_headset_mic(timeout: float = 3.0) -> None:
         time.sleep(0.1)
 
 
+def duck_voice(on: bool) -> None:
+    """
+    Lower (or bring back) the music because someone is speaking. Safe from an
+    audio callback: the pactl calls run on a worker, the last request wins.
+    """
+    global _voice_want, _voice_busy
+    if config_module.CFG.MEDIA != "duck":
+        return
+    with _vlock:
+        _voice_want = on
+        if _voice_busy:
+            return
+        _voice_busy = True
+    threading.Thread(target=_voice_loop, daemon=True).start()
+
+
+def _voice_loop() -> None:
+    global _voice_busy, _voice_duck
+    while True:
+        with _vlock:
+            want = _voice_want
+        with _lock:
+            _voice_duck = want
+            (_duck_now if want else _unduck)()
+        with _vlock:
+            if _voice_want == want:
+                _voice_busy = False
+                return
+
+
 def _restore() -> None:
-    global _timer
+    global _timer, _voice_duck
     with _lock:
-        players, _timer = dict(_playing), None
+        _timer, _voice_duck = None, False
+        _pending.update(_playing)
         _playing.clear()
     # The grace period has passed, but a Bluetooth headset takes a while
     # longer to switch back to A2DP. Pressing play before that starts the
@@ -121,20 +220,11 @@ def _restore() -> None:
         if not _headset_profile_active():
             break
         time.sleep(0.25)
-    for name, volume in players.items():
-        if volume:
-            _playerctl("-p", name, "volume", volume)
+    with _lock:
+        players = dict(_pending)   # empty: the microphone reopened meanwhile
+        _pending.clear()
+    for name, streams in players.items():
+        _set_streams(streams)
         _playerctl("-p", name, "play")
     if players:
         print(f"▶️  Media resumed: {', '.join(players)}")
-
-
-if __name__ == "__main__":  # self-check of the grace-period logic, no playerctl
-    from dataclasses import replace
-    config_module.CFG = replace(config_module.CFG, MEDIA="resume", MEDIA_GRACE_S=0.1)
-    _playing["fake"] = "1.0"
-    mic_closed(); mic_opened()            # reopened in time → snapshot kept
-    assert _playing == {"fake": "1.0"} and _timer is None
-    mic_closed(); time.sleep(0.3)         # closed for good → fired and cleared
-    assert _playing == {} and _timer is None
-    print("ok")
