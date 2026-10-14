@@ -73,6 +73,7 @@ class Companion:
         self._look, self._converse = look, converse
         self._out = 0.0      # last output level: the companion has the floor above this
         self._voice = None   # "listening" / "speaking" last posted to the bubble
+        presence.on_level = self._mic_level
 
     # ------------------------------------------------------------------ modes
     def start(self) -> None:
@@ -114,6 +115,12 @@ class Companion:
             self.set_mode("active" if STATE.presence_mode == target else target)
 
     # ---------------------------------------------------------------- session
+    def _mic_level(self, level: float) -> None:
+        """Standby microphone → the water. A session owns the bubble's level (and
+        the mic is released then); the blocks still in flight after the wake are dropped."""
+        if not STATE.companion_session:
+            self.bubble.set_level(level)
+
     def on_level(self, who: str, level: float) -> None:
         """Audio thread: feed the bubble's water, and say who has the floor."""
         if who == "out":

@@ -69,6 +69,17 @@ def test_session_levels_set_listening_and_speaking():
     assert c.bubble.levels[-1] == 0.2
 
 
+def test_standby_mic_level_reaches_the_bubble_but_not_a_session():
+    c, _ = _make()
+    assert c.presence.on_level == c._mic_level
+    c.presence.on_level(0.4)
+    assert c.bubble.levels == [0.4]
+    STATE.companion_session = True
+    c.presence.on_level(0.9)              # a block still in flight after the wake
+    STATE.companion_session = False
+    assert c.bubble.levels == [0.4]
+
+
 def test_wake_pulses_the_bubble():
     c, log = _make()
     c.wake()
