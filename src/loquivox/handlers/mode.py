@@ -673,6 +673,7 @@ class ModeHandler:
             return ModeHandler._talk_converse(session, keys)
 
         cancelled = False
+        plugin_seen = [float("-inf")]
         try:
             with keys.exclusive(grab=not KeyboardHandler.free_keyboard()):
                 while True:
@@ -705,13 +706,26 @@ class ModeHandler:
                         break
                     if session.user_turns >= cfg.TALK_MAX_TURNS:
                         break
-                    if quiet and talk.idle_for() >= cfg.COMPANION_IDLE_TIMEOUT:
+                    if quiet and ModeHandler._companion_idle(talk, session, plugin_seen) >= cfg.COMPANION_IDLE_TIMEOUT:
                         break   # nobody is talking any more: back to standby
         finally:
             talk.close()
         if talk.error is not None:
             print(f"⚠️  {label} talk ended: {talk.error}")
         return cancelled
+
+    @staticmethod
+    def _companion_idle(talk, session, plugin_seen: list) -> float:
+        """
+        Silence that counts towards standby. A plugin at work is not silence:
+        the clock is held at zero while an answer is in flight or queued, and
+        restarts from the moment it is handed over (``plugin_seen``, a
+        one-slot list the loop owns), until the voice itself takes over.
+        """
+        now = time.monotonic()
+        if session.desks.coming():
+            plugin_seen[0] = now
+        return min(talk.idle_for(), now - plugin_seen[0])
 
     @staticmethod
     def _talk_converse(session, keys) -> bool:
