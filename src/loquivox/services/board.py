@@ -135,15 +135,8 @@ class Alert(dict):
 
 def alert_message(entry: Dict[str, Any]) -> Dict[str, str]:
     """The notification as a system message, for either engine."""
-    message = Alert(role="system", content=(
-        "A notification from the user's kanban board has just arrived, about "
-        f"« {subject(entry)} »:\n\n{content(entry)}\n\n"
-        "This is not about the text being written. Interrupt yourself politely "
-        "and say it out loud in ONE short spoken sentence in the user's "
-        "language — what it is about, named as above, and what it wants — then "
-        "ask what they want to do about it. Do not read the lines out as they "
-        "are written, and invent nothing beyond them."
-    ))
+    # data only: how to say it is the frame every source gets (plugins.SOURCE_FRAME)
+    message = Alert(role="system", content=f"« {subject(entry)} »:\n\n{content(entry)}")
     message.entry = entry
     return message
 

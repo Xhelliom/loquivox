@@ -316,7 +316,7 @@ def test_an_answer_is_rechecked_when_it_is_handed_back():
         session = TalkSession()
         assert _wait(session.desks.ready)
         plugin, message = session.desks.take()
-        assert plugin.name == "ticker" and message["content"] == "tick"
+        assert plugin.name == "ticker" and "tick" in message["content"]
         session.desks.close()
     finally:
         plugins._REGISTRY.pop("ticker", None)
@@ -376,7 +376,8 @@ def test_the_conversation_core_names_no_plugin():
     for relative in ("src/loquivox/services/talk.py",
                      "src/loquivox/services/realtime_talk.py",
                      "src/loquivox/services/live_talk.py",
-                     "src/loquivox/handlers/mode.py"):
+                     "src/loquivox/handlers/mode.py",
+                     "src/loquivox/handlers/companion.py"):
         source = (ROOT / relative).read_text()
         for name in names:
             assert not re.search(rf"\b{re.escape(name)}\b", source), \

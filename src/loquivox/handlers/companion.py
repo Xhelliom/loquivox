@@ -22,6 +22,7 @@ import time
 from typing import Callable, Optional
 
 import loquivox.config as config_module
+from loquivox.services import plugins
 from loquivox.state import STATE
 
 #: the bubble menu is this list
@@ -53,6 +54,8 @@ def _look(session) -> None:
     ModeHandler._talk_look(session)
 
 
+SOURCE_POLL = 0.5     # s between two looks at the sources' queue
+SOURCE_RETRY = 30.0   # s before a message a session left unsaid may wake it again
 SPEAK_HOLD = 0.8   # s; same order as live_talk.AUDIO_IDLE (1.0), shorter so listening comes back fast
 
 
@@ -77,6 +80,8 @@ class Companion:
         self._out = 0.0      # last output level: the companion has the floor above this
         self._loud = float("-inf")   # monotonic time of the last audible output block
         self._voice = None   # "listening" / "speaking" last posted to the bubble
+        self._heard = float("-inf")   # monotonic time of the last word heard in standby
+        self._retry = float("-inf")   # no source wake before this
         presence.on_level = self._mic_level
 
     # ------------------------------------------------------------------ modes
@@ -84,6 +89,8 @@ class Companion:
         if self.presence_on():
             self.presence.start()
         self.bubble.set_state(self._standby())
+        plugins.start_sources()
+        threading.Thread(target=self._announce_loop, daemon=True).start()
 
     def presence_on(self) -> bool:
         return STATE.presence_mode == "active"
@@ -124,6 +131,8 @@ class Companion:
     def _mic_level(self, level: float) -> None:
         """Standby microphone → the water. A session owns the bubble's level (and
         the mic is released then); the blocks still in flight after the wake are dropped."""
+        if level > 0:
+            self._heard = time.monotonic()
         if not STATE.companion_session:
             self.bubble.set_level(level)
 
@@ -182,6 +191,29 @@ class Companion:
             if self.presence_on():
                 self.presence.resume()
             self.bubble.set_state(self._standby())
+
+    def announce_if_due(self) -> bool:
+        """A standing source has something and nobody is speaking: open a session
+        for it (the sweep between two turns then says it). Blocks until over.
+        Never in silence mode, never over a recording or a talk session."""
+        now = time.monotonic()
+        if (not self.presence_on() or STATE.talk_active or STATE.recording
+                or STATE.companion_session or now < self._retry
+                or now - self._heard < config_module.CFG.COMPANION_SOURCE_SILENCE_SEC
+                or not plugins.sources_waiting()):
+            return False
+        self.wake()
+        if plugins.sources_waiting():   # the session ended without saying it: not in a loop
+            self._retry = time.monotonic() + SOURCE_RETRY
+        return True
+
+    def _announce_loop(self) -> None:
+        while True:
+            try:
+                self.announce_if_due()
+            except Exception as e:
+                print(f"⚠️  Companion could not announce a source: {e}")
+            time.sleep(SOURCE_POLL)
 
     def wake_key(self) -> None:
         """The wake key: open a session, or end the one that is open."""
