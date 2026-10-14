@@ -552,7 +552,7 @@ if __name__ == "__main__":
     import sys
     ap = argparse.ArgumentParser(description="Companion bubble demo (the only life it has outside the app)")
     ap.add_argument("--demo", action="store_true")
-    ap.add_argument("--style", help="goutte (default), goutte-plus, reacteur, radar, plasma")
+    ap.add_argument("--style", help="goutte (default), plasma, radar, reacteur")
     ap.add_argument("--state", help="pin one state instead of cycling (e.g. idle, to measure CPU)")
     ap.add_argument("--gallery", action="store_true", help="the four styles side by side")
     ap.add_argument("--frames", metavar="DIR", help="render PNG frames of every style and exit")

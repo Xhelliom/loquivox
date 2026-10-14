@@ -437,6 +437,8 @@ class Config:
     )
     #: Seconds of silence, both ways, that end a companion conversation.
     COMPANION_IDLE_TIMEOUT: float = 12.0
+    #: Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
+    COMPANION_BUBBLE_STYLE: str = "goutte"
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
     #: so typing and shortcuts keep working in other apps. Every key then also
     #: lands in whatever is being typed into, so the session answers to its own
@@ -876,6 +878,8 @@ def _build_config() -> Config:
         overrides["COMPANION_CLICK_MODE"] = str(companion["click_mode"]).strip().lower()
     if str(companion.get("wake_word", "")).strip():
         overrides["COMPANION_WAKE_WORD"] = str(companion["wake_word"]).strip()
+    if companion.get("bubble_style") in ("goutte", "plasma", "radar", "reacteur"):
+        overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
     if "idle_timeout" in companion:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "stop_phrases" in companion:

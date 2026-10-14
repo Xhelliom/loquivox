@@ -1,13 +1,13 @@
 """
-Mock-ups for the companion's bubble: four sci-fi looks beside the shipped drop.
+Mock-ups for the companion's bubble: three sci-fi looks beside the shipped drop.
 
 Same frame as the bubble (``SIZE`` window, ``DROP`` body, the same ``Look`` fed
 by the same springs), so a style is a drop-in for ``paint``. The shipped look,
 ``goutte``, stays the default until the operator picks another one:
 
-    LOQUIVOX_BUBBLE_STYLE=reacteur loquivox            # or "companion_style" in settings.json
+    LOQUIVOX_BUBBLE_STYLE=reacteur loquivox
     python -m loquivox.ui.companion_bubble --demo --style radar [--state idle]
-    python -m loquivox.ui.companion_bubble --gallery   # the four side by side
+    python -m loquivox.ui.companion_bubble --gallery   # the four side by side (goutte included)
     python -m loquivox.ui.companion_bubble --frames DIR  # PNG frames for the GIFs
 
 Every state reads from motion as well as colour: standby turns and breathes
@@ -103,49 +103,6 @@ def _glow(cr, rgb, radius, alpha) -> None:
     cr.set_source(g)
     cr.arc(0, 0, radius, 0, TAU)
     cr.fill()
-
-
-# ---------------------------------------------------------------- 1. goutte+
-def goutte_plus(cr, look: Look, rig: Rig) -> None:
-    """The shipped drop, plus a breathing halo, two holographic orbits, bubbles in the water."""
-    cb.paint(cr, look)
-    _begin(cr, look, clear=False)
-    d, lv, a = _dir(look), look.level, look.alpha
-    halo = cairo.RadialGradient(0, 0, R, 0, 0, R + 11)
-    halo.add_color_stop_rgba(0, *look.rgb, (0.12 + 0.28 * rig.breathe(look) + 0.3 * lv) * a)
-    halo.add_color_stop_rgba(1, *look.rgb, 0)
-    cr.set_source(halo)
-    cr.arc(0, 0, R + 11, 0, TAU)
-    cr.arc_negative(0, 0, R, TAU, 0)
-    cr.fill()
-    # bubbles rising through the water, faster with the voice
-    cr.save()
-    cr.arc(0, 0, R - 1.5, 0, TAU)
-    cr.clip()
-    top = R - 2 * R * (cb.WATER + 0.12 * lv)
-    for x, off, sp, size in rig.parts:
-        y = R - ((off + rig.rise * sp) % 1.0) * (R - top + 2)
-        cr.set_source_rgba(1, 1, 1, 0.55 * a * min(1.0, (y - top) / 6 + .2))
-        cr.arc(x * R + 2 * math.sin(rig.rise * 3 * sp + off * 6), y, size * .9, 0, TAU)
-        cr.fill()
-    cr.restore()
-    # two tilted orbits (dashed ellipses) with a bead each, turning against each other
-    for spin, tilt, rad, bead in ((rig.spin, .38, R + 7, 1), (rig.spin2 + 1.2, .5, R + 4.5, -1)):
-        rad += 3 * d * lv
-        cr.save()
-        cr.rotate(tilt * 2.2 * bead)
-        cr.scale(1, .34)
-        cr.set_dash([5, 4], spin * 14)
-        cr.set_line_width(1.1 / .34 * .6)
-        cr.set_source_rgba(*_light(look.rgb, .7), 0.55 * a)
-        cr.arc(0, 0, rad, 0, TAU)
-        cr.stroke()
-        cr.set_dash([])
-        cr.set_source_rgba(1, 1, 1, 0.9 * a)
-        cr.arc(rad * math.cos(spin), rad * math.sin(spin), 1.6 / .34 * .5, 0, TAU)
-        cr.fill()
-        cr.restore()
-    _end(cr, look)
 
 
 # --------------------------------------------------------------- 2. reacteur
@@ -266,31 +223,24 @@ def plasma(cr, look: Look, rig: Rig) -> None:
     _end(cr, look)
 
 
-STYLES: Dict[str, Callable] = {"goutte-plus": goutte_plus, "reacteur": reacteur,
-                               "radar": radar, "plasma": plasma}
+STYLES: Dict[str, Callable] = {"reacteur": reacteur, "radar": radar, "plasma": plasma}
 VARIANTS = tuple(STYLES)
+CHOICES = (DEFAULT_STYLE,) + tuple(sorted(STYLES))   # Settings → Companion
 
-_style = None
+_style = None   # forced by set_style (demo); otherwise config, so Apply restyles the live bubble
 _rig = Rig()
 
 
 def current_style() -> str:
-    """Env var, then settings.json; anything unknown is the shipped drop. Read once."""
-    global _style
-    if _style is None:
-        name = os.environ.get("LOQUIVOX_BUBBLE_STYLE")
-        if not name:
-            try:
-                name = cb.SettingsManager.load().get("companion_style")
-            except Exception:
-                name = None
-        _style = name if name in STYLES else DEFAULT_STYLE
-    return _style
+    """The demo's choice, the env var, then ``[companion] bubble_style``; unknown is the drop."""
+    from loquivox import config
+    name = _style or os.environ.get("LOQUIVOX_BUBBLE_STYLE") or config.CFG.COMPANION_BUBBLE_STYLE
+    return name if name in STYLES else DEFAULT_STYLE
 
 
 def set_style(name: str) -> None:
     global _style
-    _style = name if name in STYLES else DEFAULT_STYLE
+    _style = name if name in STYLES or name == DEFAULT_STYLE else None
 
 
 def draw(name: str, cr, look: Look, rig: Rig, t: float) -> None:
@@ -364,7 +314,7 @@ def gallery(per_state: float = 3.0, zoom: int = 3) -> None:
     win.add(box)
     sim, clock = Sim(), [0.0, GLib.get_monotonic_time()]
     cells = []
-    for name in VARIANTS:
+    for name in CHOICES:
         area = Gtk.DrawingArea()
         area.set_size_request(SIZE * zoom, SIZE * zoom + 30)
         rig, look = Rig(), [Look(rgb=STATES["idle"])]
@@ -408,7 +358,7 @@ def render_frames(outdir: str, fps: int = 20, per_state: float = 2.0, zoom: int 
     """Offscreen PNGs: ``<style>/NNNN.png`` for each style and ``gallery/NNNN.png`` side by side."""
     from pathlib import Path
     out = Path(outdir)
-    names = list(VARIANTS)
+    names = list(CHOICES)
     sets = {n: [n] for n in names}
     sets["gallery"] = names
     cell = SIZE * zoom
