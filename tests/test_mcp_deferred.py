@@ -105,10 +105,37 @@ def test_find_tools_by_server_and_by_query():
     print("✓ find_tools loads by server or by query, for this session only")
 
 
-def test_a_deferred_tool_is_not_callable_before_it_is_loaded():
-    session = TalkSession()
-    assert session.desks.get("mcp_fy_bulk_0") is None, "a tool never offered was routed to"
-    print("✓ a call to a tool that was never loaded is dropped")
+def test_a_call_to_a_deferred_tool_loads_it_and_runs():
+    import loquivox.services.talk as talk_module
+
+    session = STATE.talk_session = TalkSession()
+    assert "mcp_fz_weather" not in _offered(session.desks)
+    assert session.desks.get("no_such_tool") is None, "a hallucinated name was routed"
+    texts = []
+
+    def _fake(messages, on_delta=None, tools=None, tool_calls_out=None):
+        texts.append(any(m.get("content") == talk_module.TEXT_ONLY for m in messages))
+        if tool_calls_out is not None and not any(m.get("role") == "tool" for m in messages):
+            tool_calls_out.append({"id": "c1", "name": "mcp_fz_weather", "arguments": "{}"})
+        return "ok"
+
+    real = talk_module.AIService.complete
+    talk_module.AIService.complete = staticmethod(_fake)
+    try:
+        session.reply("quelle météo ?")
+        assert "mcp_fz_weather" in _offered(session.desks), "the named tool was not loaded"
+        assert _wait(session.desks.ready), "the tool never ran"
+        assert not any(texts), "fell back to text instead of running the tool"
+    finally:
+        talk_module.AIService.complete = real
+        STATE.talk_session = None
+    print("✓ a deferred tool called by name is loaded and run, not answered in text")
+
+
+def test_the_no_false_done_rule_is_in_the_prompts():
+    from loquivox.services.plugins import NO_FALSE_DONE
+    assert NO_FALSE_DONE in TalkSession().system_prompt()
+    print("✓ the cascade prompt forbids announcing an action without a tool result")
 
 
 def test_the_cascade_calls_it_on_the_next_turn():
@@ -223,7 +250,8 @@ if __name__ == "__main__":
     try:
         test_only_the_always_tools_and_find_tools_are_offered()
         test_find_tools_by_server_and_by_query()
-        test_a_deferred_tool_is_not_callable_before_it_is_loaded()
+        test_a_call_to_a_deferred_tool_loads_it_and_runs()
+        test_the_no_false_done_rule_is_in_the_prompts()
         test_the_cascade_calls_it_on_the_next_turn()
         test_realtime_pushes_the_new_tools_to_the_session()
         test_live_client_delegation_reads_the_same_list_and_responses_gets_everything()

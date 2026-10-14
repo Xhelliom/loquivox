@@ -65,6 +65,13 @@ SOURCE_FRAME = (
 )
 
 
+#: appended to the cascade prompt and to the Live backend prompt
+NO_FALSE_DONE = (
+    "Never say an action is done, launched or sent unless a tool returned a "
+    "success for it in this conversation. If the tool is missing, was not "
+    "called or failed, say what is missing instead.")
+
+
 @dataclass(frozen=True)
 class Plugin:
     """
@@ -448,9 +455,13 @@ class Desks:
         A source's desk answers None here even though it exists: it was never
         on the table, so a call naming it is a hallucination, and routing one
         into a plugin with no ``run`` is how that becomes a crash. The same
-        goes for a deferred tool nobody loaded.
+        goes for a name that is no tool of ours. A *deferred* tool the model
+        names anyway is loaded on the spot and routed: it knew the name, and
+        dropping the call made it answer in text, inventing the success.
         """
         desk = self._desks.get(name)
+        if desk is not None and desk.plugin.is_tool and desk.plugin.deferred:
+            self.load([name])
         return desk if desk in self._offered() else None
 
     def ready(self) -> bool:
