@@ -128,7 +128,11 @@ class Companion:
     def on_level(self, who: str, level: float) -> None:
         """Audio thread: feed the bubble's water, and say who has the floor.
         The companion keeps it for SPEAK_HOLD after its last audible block, so the
-        gaps between two words do not flip the waves' direction."""
+        gaps between two words do not flip the waves' direction.
+        Blocks still in flight after the session closed are dropped: they would
+        put "listening" back on a bubble already at rest."""
+        if not STATE.companion_session:
+            return
         now = time.monotonic()
         if who == "out":
             self._out = level
