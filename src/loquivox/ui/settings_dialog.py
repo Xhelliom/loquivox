@@ -1795,9 +1795,10 @@ class SettingsDialog:
 
         body = cls._group(
             vbox, "Conversation",
-            f"How talk mode behaves once {config_module.CFG.HOTKEY_DEFS['talk'][0]} "
-            f"or {config_module.CFG.HOTKEY_DEFS['ai'][0]} opens a session. Which engine holds it is on the Models tab. "
-            "Each setting below says which mode and engine it applies to.")
+            f"How {config_module.CFG.HOTKEY_DEFS['ai'][0]} and "
+            f"{config_module.CFG.HOTKEY_DEFS['talk'][0]} conversations behave. "
+            f"\"How far it digs\" only applies to {config_module.CFG.HOTKEY_DEFS['talk'][0]}; "
+            "\"End my turns on meaning\" only to the cascade engine.")
 
         cls._talk_depth = Gtk.ComboBoxText()
         for depth_id, label in cls._TALK_DEPTHS:
