@@ -16,7 +16,7 @@ from loquivox.platform.base import AwayBackend
 
 BUS = "org.freedesktop.login1"
 SESSION = "org.freedesktop.login1.Session"
-PATH = "/org/freedesktop/login1/session/auto"   # the caller's own session
+MANAGER = "/org/freedesktop/login1"
 
 
 class LogindAway(AwayBackend):
@@ -24,13 +24,18 @@ class LogindAway(AwayBackend):
 
     def watch_lock(self, on_locked: Callable[[bool], None]) -> bool:
         try:
-            from gi.repository import Gio
-            bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
-            for iface in (SESSION, "org.freedesktop.DBus.Properties"):
-                bus.signal_subscribe(
-                    BUS, iface, None, PATH, None, Gio.DBusSignalFlags.NONE,
-                    lambda _c, _s, _p, _i, member, params, *_: self._signal(
-                        member, params.unpack() if params is not None else None))
+            from gi.repository import Gio, GLib
+            bus = self._bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)  # keep it: a dropped ref drops the match
+            # ".../session/auto" is an alias for method calls only: logind emits
+            # its signals on the real path (".../session/_31"), so resolve it.
+            path = bus.call_sync(
+                BUS, MANAGER, BUS + ".Manager", "GetSession",
+                GLib.Variant("(s)", ("auto",)), GLib.VariantType("(o)"),
+                Gio.DBusCallFlags.NONE, 2000, None).unpack()[0]
+            bus.signal_subscribe(
+                BUS, SESSION, None, path, None, Gio.DBusSignalFlags.NONE,
+                lambda _c, _s, _p, _i, member, params, *_: self._signal(
+                    member, params.unpack() if params is not None else None))
         except Exception as e:
             print(f"⚠️  Lock watch unavailable (logind): {e}")
             return False

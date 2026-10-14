@@ -126,6 +126,29 @@ def test_logind_reads_edges_not_levels():
     assert seen == [True, False], seen       # LockedHint: ignored, edges too
 
 
+def test_logind_subscribes_to_the_real_session_path():
+    """logind emits on /session/_31, never on the /session/auto alias."""
+    from gi.repository import Gio, GLib
+    subs = []
+
+    class Bus:
+        def call_sync(self, name, path, iface, method, args, *_):
+            assert (path, iface, method) == (logind.MANAGER, logind.BUS + ".Manager", "GetSession")
+            assert args.unpack() == ("auto",)
+            return GLib.Variant("(o)", ("/org/freedesktop/login1/session/_31",))
+
+        def signal_subscribe(self, sender, iface, member, path, *_):
+            subs.append((iface, path))
+
+    orig = Gio.bus_get_sync
+    Gio.bus_get_sync = lambda *a: Bus()
+    try:
+        assert logind.LogindAway().watch_lock(lambda _l: None)
+    finally:
+        Gio.bus_get_sync = orig
+    assert subs == [(logind.SESSION, "/org/freedesktop/login1/session/_31")], subs
+
+
 def test_stuck_lockedhint_never_silences_the_companion():
     """LockedHint goes true and never returns (niri + Noctalia): nothing happens,
     so there is nothing to get stuck — silence chosen stays, active stays."""
