@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import threading
 import time
 from collections import deque
@@ -678,6 +679,26 @@ class LiveTalk:
         self._gate = None
         self._held.clear()
 
+    def _open_mic(self, mono: np.ndarray) -> List[np.ndarray]:
+        """
+        ``TALK_ECHO_GUARD = "off"``: the microphone is never held back, nor
+        replaced by zeros. The server never says the user cut in, so a plain
+        detector at ``TALK_VAD_THRESHOLD`` (no calibration, no hold) is still
+        what empties the speakers — it only listens, it gates nothing.
+        """
+        cfg = config_module.CFG
+        if self._quiet():
+            self._gate = None
+            return [mono]
+        if self._gate is None:
+            self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD, headset=True)
+        self._gate.feed(mono)
+        if self._gate.speech_seconds >= cfg.TALK_BARGE_IN_MS / 1000.0:
+            print(f"✋ Cut off — {self._gate.loudest:.3f}")
+            self._gate = None
+            self._flush_audio()
+        return [mono]
+
     def _mic_chunks(self, mono: np.ndarray) -> List[np.ndarray]:
         """
         What of this captured chunk may reach the model.
@@ -700,6 +721,8 @@ class LiveTalk:
         sends nothing — never align the two; the self-check pins it.
         """
         cfg = config_module.CFG
+        if cfg.TALK_ECHO_GUARD == "off":
+            return self._open_mic(mono)
         now = time.monotonic()
         if not self._quiet():
             self._echo_until = now + ECHO_HANGOVER
@@ -711,7 +734,7 @@ class LiveTalk:
         if self._gate is None:
             self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
                                   margin=cfg.TALK_BARGE_IN_MARGIN,
-                                  headset=cfg.TALK_HEADSET)
+                                  headset=cfg.TALK_ECHO_GUARD == "headset")
         self._gate.feed(mono)
         if self._gate.speech_seconds < cfg.TALK_BARGE_IN_MS / 1000.0:
             self._held.append(mono)
@@ -1083,6 +1106,26 @@ if __name__ == "__main__":
     assert len(out) == 1 and len(out[0]) == len(echo) and not out[0].any(), \
         "a gated block was dropped: gpt-live-1 needs zeros, never nothing"
     talk._held.clear(); talk._gate = None; talk._flush_audio()
+
+    # Guard off: a reply is playing and the microphone still goes through as
+    # it is — never zeros — and talking over it empties the speakers.
+    saved_cfg = config_module.CFG
+    config_module.CFG = dataclasses.replace(saved_cfg, TALK_ECHO_GUARD="off")
+    try:
+        talk._last_audio = time.monotonic()
+        talk._chunks.append((bytes(4800), True)); talk._audible = 1
+        talk._queued = 4800
+        voice = np.full(480, 0.3, dtype=np.float32)
+        flushed = False
+        for _ in range(60):
+            out = talk._mic_chunks(voice)
+            assert len(out) == 1 and out[0] is voice, "guard off held the microphone"
+            flushed = flushed or not talk._chunks
+        assert flushed, "guard off: talking over the reply did not stop it"
+        assert talk._mic_chunks(voice)[0].any(), "guard off sent zeros"
+    finally:
+        config_module.CFG = saved_cfg
+        talk._gate = None; talk._flush_audio()
 
     # Deltas reach the bubble live and are concatenated exactly as received.
     talk._handle(_Event(type="session.input_transcript.delta", delta="je voudrais"))

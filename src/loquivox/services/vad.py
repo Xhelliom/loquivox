@@ -166,6 +166,16 @@ class VoiceActivityDetector:
         return self.elapsed - self._last_voice
 
 
+def reply_blocks_mic(barge_in: bool, guard: str) -> bool:
+    """Cascade: True when the reply is played blocking (mic closed). Never in ``off``."""
+    return not barge_in and guard != "off"
+
+
+def calibrates_echo(guard: str) -> bool:
+    """Only ``speakers`` measures the reply's echo; ``off`` and ``headset`` do not."""
+    return guard == "speakers"
+
+
 class EchoGate:
     """
     Tells someone speaking over a reply from the reply's own echo.

@@ -115,6 +115,7 @@ class SettingsDialog:
     _talk_phrase_check: Optional[Gtk.CheckButton] = None
     _talk_model_check: Optional[Gtk.CheckButton] = None
     _talk_depth: Optional[Gtk.ComboBoxText] = None
+    _talk_echo_guard: Optional[Gtk.ComboBoxText] = None
     _talk_semantic_check: Optional[Gtk.CheckButton] = None
     _talk_speak_check: Optional[Gtk.CheckButton] = None
     _talk_instructions: Optional[Gtk.TextView] = None
@@ -1768,6 +1769,21 @@ class SettingsDialog:
         ("deep", "Deep — pushes the reasoning further"),
     )
 
+    #: (id, label, when to pick it) for the anti-echo combo — CFG.TALK_ECHO_GUARD.
+    _ECHO_GUARDS = (
+        ("off", "Off (headset)",
+         "Nothing holds the microphone back: it always reaches the model, even "
+         "while it speaks. Pick this on a headset if it ignores you or you "
+         "cannot get a word in. Never on speakers: the reply would cut itself off."),
+        ("headset", "Headset, no calibration",
+         "Holds the microphone while a reply plays, and lets you in at the plain "
+         "voice threshold. For a headset whose own echo is measured wrongly "
+         "(typically USB)."),
+        ("speakers", "Speakers",
+         "Holds the microphone while a reply plays and measures the echo to tell "
+         "it from your voice. Pick this when the sound comes out of speakers."),
+    )
+
     _SEMANTIC_LABEL_BASE = "End my turns on meaning, not on silence (cascade)"
 
     @classmethod
@@ -1849,19 +1865,28 @@ class SettingsDialog:
         )
         body.pack_start(cls._talk_free_kbd_check, False, False, 0)
 
-        cls._talk_headset_check = Gtk.CheckButton(
-            label="The reply plays in my headset's earpieces")
-        cls._talk_headset_check.set_active(bool(config_module.CFG.TALK_HEADSET))
-        cls._talk_headset_check.set_tooltip_text(
-            "Skips the echo calibration: interrupting starts working at the "
-            "plain voice threshold instead of × the measured echo.\n\n"
-            "For a headset only — typically a USB one, where interrupting "
-            "otherwise needs shouting because your own voice lands in the "
-            "calibration window and becomes the bar. With the speakers on, "
-            "their echo would read as speech and every reply would cut "
-            "itself off."
-        )
-        body.pack_start(cls._talk_headset_check, False, False, 0)
+        cls._talk_echo_guard = Gtk.ComboBoxText()
+        for guard_id, label, _help in cls._ECHO_GUARDS:
+            cls._talk_echo_guard.append(guard_id, label)
+        cls._talk_echo_guard.set_active_id(
+            config_module.CFG.TALK_ECHO_GUARD
+            if config_module.CFG.TALK_ECHO_GUARD in dict((g[0], 1) for g in cls._ECHO_GUARDS)
+            else "speakers")
+        cls._field(body, "Anti-echo", cls._talk_echo_guard, labels)
+        guard_help = Gtk.Label()
+        guard_help.set_halign(Gtk.Align.START)
+        guard_help.set_xalign(0)
+        guard_help.set_line_wrap(True)
+        guard_help.set_max_width_chars(58)
+        guard_help.get_style_context().add_class("dim-label")
+        helps = {g[0]: g[2] for g in cls._ECHO_GUARDS}
+
+        def _show_help(combo: Gtk.ComboBoxText) -> None:
+            guard_help.set_markup(f"<small>{helps.get(combo.get_active_id(), '')}</small>")
+
+        cls._talk_echo_guard.connect("changed", _show_help)
+        _show_help(cls._talk_echo_guard)
+        body.pack_start(guard_help, False, False, 0)
 
         cls._talk_barge_margin = Gtk.SpinButton.new_with_range(1.0, 6.0, 0.1)
         cls._talk_barge_margin.set_digits(1)
@@ -2078,7 +2103,7 @@ class SettingsDialog:
         free_keyboard = bool(cls._talk_free_kbd_check.get_active())
         screenshot = bool(cls._talk_shot_check.get_active())
         auto_paste = bool(cls._talk_autopaste_check.get_active())
-        headset = bool(cls._talk_headset_check.get_active())
+        echo_guard = cls._talk_echo_guard.get_active_id() or "speakers"
         buffer = cls._talk_instructions.get_buffer()
         instructions = buffer.get_text(buffer.get_start_iter(),
                                        buffer.get_end_iter(), False).strip()
@@ -2096,7 +2121,7 @@ class SettingsDialog:
                 "screenshot_region": cls._talk_shot_region.get_active_id() or "window",
                 "screenshot_restore_clipboard": bool(cls._talk_shot_clip.get_active()),
                 "barge_in_margin": round(float(cls._talk_barge_margin.get_value()), 2),
-                "headset": headset,
+                "echo_guard": echo_guard,
                 "screenshot_cursor_px": int(cls._talk_shot_cursor.get_value()),
                 "screenshot_max_px": int(cls._talk_shot_max.get_value()),
             })

@@ -246,9 +246,12 @@ class RealtimeTalk:
         only after ``TALK_BARGE_IN_MS`` of speech above the echo. What was held
         back leaves with it, so the words that cut the assistant off are not
         lost — ``TALK_BARGE_IN_KEEP`` of them, the window the cascade replays
-        into its next turn. ``TALK_BARGE_IN = false`` never opens it.
+        into its next turn. ``TALK_BARGE_IN = false`` never opens it, and
+        ``TALK_ECHO_GUARD = "off"`` has no gate at all.
         """
         cfg = config_module.CFG
+        if cfg.TALK_ECHO_GUARD == "off":
+            return [mono]   # the server hears the user cut in and stops by itself
         now = time.monotonic()
         if not self._quiet():
             self._echo_until = now + ECHO_HANGOVER
@@ -260,7 +263,7 @@ class RealtimeTalk:
         if self._gate is None:
             self._gate = EchoGate(RATE, threshold=cfg.TALK_VAD_THRESHOLD,
                                   margin=cfg.TALK_BARGE_IN_MARGIN,
-                                  headset=cfg.TALK_HEADSET)
+                                  headset=cfg.TALK_ECHO_GUARD == "headset")
         self._gate.feed(mono)
         if self._gate.speech_seconds < cfg.TALK_BARGE_IN_MS / 1000.0:
             self._held.append(mono)
@@ -580,6 +583,13 @@ if __name__ == "__main__":
     try:
         assert not [c for _ in range(10) for c in gate._mic_chunks(voice)], \
             "half duplex still forwarded the room"
+    finally:
+        config_module.CFG = saved
+    # Guard off: no gate at all, the server is the one that hears the user cut in.
+    config_module.CFG = dataclasses.replace(saved, TALK_ECHO_GUARD="off")
+    try:
+        assert len([c for _ in range(10) for c in gate._mic_chunks(echo)]) == 10, \
+            "guard off held the microphone"
     finally:
         config_module.CFG = saved
     # Reply over: the gate reopens, and the next one starts from scratch.

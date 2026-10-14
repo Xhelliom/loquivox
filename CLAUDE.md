@@ -410,7 +410,8 @@ around:
   flushes the speakers. `push_result` reads an open user turn as "someone has
   the floor", the transcript being the only evidence available.
   **Rule: a gated microphone sends zeros, never nothing — `gpt-live-1`
-  requires it.** It needs a continuous input stream and paces its speech on
+  requires it.** (True in `headset` and `speakers`; in `echo_guard = "off"`
+  nothing is gated, so nothing is held or zeroed.) It needs a continuous input stream and paces its speech on
   it. Same spoken question, three real sessions: microphone flowing, an 18 s
   reply with no pause; gated blocks not sent at all, six stalls, five of them
   1.9 s — the voice waits for input, the gate reopens on its pause, it
@@ -718,7 +719,7 @@ loud speakers are half duplex, which is the failure to prefer — not being able
 to interrupt is a nuisance, being cut off mid-sentence every time is unusable —
 and acoustic echo cancellation (PipeWire's `libpipewire-module-echo-cancel`,
 selected as the microphone) is the only real fix. `TALK_BARGE_IN = false` makes
-the gate unconditional.
+the gate unconditional — except in `off`, see below.
 
 When the echo alone comes back above `EchoGate.ADVICE_GAIN` × the speech
 threshold, that fix is the *only* outcome available, so `services/talk.py`
@@ -735,9 +736,13 @@ reaches the speakers. On a headset it measures a quiet room, the bar stays at
 `TALK_VAD_THRESHOLD`, and that is why there is normally no "do you wear
 headphones" setting. The exception is a voice caught in that window — typically
 a USB headset, where interrupting the moment the reply starts reads as echo and
-the bar lands at twice the voice, so only shouting gets through. `TALK_HEADSET`
-(Settings → Talk, off by default) skips the calibration for exactly that case;
-it must stay off on speakers, where the echo would read as speech instead.
+the bar lands at twice the voice, so only shouting gets through. `TALK_ECHO_GUARD = "headset"`
+(Settings → Talk; default `speakers`) skips the calibration for exactly that case;
+it must not be used on speakers, where the echo would read as speech instead.
+`"off"` goes further: no gate at all in any engine — nothing is held back or
+replaced by zeros, the microphone goes to the model as is (`reply_blocks_mic` /
+`calibrates_echo` in `services/vad.py`, pinned by `tests/test_echo_guard.py`);
+barge-in is the server's (Realtime) or a plain `TALK_VAD_THRESHOLD` detector.
 
 What was heard when the user cut in is not thrown away: `snapshot_tail` keeps
 `TALK_BARGE_IN_KEEP` seconds and hands them to the next `_talk_listen` as its

@@ -330,13 +330,19 @@ class Config:
     # and nothing can interrupt it. Each reply prints the two numbers to set it
     # from: the echo peak and the loudest block heard.
     TALK_BARGE_IN_MARGIN: float = 2.0
-    # The reply plays in a headset's earpieces: skip the echo calibration and
-    # interrupt at the plain threshold. For the case auto-calibration gets
-    # wrong — a voice caught in the measurement window becomes the bar, and
-    # only shouting gets through (typical with a USB headset). Only set this
-    # when the assistant really speaks in the headset: with the speakers on,
-    # their echo reads as speech and every reply cuts itself off.
-    TALK_HEADSET: bool = False
+    # The echo guard, i.e. what stands between the microphone and the model
+    # while a reply plays:
+    #   "off"      — nothing. The microphone goes through as it is, never held
+    #                back nor replaced by zeros. Cutting in still works: the
+    #                Realtime server hears it itself, the cascade and Live
+    #                watch the plain TALK_VAD_THRESHOLD and empty the speakers.
+    #   "headset"  — the gate, without its calibration (the old TALK_HEADSET).
+    #   "speakers" — the gate, calibrated on the reply's own echo (the default).
+    # Old config.toml keys still read: `headset = true` is "headset", and
+    # `barge_in = false` (half duplex) still holds the microphone for a whole
+    # reply, unless echo_guard is "off".
+    TALK_ECHO_GUARD: str = "speakers"
+    TALK_ECHO_GUARDS: Tuple[str, ...] = ("off", "headset", "speakers")
     # How the conversation is held:
     #   "cascade"  — STT → LLM → TTS, every slot swappable (local or cloud)
     #   "realtime" — one OpenAI Realtime session, speech in and speech out:
@@ -965,8 +971,10 @@ def _build_config() -> Config:
         overrides["TALK_BARGE_IN_KEEP"] = float(talk["barge_in_keep"])
     if "barge_in_margin" in talk:
         overrides["TALK_BARGE_IN_MARGIN"] = float(talk["barge_in_margin"])
-    if "headset" in talk:
-        overrides["TALK_HEADSET"] = bool(talk["headset"])
+    if "headset" in talk and bool(talk["headset"]):
+        overrides["TALK_ECHO_GUARD"] = "headset"
+    if str(talk.get("echo_guard", "")).strip().lower() in base.TALK_ECHO_GUARDS:
+        overrides["TALK_ECHO_GUARD"] = str(talk["echo_guard"]).strip().lower()
     if str(talk.get("system_prompt", "")).strip():
         overrides["TALK_SYSTEM_PROMPT"] = str(talk["system_prompt"]).strip()
     if "chat_prompt" in talk and str(talk["chat_prompt"]).strip():
