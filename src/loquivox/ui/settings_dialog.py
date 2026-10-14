@@ -491,15 +491,15 @@ class SettingsDialog:
         cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
         cls._field(body, "Bubble style", cls._comp_style, labels)
 
-        cls._comp_duck_ai = Gtk.CheckButton(label="Lower the music when the companion speaks")
+        cls._comp_duck_ai = Gtk.CheckButton(label="Baisser les autres sons quand le compagnon parle")
         cls._comp_duck_ai.set_active(bool(cfg.COMPANION_DUCK_ON_ASSISTANT))
         cls._field(body, "Music", cls._comp_duck_ai, labels)
-        cls._comp_duck_user = Gtk.CheckButton(label="Lower the music when I speak")
+        cls._comp_duck_user = Gtk.CheckButton(label="Baisser les autres sons quand je parle")
         cls._comp_duck_user.set_active(bool(cfg.COMPANION_DUCK_ON_USER))
         cls._field(body, "", cls._comp_duck_user, labels)
 
-        cls._note(body, "The music is only lowered with <i>media = duck</i> "
-                        "(Appearance tab).")
+        cls._note(body, "Les autres sons ne baissent qu'avec <i>media = duck</i> "
+                        "(onglet Apparence).")
         cls._note(body, "The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>); it applies right away.")
         cls._comp_status = Gtk.Label()
@@ -1178,7 +1178,7 @@ class SettingsDialog:
         media_combo = Gtk.ComboBoxText()
         for mid, label in (("off", "Leave it alone"),
                            ("resume", "Resume playback afterwards"),
-                           ("duck", "Lower the volume, then restore and resume")):
+                           ("duck", "Baisser tous les autres sons, puis les remettre et reprendre")):
             media_combo.append(mid, label)
         media_combo.set_active_id(config_module.CFG.MEDIA)
         cls._field(body, "While recording", media_combo, labels)

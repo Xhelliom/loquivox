@@ -49,13 +49,13 @@ language = ""
 # Leave "" to use the system default input. An unknown/disconnected name falls
 # back to the default.
 input_device = ""
-# Music while the microphone is open (drives the players via `playerctl`):
+# Other sounds while the microphone is open (`playerctl` only presses play again):
 #   "off"    — leave it alone.
 #   "resume" — press play again afterwards. A classic Bluetooth headset switches
 #              to its headset profile when its microphone opens; the stereo
 #              output vanishes for an instant and every player pauses itself,
 #              then never resumes. Nothing can prevent that, this repairs it.
-#   "duck"   — lower the players' volume to `media_duck_volume` meanwhile, and
+#   "duck"   — lower EVERY other audio stream (not Loquivox's) to `media_duck_volume`, and
 #              restore it (and resume) afterwards. Only visible where the music
 #              survives the microphone: speakers, a wired headset, or a
 #              Bluetooth LE Audio (LC3) headset, which carries stereo and a
