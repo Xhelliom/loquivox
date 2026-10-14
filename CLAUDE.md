@@ -704,7 +704,7 @@ Unlock signals **only**: paired by construction. `LockedHint` is ignored, edges
 included — on niri + Noctalia it sticks at "yes" unlocked, so a true edge with
 no false one would leave the "lock" reason, and the silence, stuck until F7) and, on Wayland, `watch_idle` through swayidle
 (ext-idle-notify, `[companion] silence_idle_min`, startup-only; X11 has no idle
-fallback). `tests/test_away.py`. **Not verified on the real machine**: the
+fallback). `tests/test_away.py`. **Noctalia 5.2.1** is a native binary (not quickshell; `noctalia msg`) whose strings show it *sets* the logind `LockedHint` (`SetLockedHint`) and exposes no lock-state query: its own lock (idle 600 s, Super+L) is seen by neither Lock/Unlock nor, reliably, by the hint — hence the idle fallback, default 10 min (swayidle start and `idle` line verified for real; `active` needs input). **Not verified on the real machine**: the
 niri + Noctalia trial is the operator's to do — run `busctl --system monitor
 org.freedesktop.login1` through a lock then an unlock to see which signals
 Noctalia really emits; if it emits no Lock/Unlock, only the idle fallback works.

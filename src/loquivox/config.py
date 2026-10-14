@@ -431,7 +431,7 @@ class Config:
     COMPANION_SILENCE_ON_LOCK: bool = True
     #: minutes without input before the same silence; 0 = off. The fallback for a
     #: shell whose lock screen tells nobody. Read at startup (the watcher is spawned once).
-    COMPANION_SILENCE_IDLE_MIN: int = 15
+    COMPANION_SILENCE_IDLE_MIN: int = 10
     #: Said to the companion, these (short, whole-utterance) close the cloud
     #: session with no reply. Accents and punctuation are ignored.
     COMPANION_STOP_PHRASES: Tuple[str, ...] = (
