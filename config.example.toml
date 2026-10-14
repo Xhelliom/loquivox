@@ -476,7 +476,7 @@ chat_auto_hide = 3
 # [[rules]]
 # name = "save the lights"
 # when = "companion.session_opened"
-# do = { server = "home", tool = "call_service", args = { domain = "scene", service = "create", data = { scene_id = "before_loquivox", snapshot_entities = ["light.desk"] } } }
+# do = { server = "home", tool = "call_service", args = { domain = "scene", service = "create", data = { scene_id = "before_loquivox", snapshot_entities = ["light.desk_lamp", "light.desk_strip"] } } }
 #
 # [[rules]]
 # name = "blue while it speaks"
@@ -488,6 +488,9 @@ chat_auto_hide = 3
 # name = "back as before"
 # when = "companion.session_closed"
 # do = { server = "home", tool = "call_service", args = { domain = "scene", service = "turn_on", entity_id = "scene.before_loquivox" } }
-# # Some lights (a group, one with an effect) cannot be restored from a
-# # snapshot — the server answers an error. Then restore with explicit values:
-# # turn_on with rgb_color / brightness set to what the light was.
+# # Snapshot the lights themselves, never a light *group* (light.desk made of
+# # the two above): Home Assistant cannot restore a scene made from a group and
+# # answers an error. Tried for real on a group of WLED and Hue lamps: the
+# # snapshot of its members brought colour, brightness and effect back; the
+# # snapshot of the group failed (HTTP 500). If a lamp still cannot be restored,
+# # use turn_on with explicit rgb_color / brightness instead.
