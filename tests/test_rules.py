@@ -46,7 +46,7 @@ def _wait(cond, timeout=5.0):
 
 
 def _reset():
-    rules._slots.clear(), rules._last.clear(), rules._warned.clear()
+    rules._pending.clear(), rules._ended.clear(), rules._last.clear(), rules._warned.clear()
 
 
 def test_substitute_and_normalize():
@@ -87,9 +87,11 @@ def test_burst_is_one_in_flight_plus_the_last():
     _reset()
     _cfg([{"when": "companion.state", "name": "burst", "do": {"server": "s", "tool": "t", "args": {"i": "{i}"}}}])
     began = time.monotonic()
-    for i in range(30):
+    rules.on_event("companion.state", {"state": "x", "i": 0})
+    assert _wait(lambda: seen)                # the first call is in flight…
+    for i in range(1, 30):                    # …when the rest of the burst lands
         rules.on_event("companion.state", {"state": "x", "i": i})
-    assert time.monotonic() - began < 0.1, "emitting must never wait for an action"
+    assert time.monotonic() - began < 0.5, "emitting must never wait for an action"
     assert _wait(lambda: len(seen) == 2 and rules._last["burst"][0]), seen
     time.sleep(0.5)
     assert seen[0] == 0 and seen[1] == 29 and len(seen) == 2, seen
@@ -107,6 +109,28 @@ def test_min_gap_between_runs():
     assert _wait(lambda: len(stamps) == 4)
     assert stamps[2][0] - stamps[1][0] >= rules.MIN_GAP - 0.01, stamps
     print("✓ two runs of a rule are MIN_GAP apart")
+
+
+def test_restore_never_overtakes_a_slow_call():
+    order = []
+
+    def slow(s, t, a):
+        order.append(t + ":start")
+        time.sleep(0.4 if t == "blue" else 0)
+        order.append(t + ":end")
+        return "ok"
+    rules._invoke = slow
+    _reset()
+    _cfg([{"when": "companion.state", "if": {"state": "speaking"}, "name": "blue",
+           "do": {"server": "s", "tool": "blue"}},
+          {"when": "companion.session_closed", "name": "back",
+           "do": {"server": "s", "tool": "back"}}])
+    rules.on_event("companion.state", {"state": "speaking"})
+    assert _wait(lambda: order)
+    rules.on_event("companion.session_closed", {"cause": "key"})
+    assert _wait(lambda: len(order) == 4), order
+    assert order == ["blue:start", "blue:end", "back:start", "back:end"], order
+    print("✓ a slow `speaking` call ends before the restore starts")
 
 
 def test_bus_survives_a_subscriber_that_raises():

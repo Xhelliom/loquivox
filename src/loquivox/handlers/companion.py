@@ -233,11 +233,13 @@ class Companion:
         self._room, self._room_blocks = 0.0, 0
         self.bubble.pulse()                # heard: "I'm listening"
         self._set_state("cloud")     # red from the capture on: the cost is visible
+        opened = False
         try:
             self._look(session)            # before the mic is released and the cloud opens
             self.presence.release()
             print("🫧 Companion: session open")
             events.emit("companion.session_opened", cause=cause)
+            opened = True
             self._converse(session, self.presence.take_tail())
         except Exception as e:
             print(f"⚠️  Companion session failed: {e}")
@@ -250,7 +252,8 @@ class Companion:
                 STATE.talk_click.get_nowait()
             self.bubble.set_level(0.0)
             print("🫧 Companion: session closed")
-            events.emit("companion.session_closed", cause=cause)
+            if opened:     # a restore rule must not replay a snapshot that was never taken
+                events.emit("companion.session_closed", cause=cause)
             if self.presence_on():
                 self.presence.resume()
             self._set_state(self._standby())

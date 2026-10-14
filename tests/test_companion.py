@@ -396,6 +396,17 @@ def test_the_session_publishes_its_events():
         c, _ = _make()
         c.wake(force=True, cause="key")
         c.on_level("out", 0.3)      # outside a session: nothing
+        c2, _ = _make(session=lambda s, prefix=(): c2.on_level("out", 0.3))
+        seen.clear()
+        c2.wake(force=True, cause="key")
+    finally:
+        events._subscribers.remove(sub)
+    assert ("companion.state", {"state": "speaking"}) in seen, seen
+    seen[:] = seen[:0]
+    events.subscribe(sub)
+    try:
+        c, _ = _make()
+        c.wake(force=True, cause="key")
     finally:
         events._subscribers.remove(sub)
     assert seen == [("companion.state", {"state": "cloud"}),

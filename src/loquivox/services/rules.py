@@ -15,10 +15,11 @@ a list: the actions run in order. They go straight to the MCP client
 them. "Back to how it was" is configuration, not code: one rule saves, another
 restores.
 
-**Never on the voice's path.** ``on_event`` only matches and queues; each rule
-has its own thread and a one-place slot. While an action runs, newer events
-replace the waiting one (a burst is at most one call in flight plus the last
-event), and two runs of a rule are ``MIN_GAP`` apart. A server that is absent
+**Never on the voice's path.** ``on_event`` only matches and queues; one worker
+runs every rule, in the order their events arrived (a restore never overtakes
+the slow call it follows). Each rule has a one-place slot: while an action
+runs, newer events replace the waiting one (a burst is at most one call in
+flight plus the last event), and two runs of a rule are ``MIN_GAP`` apart. A server that is absent
 or an action that fails is one warning per distinct error, then silence; the
 last outcome is kept for Settings → Plugins → Rules.
 
@@ -33,7 +34,6 @@ import json
 import re
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
@@ -80,16 +80,13 @@ def substitute(value: Any, data: Dict[str, Any]) -> Any:
 
 
 # --------------------------------------------------------------------- engine
-@dataclass
-class _Slot:
-    """One rule's queue: room for the latest event, one thread while it has work."""
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    pending: Optional[tuple] = None
-    running: bool = False
-    last: float = float("-inf")     # monotonic end of the last run
-
-
-_slots: Dict[str, _Slot] = {}
+#: rule name → (arrival number, rule, data): the latest event waiting for each rule
+_pending: Dict[str, tuple] = {}
+#: rule name → monotonic end of its last run
+_ended: Dict[str, float] = {}
+_cond = threading.Condition()
+_seq = 0
+_worker: Optional[threading.Thread] = None
 #: rule name → (ok, time.time(), detail): the last outcome, for Settings
 _last: Dict[str, tuple] = {}
 _warned: set = set()
@@ -115,37 +112,41 @@ def _run(rule: Dict[str, Any], data: Dict[str, Any]) -> None:
             print(f"⚠️  Rule {rule['name']}: {why}")
 
 
-def _drain(slot: _Slot) -> None:
+def _drain() -> None:
+    """The one worker: jobs leave in the order their events arrived, whatever the rule."""
     while True:
-        gap = MIN_GAP - (time.monotonic() - slot.last)
-        if gap > 0:
-            time.sleep(gap)         # events arriving now replace the waiting one
-        with slot.lock:
-            job, slot.pending = slot.pending, None
-            if job is None:
-                slot.running = False
-                return
-        _run(*job)
-        slot.last = time.monotonic()
+        with _cond:
+            while not _pending:
+                _cond.wait()
+            name = min(_pending, key=lambda n: _pending[n][0])
+            gap = MIN_GAP - (time.monotonic() - _ended.get(name, float("-inf")))
+            if gap > 0:
+                _cond.wait(gap)     # events arriving now replace the waiting one
+                continue
+            _, rule, data = _pending.pop(name)
+        _run(rule, data)
+        with _cond:
+            _ended[name] = time.monotonic()
 
 
 def on_event(name: str, data: Dict[str, Any]) -> None:
     """Subscriber: match, queue, return. Called on the emitter's thread."""
+    global _seq, _worker
     for rule in rules():
         if (not rule["enabled"] or rule["when"] != name
                 or any(data.get(k) != v for k, v in rule["if"].items())):
             continue
-        slot = _slots.setdefault(rule["name"], _Slot())
-        with slot.lock:
-            slot.pending = (rule, dict(data))
-            if slot.running:
-                continue
-            slot.running = True
-        threading.Thread(target=_drain, args=(slot,), daemon=True, name="rule").start()
+        with _cond:
+            _seq += 1
+            _pending[rule["name"]] = (_seq, rule, dict(data))
+            if _worker is None or not _worker.is_alive():
+                _worker = threading.Thread(target=_drain, daemon=True, name="rules")
+                _worker.start()
+            _cond.notify()
 
 
 def start() -> None:
-    """Listen to the bus, and bring up the servers the rules call."""
+    """Subscribe to the bus (the servers are brought up by the app, not here)."""
     events.subscribe(on_event)
 
 
