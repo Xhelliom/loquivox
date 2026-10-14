@@ -637,8 +637,8 @@ every tool of every server declared under `[mcp.servers.<name>]` (`CFG.MCP_SERVE
 delegations like `write_text`; `tests/test_plugins.py` drives a real stdio test
 server (`tests/mcp_fixture_server.py`) through all four routes. Servers live on
 one asyncio loop in a daemon thread, started by `app._start_mcp` beside the
-keyboard (or at first use — importing the module waits `CONNECT_TIMEOUT` for
-them) and ended in `_run`'s `finally`. A server that is absent, slow or
+keyboard (or at first use — importing the module starts them, never waits: it may run
+on the GTK thread) and ended in `_run`'s `finally`. A server that is absent, slow or
 crashing is `state="failed"` plus a warning, never an exception; a server
 switched off in Settings is stopped and its tools' `enabled()` goes False.
 Traps: the child gets an allow-listed environment (`env=` *adds* to it), and
@@ -653,7 +653,10 @@ and no session means no yes. What a tool returns goes through `RESULT_FRAME`
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
 `config_io.update_section` takes dotted sections for the nested table). Not
 done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
-mid-session (Apply in Settings restarts a failed one).
+mid-session. `sync()` relaunches only a server whose config or `enabled` changed (a
+failed one with the same config stays failed: switch it off and on), cancels one still
+`starting` when it stops it, and Settings runs it on a thread — Apply never freezes GTK.
+A pending yes is keyed (session, server, tool, arguments): it never crosses sessions.
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

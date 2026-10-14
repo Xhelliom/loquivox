@@ -33,6 +33,7 @@ import asyncio
 import json
 import re
 import threading
+import weakref
 from asyncio import run_coroutine_threadsafe as _submit  # bound now: the engines' tests patch asyncio's
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -81,8 +82,9 @@ class _Server:
 _servers: Dict[str, _Server] = {}
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _lock = threading.Lock()
-#: (tool, arguments) → how many times the user had spoken when we asked
-_pending: Dict[str, int] = {}
+#: session → {(server, tool, arguments): how many times the user had spoken
+#: when we asked}; a question belongs to the session that heard it
+_pending: "weakref.WeakKeyDictionary[Any, Dict[Any, int]]" = weakref.WeakKeyDictionary()
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -136,13 +138,17 @@ async def _serve(s: _Server) -> None:
                 cursor = page.next_cursor
                 if not cursor:
                     break
-    except Exception as e:                  # absent, crashed, slow: a warning
+    except BaseException as e:              # absent, crashed, slow, or cancelled
         try:
             await client.__aexit__(None, None, None)
         except BaseException:
             pass
-        return _fail(s, _why(e))
+        if not isinstance(e, Exception):    # cancelled: _stop already said "off"
+            raise
+        return _fail(s, _why(e)) if s.state == "starting" else None
     try:
+        if s.state != "starting":           # stopped while connecting: leave no trace
+            return
         s.client, s.tools, s.state, s.error = client, tools, "up", ""
         for tool in tools:
             register(_plugin(s, tool))
@@ -184,14 +190,15 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
         args = dict(args)
         confirmed = bool(args.pop("confirmed", False))
         if acting:
-            key = tool.name + json.dumps(args, sort_keys=True, default=str)
+            key = (s.name, tool.name, json.dumps(args, sort_keys=True, default=str))
             session = STATE.talk_session
+            asked = _pending.setdefault(session, {}) if session is not None else {}
             spoken = session.user_turns if session is not None else 0
-            if not (confirmed and session is not None and spoken > _pending.get(key, spoken)):
-                _pending[key] = spoken
+            if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
+                asked[key] = spoken
                 return _Ask(ASK.format(tool=tool.name, server=s.name,
                                        what=json.dumps(args, ensure_ascii=False)))
-            del _pending[key]
+            del asked[key]
         return _call(s, tool.name, args)
 
     def message(args: Dict[str, Any], result: str) -> Dict[str, str]:
@@ -222,9 +229,12 @@ def _wanted(name: str) -> bool:
 
 def sync(timeout: float = 0.0) -> None:
     """
-    Make the running servers match config.toml: start what is enabled and not
-    running (a failed one is retried), stop what is off or gone. Waits up to
-    ``timeout`` seconds in total for the new ones to answer — 0 never blocks.
+    Make the running servers match config.toml: start what is enabled and new
+    or changed, stop what is off or gone. A server that failed with an
+    unchanged config is not retried (switch it off and on). Waits up to
+    ``timeout`` seconds *per* starting server for it to answer — 0 never waits
+    for one (stopping a running server may still take a few seconds, so call
+    it off the GTK thread).
     """
     declared = config_module.CFG.MCP_SERVERS
     for name in [n for n in _servers if n not in declared
@@ -233,7 +243,7 @@ def sync(timeout: float = 0.0) -> None:
     started = []
     for name, cfg in declared.items():
         s = _servers.get(name)
-        if not cfg.get("enabled", True) or (s and s.state in ("starting", "up") and s.cfg == cfg):
+        if not cfg.get("enabled", True) or (s and s.cfg == cfg):
             continue
         if s:
             _stop(s)
@@ -258,6 +268,8 @@ async def _guarded(s: _Server) -> None:
 
 
 def _stop(s: _Server) -> None:
+    if s.state == "starting" and _loop is not None:    # still connecting: cancel the task
+        _loop.call_soon_threadsafe(lambda: s.future and s.future.cancel())
     if s.state == "up" and s.stop is not None and _loop is not None:
         _loop.call_soon_threadsafe(s.stop.set)
         for _ in range(100):        # ponytail: bounded wait, 5 s then the daemon thread reaps it
@@ -327,7 +339,7 @@ def _settings(dialog, vbox, labels) -> None:
             status_label.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
-        sync(CONNECT_TIMEOUT)
+        threading.Thread(target=sync, daemon=True, name="mcp-sync").start()  # off the GTK thread
         status_label.set_markup("<small>✓ Servers updated — reopen Settings to see their state.</small>")
 
     dialog._actions(body, _apply, status_label)
@@ -335,5 +347,5 @@ def _settings(dialog, vbox, labels) -> None:
 
 # A card, no tool: not enabled, so no session ever offers it.
 register(Plugin(name="mcp", enabled=lambda: False, settings=_settings))
-# First use waits for the servers start() began (or begins them).
-sync(CONNECT_TIMEOUT)
+# Begin them if nobody has, without waiting: this import may run on the GTK thread.
+sync(0.0)

@@ -118,6 +118,66 @@ def test_switching_a_server_off_takes_its_tools_away():
     print("✓ on/off per server starts and stops it")
 
 
+def test_a_yes_does_not_outlive_its_session():
+    plugin = _plugin("mcp_fx_delete_all")
+    old = STATE.talk_session = TalkSession()
+    plugin.run({"what": "x"})                      # asked in the first session
+    old.add_user("oui")
+    new = STATE.talk_session = TalkSession()        # the question was never put here
+    new.add_user("bonjour")
+    assert "deleted" not in plugin.run({"what": "x", "confirmed": True}), \
+        "a question asked in a previous session was honoured in the next one"
+    STATE.talk_session = None
+    print("✓ a pending confirmation belongs to its session")
+
+
+def test_two_servers_do_not_share_a_confirmation():
+    _servers(fx=FIXTURE, fy=FIXTURE)
+    mcp_tools.sync(timeout=20)
+    session = STATE.talk_session = TalkSession()
+    _plugin("mcp_fx_delete_all").run({"what": "x"})
+    session.add_user("oui")
+    assert "deleted" not in _plugin("mcp_fy_delete_all").run({"what": "x", "confirmed": True}), \
+        "a yes for one server's tool was used by another's"
+    STATE.talk_session = None
+    print("✓ a confirmation is per server")
+
+
+def test_apply_never_blocks_nor_retries_a_failed_server():
+    ghost = {"command": "/nonexistent/binary"}
+    _servers(ghost=ghost)
+    mcp_tools.sync(timeout=20)
+    first = mcp_tools._servers["ghost"]
+    assert first.state == "failed"
+    t = time.monotonic()
+    mcp_tools.sync(0)
+    assert time.monotonic() - t < 1.0
+    assert mcp_tools._servers["ghost"] is first, "an unchanged failed server was relaunched"
+    _servers(ghost={**ghost, "args": ["x"]})
+    mcp_tools.sync(0)
+    assert mcp_tools._servers["ghost"] is not first, "a changed config must relaunch"
+    print("✓ sync(0) does not wait and only relaunches what changed")
+
+
+def test_stopping_a_starting_server_cancels_it():
+    slow = {**FIXTURE, "command": sys.executable, "args": [
+        "-c", "import time, runpy; time.sleep(2); "
+              f"runpy.run_path({str(ROOT / 'tests/mcp_fixture_server.py')!r}, run_name='__main__')"]}
+    _servers(slow=slow)
+    mcp_tools.sync(0)
+    s = mcp_tools._servers["slow"]
+    time.sleep(0.5)
+    assert s.state == "starting"
+    _servers()
+    mcp_tools.sync(0)                               # no longer declared: stopped
+    time.sleep(4)
+    assert s.state == "off", s.state
+    assert s.future.done(), "the task of a stopped, starting server is still running"
+    assert not any(p.name.startswith("mcp_slow_") for p in plugins.all_plugins()), \
+        "a server stopped while starting registered its tools"
+    print("✓ a server stopped while starting is cancelled")
+
+
 def test_the_toml_schema_is_read():
     import tomllib
     data = tomllib.loads('[mcp.servers.a]\ncommand = "x"\nargs = ["y"]\n'
@@ -134,7 +194,11 @@ if __name__ == "__main__":
         test_a_declared_server_exposes_its_tools()
         test_a_result_is_data_not_an_instruction()
         test_a_tool_that_acts_waits_for_a_spoken_yes()
+        test_a_yes_does_not_outlive_its_session()
         test_a_missing_or_crashing_server_is_a_warning()
+        test_two_servers_do_not_share_a_confirmation()
+        test_apply_never_blocks_nor_retries_a_failed_server()
+        test_stopping_a_starting_server_cancels_it()
         test_switching_a_server_off_takes_its_tools_away()
         test_the_toml_schema_is_read()
     finally:
