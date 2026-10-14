@@ -211,28 +211,57 @@ def clamp(pos: Tuple[int, int], screen: Tuple[int, int]) -> Tuple[int, int]:
 
 
 class Drag:
-    """Pointer → margins, no GTK. Press/motion coordinates are surface-relative,
-    so a motion event is only trustworthy once the surface has been committed at
-    its last placement (``settled``); before that it still carries the old
-    origin and would add the whole gap a second time."""
+    """Pointer → margins, no GTK. The travel is always measured from the press:
+    pos = pos at press + (pointer - press point), neither ever updated.
+
+    What the pointer coordinates are relative to depends on the compositor.
+    ``"click"``: the surface as it was at the press (niri; X11 root coords) —
+    travel is ``p - press``. ``"surface"``: the surface as it is now, so a move
+    we applied shows up as a jump back — travel is ``p - press + moved``.
+    Pass ``mode`` when known (X11); otherwise the first step is DECIDE_AT px
+    (both readings agree before anything has moved) and the next event tells
+    them apart: it either followed the pointer or stayed near the press."""
+
+    DECIDE_AT = 16   # px of first step: far enough apart to tell the readings
 
     def __init__(self) -> None:
         self.press: Optional[Tuple[float, float, Tuple[int, int]]] = None
         self.dragging = False
+        self.mode: Optional[str] = None
 
-    def start(self, x: float, y: float, pos: Tuple[int, int]) -> None:
-        self.press, self.dragging = (x, y, pos), False
+    def start(self, x: float, y: float, pos: Tuple[int, int], mode: Optional[str] = None) -> None:
+        self.press, self.dragging, self.mode = (x, y, pos), False, mode
+        self._moved = (0.0, 0.0)    # surface displacement applied so far, screen axes
 
-    def motion(self, x: float, y: float, settled: bool):
+    def motion(self, x: float, y: float, screen: Tuple[int, int]):
         """New (margin-right, margin-top) and the (dx, dy) travelled, or None."""
-        if self.press is None or not settled:
+        if self.press is None:
             return None
         px, py, (mr, mt) = self.press
-        dx, dy = x - px, y - py
-        if not self.dragging and math.hypot(dx, dy) < DRAG_THRESHOLD:
+        mx, my = self._moved
+        a = (x - px, y - py)                  # coordinates relative to the press
+        b = (a[0] + mx, a[1] + my)            # relative to the surface as moved
+        moved = math.hypot(mx, my)
+        if self.mode is None:
+            if not moved:
+                # Nothing moved yet, so both readings agree: wait for a first
+                # step big enough to tell them apart on the next event.
+                if math.hypot(*a) < self.DECIDE_AT:
+                    self.dragging = self.dragging or math.hypot(*a) >= DRAG_THRESHOLD
+                    return None
+            else:
+                # We moved the surface by `moved`. Coordinates tied to the press
+                # have followed the pointer (≈ moved along that direction);
+                # coordinates tied to the surface have stayed near the press (≈ 0).
+                along = (a[0] * mx + a[1] * my) / moved
+                self.mode = "click" if along >= moved / 2 else "surface"
+        dx, dy = b if self.mode == "surface" else a
+        self.dragging = self.dragging or math.hypot(dx, dy) >= DRAG_THRESHOLD
+        if not self.dragging:
             return None
-        self.dragging = True
-        return (mr - dx, mt + dy), (dx, dy)
+        pos = clamp((round(mr - dx), round(mt + dy)), screen)
+        self._moved = (mr - pos[0], pos[1] - mt)
+        return pos, (dx, dy)
 
 
 class CompanionBubble(Gtk.Window):
@@ -248,7 +277,6 @@ class CompanionBubble(Gtk.Window):
         self._pos = load_position()
         self._press = None       # (x, y, pos) while the left button is down
         self._drag = Drag()
-        self._settle = 0        # frames to wait after a move before trusting motion
         self._hover = False
         self._level = 0.0        # raw level, written from any thread
         self._loud = False
@@ -439,7 +467,9 @@ class CompanionBubble(Gtk.Window):
 
     def _on_press(self, _w, ev) -> bool:
         if ev.button == 1:
-            self._drag.start(ev.x, ev.y, self._pos)
+            # X11: root coordinates, which do not move with the window.
+            x, y = (ev.x, ev.y) if self._wl else (ev.x_root, ev.y_root)
+            self._drag.start(x, y, self._pos, None if self._wl else "click")
             self._press = True
             self._rest_scale()
         elif ev.button == 3:
@@ -449,28 +479,14 @@ class CompanionBubble(Gtk.Window):
     def _on_motion(self, _w, ev) -> bool:
         if self._press is None:
             return False
-        step = self._drag.motion(ev.x, ev.y, self._settle == 0)
+        x, y = (ev.x, ev.y) if self._wl else (ev.x_root, ev.y_root)
+        step = self._drag.motion(x, y, self._screen_size())
         if step is None:
             return True
-        # The new margins are only committed on a later frame: until then,
-        # events still use the old origin and are ignored (see Drag).
-        # The press anchor stays: once committed, the bubble is under the
-        # pointer again, so (x - press x) is the travel since the last step.
         self._pos, (dx, dy) = step
-        self._pos = (round(self._pos[0]), round(self._pos[1]))
-        self._press_pos_update()
+        self._apply_position()
         self._stretch_toward(dx, dy)
         return True
-
-    def _press_pos_update(self) -> None:
-        self._apply_position()
-        self._drag.press = (*self._drag.press[:2], self._pos)
-        self._settle = 2
-        self.add_tick_callback(self._on_settle)
-
-    def _on_settle(self, _w, _clock) -> bool:
-        self._settle = max(0, self._settle - 1)
-        return self._settle > 0
 
     def _stretch_toward(self, dx: float, dy: float) -> None:
         """Lean into the motion: up to 8 % along the direction of travel."""

@@ -85,15 +85,14 @@ from types import SimpleNamespace as NS
 
 saved, clicks = [], []
 cb.save_position = saved.append
-bubble = NS(_on_click=lambda: clicks.append(1), _press=None, _drag=cb.Drag(), _settle=0, _pos=(24, 24),
-            _screen_size=lambda: (1920, 1080), add_tick_callback=lambda f: None, _on_settle=None,
+bubble = NS(_on_click=lambda: clicks.append(1), _press=None, _drag=cb.Drag(), _wl=True, _pos=(24, 24),
+            _screen_size=lambda: (1920, 1080), 
             _apply_position=lambda: None, _rest_scale=lambda: None, _stretch_toward=lambda dx, dy: None,
             _sp={"stretch": cb.Spring()}, _popup_menu=lambda ev: clicks.append("menu"))
 bubble._on_press = lambda ev: cb.CompanionBubble._on_press(bubble, None, ev)
 bubble._on_motion = lambda ev: cb.CompanionBubble._on_motion(bubble, None, ev)
-bubble._press_pos_update = lambda: cb.CompanionBubble._press_pos_update(bubble)
 bubble._on_release = lambda ev: cb.CompanionBubble._on_release(bubble, None, ev)
-ev = lambda b, x=10, y=10: NS(button=b, x=x, y=y)
+ev = lambda b, x=10, y=10: NS(button=b, x=x, y=y, x_root=x, y_root=y)
 
 bubble._on_press(ev(1)); bubble._on_release(ev(1))
 assert clicks == [1] and not saved, (clicks, saved)
@@ -116,17 +115,32 @@ assert iv("silent", moving=True, loud=False, anim=True, visible=True) == 16
 assert iv("idle", moving=True, loud=True, anim=True, visible=False) == 0
 assert iv("speaking", moving=True, loud=True, anim=False, visible=True) == 0
 
-# Drag: events arriving before the new margins are committed are ignored, so the
-# bubble follows the pointer 1:1 instead of adding the gap once per event.
+# Drag: pos = pos at press + (pointer - press point), whatever the coordinates
+# are relative to. Simulate a pointer moving right 3 px per event, 60 events
+# (the first few events may be misread while the surface has barely moved;
+# the formula is absolute, so the position converges once the mode is known).
+SCREEN = (3840, 2160)
+def run(mode_of_coords, forced=None):
+    d = cb.Drag(); d.start(40, 40, (1000, 100), forced)
+    moved, pos = 0, (1000, 100)
+    for i in range(1, 61):
+        t = 3 * i                               # real pointer travel, px
+        x = 40 + t if mode_of_coords == "click" else 40 + t - moved
+        step = d.motion(x, 40, SCREEN)
+        if step is None:
+            continue
+        pos, _ = step
+        moved = 1000 - pos[0]                    # surface displacement, screen axes
+    assert pos[0] == 1000 - t, (mode_of_coords, pos)   # bubble under the pointer
+    assert d.mode == (forced or mode_of_coords), d.mode
+    return pos
+assert run("click") == (820, 100)
+assert run("surface") == (820, 100)
+assert run("click", "click") == (820, 100)       # X11: root coordinates
 d = cb.Drag(); d.start(40, 40, (100, 100))
-assert d.motion(41, 41, True) is None and not d.dragging, "below threshold = a click"
-(pos, (dx, dy)) = d.motion(60, 50, True)
-assert pos == (80, 110) and (dx, dy) == (20, 10), pos
-d.press = (*d.press[:2], pos)
-assert d.motion(60, 50, False) is None, "stale origin: ignored"
-pos2, _ = d.motion(70, 50, True)       # settled; surface under pointer again
-assert pos2 == (50, 120), pos2
-assert cb.clamp((3804, 2124), (3840, 2160)) == (3840 - cb.SIZE, 2160 - cb.SIZE)
+assert d.motion(41, 41, SCREEN) is None and not d.dragging, "below threshold = a click"
+d = cb.Drag(); d.start(40, 40, (10, 10), "click")
+assert d.motion(500, 40, SCREEN)[0] == (0, 10), "clamped inside the screen"
 print("drag ok")
 
 print("✓ companion bubble OK")
