@@ -42,7 +42,7 @@ import base64
 import threading
 import time
 from collections import deque
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -193,6 +193,9 @@ class LiveTalk:
         #: reads. Starts in the past: a session that has said nothing is not
         #: mid-sentence.
         self._last_audio: float = 0.0
+        #: ``(who, level 0..1)`` for the companion's bubble: "in" = microphone,
+        #: "out" = what the speakers are playing
+        self.on_level: Optional[Callable[[str, float], None]] = None
         self._gate: Optional[EchoGate] = None
         self._held: List[np.ndarray] = []
         self._echo_until: float = 0.0
@@ -729,6 +732,8 @@ class LiveTalk:
         if self._conn is None or self._stop or not self._started.is_set():
             return
         mono = indata[:, 0].copy()
+        if self.on_level:
+            self.on_level("in", min(1.0, float(np.sqrt(np.mean(mono ** 2))) * 6))
         try:
             if STATE.viz_queue.qsize() < 5:
                 STATE.viz_queue.put_nowait(mono)
@@ -779,6 +784,9 @@ class LiveTalk:
             if done < need:
                 outdata[done:] = bytes(need - done)
                 self._primed = False
+        if self.on_level:
+            pcm = np.frombuffer(outdata, dtype=np.int16)[:done // 2].astype(np.float32)
+            self.on_level("out", min(1.0, float(np.sqrt(np.mean(pcm ** 2))) / 32768 * 6) if pcm.size else 0.0)
 
     def _flush_audio(self) -> None:
         """Drop everything not yet played — the user has started speaking."""
@@ -1023,6 +1031,16 @@ if __name__ == "__main__":
     talk._on_play(out, len(out) // 2, None, None)
     assert not any(out) and not talk._primed and talk._audible == 0, \
         "ran dry and kept going instead of refilling"
+    # …and the play callback reports what it played, or the bubble's water
+    # never moves with the assistant's voice.
+    levels = []
+    talk.on_level = lambda who, x: levels.append((who, x))
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._handle(_Event(type="session.output_audio.delta", delta=delta))
+    talk._on_play(out, len(out) // 2, None, None)
+    assert levels and levels[-1][0] == "out" and levels[-1][1] > 0, "_on_play reports no output level"
+    talk.on_level = None
+    talk._flush_audio()
     talk._last_audio = 0.0
 
     # While a reply plays the gate holds the microphone back — and the model
