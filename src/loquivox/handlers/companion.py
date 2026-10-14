@@ -197,6 +197,8 @@ def set_wake_word(name: str) -> None:
     """Settings changed the wake word: reload it in the running listener."""
     if _companion is not None:
         _companion.presence.set_wake_model(name)
+        if _companion.presence.wake_error:  # the caller must not report a success
+            raise RuntimeError(_companion.presence.wake_error)
 
 
 def toggle_silence() -> None:

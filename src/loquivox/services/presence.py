@@ -7,7 +7,9 @@ when someone is addressing the assistant. Nothing is recorded, nothing leaves
 the machine: the cloud session (``services/live_talk.py``) opens only after
 ``on_wake`` fires.
 
-openwakeword is optional (``pip install -e '.[wake]'``). Without it — or without
+openwakeword is optional (``pip install -e '.[wake]'``, or Settings → Companion,
+which installs it ``--no-deps``: its ``tflite-runtime`` requirement has no wheel
+for Python 3.12+ and only the ONNX engine is used here). Without it — or without
 its model files, fetched once with ``openwakeword.utils.download_models()`` —
 the listener still runs, says so once, and only the hotkey starts a session.
 
@@ -38,6 +40,23 @@ BLOCK: int = 1280
 #: built-in openwakeword model; the French phrase is the owner's call (phase 1)
 WAKE_MODEL: str = "hey_jarvis"
 WAKE_THRESHOLD: float = 0.5
+#: what openwakeword's ONNX engine really imports; installed beside it ``--no-deps``
+WAKE_DEPS = ("onnxruntime", "scipy", "scikit-learn", "tqdm", "requests")
+
+
+def load_wake_model(name: str):
+    """The ONNX model for ``name``; raises with the cause if the package or its files are missing."""
+    from openwakeword.model import Model
+    return Model(wakeword_models=[name], inference_framework="onnx")
+
+
+def wake_problem(name: str) -> str:
+    """Why ``name`` cannot be loaded, or "" when it can — the only test a ✓ may rest on."""
+    try:
+        load_wake_model(name)
+    except Exception as exc:
+        return f"openwakeword unavailable ({exc})"
+    return ""
 #: after a wake, ignore further ones for this long (seconds)
 REFRACTORY: float = 2.0
 #: longest stretch kept after a wake word (seconds)
@@ -49,6 +68,7 @@ class Presence:
                  wake_model: str = WAKE_MODEL, threshold: float = WAKE_THRESHOLD,
                  stream_factory=None) -> None:
         self.on_wake = on_wake
+        self.wake_error = ""  # why the wake word is off, "" when it is not
         self.wake_model = wake_model
         self.threshold = threshold
         self._model = model
@@ -77,9 +97,11 @@ class Presence:
 
     def _load_model(self):
         try:
-            from openwakeword.model import Model
-            return Model(wakeword_models=[self.wake_model], inference_framework="onnx")
+            model = load_wake_model(self.wake_model)
+            self.wake_error = ""
+            return model
         except Exception as exc:  # missing package or missing model files
+            self.wake_error = f"openwakeword unavailable ({exc})"
             if not self._warned:
                 print(f"⚠️  Presence: openwakeword unavailable ({exc}) — "
                       "wake word off, hotkey only")

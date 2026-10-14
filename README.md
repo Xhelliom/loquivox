@@ -249,6 +249,14 @@ included, because it listens to the waveform rather than to a transcript.
 pip install -e '.[turn]'   # onnxruntime; the model is fetched on first use
 ```
 
+**Companion wake word** (local, [openwakeword](https://github.com/dscripka/openWakeWord)):
+Settings → Companion has an *Install openwakeword* button. It installs the ONNX engine's
+real dependencies, then openwakeword with `--no-deps` (its `tflite-runtime` requirement has
+no wheel for Python 3.12+), downloads the models and only then reports success — if the
+package or the configured wake word's model does not load, the cause is shown instead.
+By hand: `pip install -e '.[wake]'`, then `pip install --no-deps openwakeword` and
+`python -c "from openwakeword.utils import download_models; download_models()"` on 3.12+.
+
 No onnxruntime, no network on first run, `semantic_turns = false`? Talk mode falls back to
 plain silence detection — nothing breaks. And with the `openai_realtime` backend, OpenAI's own
 `semantic_vad` does the job server-side instead.

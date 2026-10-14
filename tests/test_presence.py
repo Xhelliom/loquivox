@@ -109,6 +109,40 @@ def test_without_openwakeword_starts_and_warns_once(capsys=None):
     assert _Stream.opened[-1] is not None  # mic still opened
 
 
+def test_wake_error_names_the_cause():
+    sys.modules["openwakeword"] = sys.modules["openwakeword.model"] = None
+    p = _make([], None)
+    p.start(); p.stop()
+    assert p.wake_error and "openwakeword" in p.wake_error
+    assert presence.wake_problem("hey_jarvis")  # the helper Settings uses: never "" when it fails
+
+
+def test_wake_extra_never_pulls_tflite():
+    import tomllib, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    extra = tomllib.loads((root / "pyproject.toml").read_text())["project"]["optional-dependencies"]["wake"]
+    for dep in ("onnxruntime", "scipy", "scikit-learn"):
+        assert any(d.startswith(dep) for d in extra), dep
+    ow = [d for d in extra if d.startswith("openwakeword")]
+    assert all("python_version" in d for d in ow), ow  # 3.14: tflite-runtime has no wheel
+    assert set(presence.WAKE_DEPS) <= {d.split(">")[0] for d in extra}
+
+
+def test_apply_raises_when_the_model_does_not_load():
+    from loquivox.handlers import companion
+    sys.modules["openwakeword"] = sys.modules["openwakeword.model"] = None
+    p = _make([], None)
+    companion.install(p, None)
+    try:
+        companion.set_wake_word("hey_jarvis")
+    except RuntimeError as exc:
+        assert "openwakeword" in str(exc)
+    else:
+        raise AssertionError("Apply must not report a success")
+    finally:
+        companion._companion = None
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

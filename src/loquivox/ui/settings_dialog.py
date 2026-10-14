@@ -500,14 +500,25 @@ class SettingsDialog:
         btn.set_sensitive(False)
         btn.set_label("Installing…")
 
+        wake = cls._comp_wake.get_active_id()
+
         def work():
-            ok, msg = cls._pip_install("openwakeword>=0.6")
+            from loquivox.services import presence
+            # openwakeword's own requirements include tflite-runtime (no wheel
+            # for 3.14): take what the ONNX engine really imports, then the
+            # package itself without dependencies.
+            ok, msg = cls._pip_install(*presence.WAKE_DEPS)
+            if ok:
+                ok, msg = cls._pip_install("openwakeword>=0.6", "--no-deps")
             if ok:
                 try:
                     from openwakeword.utils import download_models
                     download_models()
                 except Exception as e:
-                    ok, msg = False, str(e)
+                    ok, msg = False, f"model download failed: {e}"
+            if ok:  # a ✓ rests on a real import and a loaded model, nothing else
+                msg = presence.wake_problem(wake)
+                ok = not msg
 
             def done():
                 btn.set_sensitive(True)
@@ -1548,7 +1559,7 @@ class SettingsDialog:
     )
 
     @staticmethod
-    def _pip_install(pip_name: str):
+    def _pip_install(*pip_args: str):
         """Run pip install in-process venv. Returns (ok, last_output_line)."""
         import importlib
         import subprocess
@@ -1557,7 +1568,7 @@ class SettingsDialog:
             return False, SettingsDialog._MANAGED_ENV_HINT
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "pip", "install", pip_name],
+                [sys.executable, "-m", "pip", "install", *pip_args],
                 capture_output=True, text=True, timeout=900,
             )
         except Exception as e:

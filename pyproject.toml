@@ -38,7 +38,13 @@ deepgram = ["deepgram-sdk>=7"]
 turn = ["onnxruntime>=1.17"]
 # Local wake word for the companion mode (presence listener). Without it only
 # the hotkey starts a session.
-wake = ["openwakeword>=0.6"]
+# openwakeword itself requires tflite-runtime, which has no wheel from 3.12 on: there
+# the extra installs its real dependencies and Settings → Companion adds the
+# package with --no-deps (ONNX engine only).
+wake = [
+    "onnxruntime>=1.17", "scipy>=1.3", "scikit-learn>=1", "tqdm>=4", "requests>=2",
+    "openwakeword>=0.6; python_version < '3.12'",
+]
 # Local offline text-to-speech (Piper). Voices are ~60 MB ONNX files fetched on
 # first use into ~/.cache/loquivox/piper. Without it, replies are spoken by the
 # configured cloud engine.
