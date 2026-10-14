@@ -84,14 +84,7 @@ class AudioService:
         # opens ~1s after the microphone is armed, and what is said in that
         # second is the start of a sentence, not silence. Only this callback
         # touches stream_fed, so the catch-up needs no lock.
-        session = STATE.stream_session
-        if session is not None:
-            try:
-                for chunk in STATE.audio_buffer[STATE.stream_fed:]:
-                    session.feed(chunk[:, 0])
-                STATE.stream_fed = len(STATE.audio_buffer)
-            except Exception:
-                pass
+        AudioService._feed_session()
 
         # Feed the visualization queue (skip if full). Sent whole, NOT
         # downsampled: PortAudio blocks are small and vary wildly (4–139 frames
@@ -99,6 +92,27 @@ class AudioService:
         try:
             if STATE.viz_queue.qsize() < 5:
                 STATE.viz_queue.put_nowait(mono)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _feed_session() -> None:
+        """Hand the live session every block it has not had yet.
+
+        Called by the callback AND by ``stop_recording``: the session opens
+        ~1s after the microphone, so a key released right after it opened
+        stops the stream before any callback could catch up, and the session
+        was committed empty ("buffer too small") with the audio sitting in the
+        buffer. Only one thread at a time calls it (the callback, or the
+        stopper once the stream has stopped).
+        """
+        session = STATE.stream_session
+        if session is None:
+            return
+        try:
+            for chunk in STATE.audio_buffer[STATE.stream_fed:]:
+                session.feed(chunk[:, 0])
+            STATE.stream_fed = len(STATE.audio_buffer)
         except Exception:
             pass
 
@@ -179,6 +193,13 @@ class AudioService:
             STATE.stream.close()
             STATE.stream = None
             media.mic_closed()
+            AudioService._feed_session()  # the stream is stopped: no callback races us
+            if STATE.stream_session is not None:
+                rate = STATE.capture_rate or 1
+                sent = sum(len(c) for c in STATE.audio_buffer[:STATE.stream_fed])
+                total = sum(len(c) for c in STATE.audio_buffer)
+                print(f"📤 Live session got {STATE.stream_fed}/{len(STATE.audio_buffer)} blocks, "
+                      f"{sent * 1000 // rate} of {total * 1000 // rate} ms recorded")
 
         if STATE.audio_buffer:
             return np.concatenate(STATE.audio_buffer, axis=0)
