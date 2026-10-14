@@ -485,6 +485,12 @@ class SettingsDialog:
         cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
         cls._field(body, "Single click", cls._comp_click, labels)
 
+        cls._comp_style = Gtk.ComboBoxText()
+        for name in ("goutte", "plasma", "radar", "reacteur"):
+            cls._comp_style.append(name, name)
+        cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
+        cls._field(body, "Bubble style", cls._comp_style, labels)
+
         cls._note(body, "The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>); it applies right away.")
         cls._comp_status = Gtk.Label()
@@ -548,6 +554,7 @@ class SettingsDialog:
                 "enabled": cls._comp_enabled.get_active(),
                 "wake_word": wake,
                 "click_mode": cls._comp_click.get_active_id(),
+                "bubble_style": cls._comp_style.get_active_id(),
             })
         except ConfigWriteError as e:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")

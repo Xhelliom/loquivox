@@ -16,7 +16,8 @@ import cairo
 from loquivox.ui import companion_bubble as cb
 from loquivox.ui import companion_bubble_styles as st
 
-assert len(st.VARIANTS) == 4, st.VARIANTS
+assert len(st.VARIANTS) == 3 and "goutte-plus" not in st.VARIANTS, st.VARIANTS
+assert st.CHOICES == ("goutte", "plasma", "radar", "reacteur"), st.CHOICES
 c = cb.SIZE // 2
 
 
@@ -74,9 +75,13 @@ a, b = (cairo.ImageSurface(cairo.FORMAT_ARGB32, cb.SIZE, cb.SIZE) for _ in range
 cb.paint(cairo.Context(a), look)
 st.draw(st.DEFAULT_STYLE, cairo.Context(b), look, st.Rig(), 0.0)
 assert bytes(a.get_data()) == bytes(b.get_data())
-os.environ["LOQUIVOX_BUBBLE_STYLE"] = "radar"; st._style = None
-assert st.current_style() == "radar"
-os.environ["LOQUIVOX_BUBBLE_STYLE"] = "nope"; st._style = None
-assert st.current_style() == "goutte", "unknown names fall back to the drop"
+# the choice comes from config.toml, unknown -> goutte, and follows reload_config()
+from loquivox import config as cfgmod
+os.environ.pop("LOQUIVOX_BUBBLE_STYLE", None)
+st._style = None
+for value, want in (("radar", "radar"), ("goutte-plus", "goutte"), ("nope", "goutte"), ("plasma", "plasma")):
+    cfgmod._load_user_toml = lambda v=value: {"companion": {"bubble_style": v}}
+    cfgmod.CFG = cfgmod._build_config()
+    assert st.current_style() == want, (value, st.current_style())
 
 print("✓ companion bubble styles OK")

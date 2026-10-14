@@ -1,6 +1,6 @@
 # Styles de la bulle du compagnon — maquettes
 
-Rendu par défaut inchangé ; les variantes se choisissent en démo :
+Rendu par défaut inchangé (`goutte`). Se choisit dans Réglages → Compagnon (ou `[companion] bubble_style` de config.toml) ; en démo :
 
 ```
 python -m loquivox.ui.companion_bubble --demo --style <nom> [--state <état>]
@@ -15,15 +15,13 @@ Mesure en état `idle`, 15 s, en % d'un cœur, commande
 | Style        | CPU (idle) |
 |--------------|-----------:|
 | `goutte`     | ~6 %       |
-| `goutte-plus`| ~13 %      |
 | `reacteur`   | ~4 %       |
 | `radar`      | ~3 %       |
 | `plasma`     | ~2 %       |
 
 ## GIF (5 états chacun)
 
-- `goutte-plus.gif`
 - `reacteur.gif`
 - `radar.gif`
 - `plasma.gif`
-- `gallery.gif` — les variantes côte à côte
+- `gallery.gif` — les quatre styles côte à côte

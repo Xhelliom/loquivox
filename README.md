@@ -250,6 +250,8 @@ included, because it listens to the waveform rather than to a transcript.
 pip install -e '.[turn]'   # onnxruntime; the model is fetched on first use
 ```
 
+**Companion bubble style**: `goutte` (default), `plasma`, `radar` or `reacteur` — Settings → Companion, or `bubble_style` under `[companion]` in `config.toml`; applied live. Previews: `docs/bubble-styles/`.
+
 **Companion wake word** (local, [openwakeword](https://github.com/dscripka/openWakeWord)):
 Settings → Companion has an *Install openwakeword* button. It installs the ONNX engine's
 real dependencies, then openwakeword with `--no-deps` (its `tflite-runtime` requirement has
