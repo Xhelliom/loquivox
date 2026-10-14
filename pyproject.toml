@@ -33,6 +33,8 @@ dependencies = [
 # the streaming transcription backend and the realtime engine need only 2.x.
 openai = ["openai>=3.13"]
 deepgram = ["deepgram-sdk>=7"]
+# MCP client (services/mcp_tools.py): the tools of any MCP server, spoken.
+mcp = ["mcp>=2; python_version >= '3.11'"]
 # Semantic end-of-turn detection for talk mode (Smart Turn v3, ~8 MB ONNX
 # fetched on first use). Without it, talk mode ends turns on silence alone.
 turn = ["onnxruntime>=1.17"]

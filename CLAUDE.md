@@ -89,7 +89,7 @@ transcription/    Pluggable speech-to-text: factory + dispatcher; backends for
                   groq, whispercpp (local), deepgram, openai_realtime; streaming.py
 services/         audio (record+transcribe), ai (chat+vision), tts (engine per
                   CFG.TTS_ENGINES: Groq Orpheus EN / OpenAI multilingual /
-                  Piper local via tts_piper.py), realtime_talk (speech-to-speech
+                  Piper local via tts_piper.py), mcp_tools (MCP client: servers → plugins), realtime_talk (speech-to-speech
                   talk mode), live_talk (gpt-live-1: speech in/out, thinking
                   delegated back to our own model),
                   clipboard, image, postprocess (LLM refinement of dictation),
@@ -626,6 +626,34 @@ after the poll if the user kept talking. The message carries its entry
 something to re-read; the core still names no plugin, and a `still_true` that
 raises drops the message rather than speaking it. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
 local service most installations do not run.
+
+`mcp_tools` (`services/mcp_tools.py`) is how Loquivox **acts**: an MCP *client*
+(official `mcp` SDK, optional `.[mcp]` extra, v2 API: `mcp.Client` takes a
+`StdioServerParameters` or a URL). The brainstorm of 14/10 settled the split —
+MCP for acting, source plugins for real time — and it adds **no engine branch**:
+every tool of every server declared under `[mcp.servers.<name>]` (`CFG.MCP_SERVERS`;
+`command`/`args`/`env` or `url`, `enabled`) becomes one ordinary `Plugin` named
+`mcp_<server>_<tool>`, so `Desks` hands it to the cascade, Realtime and both Live
+delegations like `write_text`; `tests/test_plugins.py` drives a real stdio test
+server (`tests/mcp_fixture_server.py`) through all four routes. Servers live on
+one asyncio loop in a daemon thread, started by `app._start_mcp` beside the
+keyboard (or at first use — importing the module waits `CONNECT_TIMEOUT` for
+them) and ended in `_run`'s `finally`. A server that is absent, slow or
+crashing is `state="failed"` plus a warning, never an exception; a server
+switched off in Settings is stopped and its tools' `enabled()` goes False.
+Traps: the child gets an allow-listed environment (`env=` *adds* to it), and
+`run_coroutine_threadsafe` is bound at import because the engines' tests patch
+asyncio's. **Acting needs a spoken yes**: a tool without `readOnlyHint` (no
+annotation = acts) gets a `confirmed` argument; the first call only answers
+`ASK` ("nothing was done, ask"), and a later one runs only if
+`TalkSession.user_turns` has grown since — the user *spoke*, whatever the model
+claims — for the same tool and arguments; the yes is spent by that one action
+and no session means no yes. What a tool returns goes through `RESULT_FRAME`
+(data, never an instruction), like a source's text. Settings → Plugins has its
+card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
+`config_io.update_section` takes dotted sections for the nested table). Not
+done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
+mid-session (Apply in Settings restarts a failed one).
 
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 

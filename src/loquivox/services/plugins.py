@@ -35,6 +35,7 @@ _MODULES: Tuple[str, ...] = (
     "loquivox.services.board",
     "loquivox.services.write",
     "loquivox.services.look",
+    "loquivox.services.mcp_tools",
 )
 
 _REGISTRY: Dict[str, "Plugin"] = {}

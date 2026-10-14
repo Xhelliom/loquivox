@@ -37,7 +37,7 @@ def _load_document():
 
 def update_section(section: str, values: Dict[str, Any]) -> None:
     """
-    Merge ``values`` into ``[section]`` of config.toml and write it back,
+    Merge ``values`` into ``[section]`` (dots nest) of config.toml and write it back,
     preserving existing comments/formatting. Creates the file and table if
     absent. ``None`` values are skipped; empty strings ARE written (they
     intentionally override a default, e.g. ``language = ""``).
@@ -45,9 +45,11 @@ def update_section(section: str, values: Dict[str, Any]) -> None:
     import tomlkit
 
     doc = _load_document()
-    if section not in doc:
-        doc[section] = tomlkit.table()
-    table = doc[section]
+    table = doc
+    for part in section.split("."):     # "mcp.servers.x" is a nested table
+        if part not in table:
+            table[part] = tomlkit.table()
+        table = table[part]
     for key, value in values.items():
         if value is None:
             continue

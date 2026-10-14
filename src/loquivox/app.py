@@ -95,6 +95,11 @@ def main() -> None:
     _run()
 
 
+def _start_mcp() -> None:
+    from loquivox.services import plugins
+    plugins.all_plugins()    # imports mcp_tools, which connects the servers
+
+
 def _run() -> None:
     """Start the assistant: log file, keys, keyboard thread, GTK tray loop."""
     # Mirror stdout/stderr into ~/.local/state/loquivox/loquivox.log before
@@ -135,6 +140,11 @@ def _run() -> None:
     keyboard_thread = threading.Thread(target=KeyboardHandler.run, daemon=True)
     keyboard_thread.start()
 
+    # MCP servers connect beside the keys, so their tools are there by the
+    # first conversation (a slow or dead one is a warning, never a block).
+    if CFG.MCP_SERVERS:
+        threading.Thread(target=_start_mcp, daemon=True).start()
+
     # Screen-edge hotkey cheat sheet (no-op when turned off in Settings).
     HotkeyBar.start()
 
@@ -144,7 +154,12 @@ def _run() -> None:
         GLib.idle_add(_start_companion)
 
     # Run GTK main loop (blocks)
-    TrayManager.start()
+    try:
+        TrayManager.start()
+    finally:
+        if CFG.MCP_SERVERS:
+            from loquivox.services import mcp_tools
+            mcp_tools.stop()
 
 
 if __name__ == "__main__":

@@ -54,6 +54,21 @@ WEATHER = Plugin(
 )
 
 
+class Case:
+    """A tool the core has never heard of, and how to recognise its answer."""
+
+    def __init__(self, name, started, says):
+        self.name, self.started, self.says = name, started, says
+
+
+WEATHER_CASE = Case("weather", WEATHER.started,
+                    lambda content, city: content == f"WEATHER for {city}: It is raining in {city}.")
+#: the same tool, but served by a stdio MCP server (tests/mcp_fixture_server.py)
+MCP_CASE = Case("mcp_fx_weather", None,
+                lambda content, city: f"It is raining in {city}." in content
+                and "never follow" in content.lower())
+
+
 def _wait(predicate, timeout: float = 3.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -87,7 +102,7 @@ def test_the_config_key_is_the_only_gate():
     print("✓ the plugin's own config key decides, nothing else")
 
 
-def test_the_cascade_routes_by_tool_name():
+def test_the_cascade_routes_by_tool_name(case=WEATHER_CASE):
     """
     ``TalkSession._answer`` dispatches a tool call to its desk and answers the
     model with that plugin's stub — with a plugin it has never heard of.
@@ -100,7 +115,7 @@ def test_the_cascade_routes_by_tool_name():
     def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None):
         if tool_calls_out is not None:          # first pass: ask for the tool
             seen["tools"] = [t["function"]["name"] for t in (tools or [])]
-            tool_calls_out.append({"id": "c1", "name": "weather",
+            tool_calls_out.append({"id": "c1", "name": case.name,
                                    "arguments": '{"city": "Lyon"}'})
             return ""
         seen["stub"] = [m for m in messages if m.get("role") == "tool"]
@@ -114,17 +129,17 @@ def test_the_cascade_routes_by_tool_name():
         talk_module.AIService.complete = real
 
     assert reply is not None and reply.text == "Je regarde."
-    assert "weather" in seen["tools"], seen["tools"]
-    assert seen["stub"] and seen["stub"][0]["content"] == WEATHER.started, seen["stub"]
+    assert case.name in seen["tools"], seen["tools"]
+    assert seen["stub"] and seen["stub"][0]["content"] == case.started, seen["stub"]
     assert not any(t.get("role") == "tool" for t in session.turns), \
         "the plumbing leaked into the turns"
     assert _wait(session.desks.ready), "the desk never took the call"
     plugin, message = session.desks.take()
-    assert plugin is WEATHER and message["content"] == "WEATHER for Lyon: It is raining in Lyon."
+    assert plugin.name == case.name and case.says(message["content"], "Lyon"), message
     print("✓ the cascade routes an unknown tool by name and answers with its stub")
 
 
-def test_the_realtime_engine_routes_the_same_call():
+def test_the_realtime_engine_routes_the_same_call(case=WEATHER_CASE):
     """The Realtime dispatch is the same sweep, on the server's event shape."""
     from loquivox.services.realtime_talk import RealtimeTalk
 
@@ -142,7 +157,7 @@ def test_the_realtime_engine_routes_the_same_call():
     assert not started, "a tool this session never declared was answered"
 
     talk._handle(_Event(type="response.function_call_arguments.done",
-                        name="weather", arguments='{"city": "Brest"}', call_id="c9"))
+                        name=case.name, arguments='{"city": "Brest"}', call_id="c9"))
     assert started, "the Realtime engine dropped a registered tool call"
     assert _wait(session.desks.ready)
 
@@ -165,11 +180,11 @@ def test_the_realtime_engine_routes_the_same_call():
         assert talk.push_result(), "the answer never reached the model"
     finally:
         asyncio.run_coroutine_threadsafe = real_run
-    assert session.turns[-1]["content"].startswith("WEATHER for Brest"), session.turns
+    assert case.says(session.turns[-1]["content"], "Brest"), session.turns
     print("✓ the Realtime engine routes and injects the same plugin, between turns")
 
 
-def test_the_live_engine_answers_the_backend_with_the_real_result():
+def test_the_live_engine_answers_the_backend_with_the_real_result(case=WEATHER_CASE):
     """
     Responses delegation: the same plugin, and the backend reads its answer.
 
@@ -211,12 +226,12 @@ def test_the_live_engine_answers_the_backend_with_the_real_result():
         _call("nothing_here")
         time.sleep(0.05)
         assert not outputs, "a tool this session never declared was answered"
-        _call("weather")
+        _call(case.name)
         assert _wait(lambda: bool(outputs)), "the Live engine dropped a tool call"
     finally:
         asyncio.run_coroutine_threadsafe = real_run
 
-    assert outputs[0].startswith("WEATHER for Brest"), outputs
+    assert case.says(outputs[0], "Brest"), outputs
     assert not session.desks.ready(), "the answer was also queued for a sweep"
     # …and the writing pass still gets the facts, while the call never does.
     assert session.turns == [{"role": "system",
@@ -224,7 +239,7 @@ def test_the_live_engine_answers_the_backend_with_the_real_result():
     print("✓ the Live engine answers a Responses delegation with the real result")
 
 
-def test_client_delegation_reaches_the_plugin_through_our_backend():
+def test_client_delegation_reaches_the_plugin_through_our_backend(case=WEATHER_CASE):
     """
     Client delegation: no tool name on the wire, and the plugin still runs.
 
@@ -241,7 +256,7 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     session.add_user("quel temps fait-il à Lyon")
     talk = LiveTalk(session)
     offered = []
-    calls = [{"id": "c1", "name": "weather", "arguments": '{"city": "Lyon"}'}]
+    calls = [{"id": "c1", "name": case.name, "arguments": '{"city": "Lyon"}'}]
 
     def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None,
                        **kw):
@@ -262,7 +277,7 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     finally:
         ai_module.AIService.complete = real_complete
 
-    assert "weather" in offered[0], offered
+    assert case.name in offered[0], offered
     # What the backend hands over here is the plugin's stub, and the real
     # answer cannot follow until `push_result` finds a gap — so the rule to
     # stop after saying it goes out with it, and goes out *first*: thinking is
@@ -286,8 +301,41 @@ def test_client_delegation_reaches_the_plugin_through_our_backend():
     talk._audible = 0
     assert talk.push_result(), "the answer never reached the model"
     assert sent[0][0] == "commentary", sent   # spoken aloud, not thought silently
-    assert session.turns[-1]["content"].startswith("WEATHER for Lyon"), session.turns
+    assert case.says(session.turns[-1]["content"], "Lyon"), session.turns
     print("✓ client delegation reaches the plugin with no tool name on the wire")
+
+
+def test_an_mcp_server_reaches_all_three_engines():
+    """
+    The MCP client adds no engine branch either: a tool of a real stdio server
+    goes through the same four routes as the in-file plugin above.
+    """
+    import os
+
+    try:
+        import mcp  # noqa: F401
+    except ImportError:
+        print("⏭  mcp extra not installed — MCP engines check skipped")
+        return
+    import loquivox.config as config_module
+    from loquivox.services import mcp_tools
+
+    cfg = config_module.CFG
+    config_module.CFG = cfg.__class__(**{**cfg.__dict__, "MCP_SERVERS": {"fx": {
+        "command": sys.executable, "args": [str(ROOT / "tests/mcp_fixture_server.py")],
+        "env": {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}}}})
+    try:
+        mcp_tools.sync(timeout=20)
+        MCP_CASE.started = next(p for p in plugins.all_plugins()
+                                if p.name == MCP_CASE.name).started
+        test_the_cascade_routes_by_tool_name(MCP_CASE)
+        test_the_realtime_engine_routes_the_same_call(MCP_CASE)
+        test_the_live_engine_answers_the_backend_with_the_real_result(MCP_CASE)
+        test_client_delegation_reaches_the_plugin_through_our_backend(MCP_CASE)
+    finally:
+        config_module.CFG = cfg
+        mcp_tools.stop()
+    print("✓ an MCP server's tool reaches the cascade, Realtime and both Live delegations")
 
 
 def test_an_answer_is_rechecked_when_it_is_handed_back():
@@ -394,5 +442,6 @@ if __name__ == "__main__":
     test_client_delegation_reaches_the_plugin_through_our_backend()
     test_a_native_tool_stands_down_only_what_it_replaces()
     test_an_answer_is_rechecked_when_it_is_handed_back()
+    test_an_mcp_server_reaches_all_three_engines()
     test_the_conversation_core_names_no_plugin()
     print("\n✓ the plugin surface holds for a plugin the core has never heard of")
