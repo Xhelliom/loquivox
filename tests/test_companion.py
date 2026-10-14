@@ -60,10 +60,12 @@ def test_wake_runs_the_loop_in_order():
 
 def test_session_levels_set_listening_and_speaking():
     c, log = _make()
+    STATE.companion_session = True
     c.on_level("in", 0.4)
     c.on_level("in", 0.5)                 # unchanged state: not posted twice
     c.on_level("out", 0.3)
     c.on_level("in", 0.2)
+    STATE.companion_session = False
     assert log == ["bubble:listening", "bubble:speaking"], log   # held: see the next test
     assert c.bubble.levels[-1] == 0.3
 
@@ -73,6 +75,7 @@ def test_short_gap_keeps_speaking_long_gap_listens(monkeypatch=None):
     real, comp.time.monotonic = comp.time.monotonic, lambda: now[0]
     try:
         c, log = _make()
+        STATE.companion_session = True
         c.on_level("out", 0.3)
         now[0] += 0.3
         c.on_level("out", 0.0)            # a blank between two words
@@ -82,7 +85,20 @@ def test_short_gap_keeps_speaking_long_gap_listens(monkeypatch=None):
         c.on_level("out", 0.0)
         assert log == ["bubble:speaking", "bubble:listening"], log
     finally:
+        STATE.companion_session = False
         comp.time.monotonic = real
+
+
+def test_late_block_after_session_leaves_the_bubble_at_rest():
+    def converse(session, prefix=()):
+        c.on_level("in", 0.4)             # a live block: red "listening"
+    c, log = _make(session=converse)
+    c.wake()
+    n, levels = len(log), list(c.bubble.levels)
+    c.on_level("in", 0.5)                 # arrives after the session closed
+    c.on_level("out", 0.3)
+    assert log == log[:n] and log[-1] == "bubble:idle", log
+    assert c.bubble.levels == levels
 
 
 def test_converse_wires_on_level():
