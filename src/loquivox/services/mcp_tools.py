@@ -41,6 +41,7 @@ import asyncio
 import json
 import re
 import threading
+import time
 import weakref
 from asyncio import run_coroutine_threadsafe as _submit  # bound now: the engines' tests patch asyncio's
 from dataclasses import dataclass, field
@@ -179,6 +180,16 @@ async def _serve(s: _Server) -> None:
 
 
 def _call(s: _Server, tool: str, args: Dict[str, Any]) -> str:
+    """Run one tool and journal it: name, outcome, duration — never the arguments."""
+    t0 = time.monotonic()
+    out = _call_raw(s, tool, args)
+    ok = not out.startswith(("The tool failed", "The tool reported an error", "The server "))
+    print(f"🔧 MCP {s.name}.{tool}: {'ok' if ok else 'ERROR'} "
+          f"({time.monotonic() - t0:.1f}s)")
+    return out
+
+
+def _call_raw(s: _Server, tool: str, args: Dict[str, Any]) -> str:
     if s.state != "up":
         return f"The server {s.name} is not running."
     try:
@@ -237,6 +248,7 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
             spoken = session.user_turns if session is not None else 0
             if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
                 asked[key] = spoken
+                print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes")
                 return _Ask(ASK.format(tool=tool.name, server=s.name,
                                        what=json.dumps(args, ensure_ascii=False)))
             del asked[key]
