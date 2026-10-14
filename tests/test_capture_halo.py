@@ -6,6 +6,8 @@ Checks for the capture halo: niri's geometry parsing and the two flashes
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import tempfile
 from pathlib import Path

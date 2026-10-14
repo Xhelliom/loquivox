@@ -10,6 +10,8 @@ warning and nothing else. The three engines are driven in test_plugins.py.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import os
 import sys
 import time

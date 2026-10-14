@@ -7,6 +7,8 @@ The log's ``id`` restarts at 1 with the bridge, so the cursor is ``ts``.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import threading
 from pathlib import Path

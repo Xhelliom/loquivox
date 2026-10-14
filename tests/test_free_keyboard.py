@@ -9,6 +9,8 @@ not end a turn, an Esc must not cancel the conversation.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 from dataclasses import replace
 from pathlib import Path

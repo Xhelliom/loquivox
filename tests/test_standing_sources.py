@@ -7,6 +7,8 @@ No microphone, no GTK, no network — a source the core has never heard of:
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import time
 from pathlib import Path

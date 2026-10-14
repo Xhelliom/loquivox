@@ -5,6 +5,8 @@ Checks for the companion bubble's alternative styles.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import os
 import sys
 from pathlib import Path

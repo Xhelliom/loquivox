@@ -14,6 +14,8 @@ must fit inside the window's width, and every label column must line up.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 from pathlib import Path
 
