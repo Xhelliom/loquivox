@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import tempfile
 import threading
 import time
 import weakref
@@ -50,8 +51,15 @@ from typing import Any, Dict, List, Optional
 import loquivox.config as config_module
 from loquivox.services.plugins import _REGISTRY, Plugin, register
 
-#: seconds a server gets to start and list its tools, and a call to answer
-CONNECT_TIMEOUT = 15.0
+#: seconds a server gets to start and list its tools (`connect_timeout` per
+#: server overrides it: uvx resolving `pkg@latest` can take 7-13 s alone), and
+#: a call to answer
+CONNECT_TIMEOUT = 30.0
+#: a server that failed to start is tried again after RETRY_MIN, doubling up to
+#: RETRY_MAX — or at once when something calls it
+RETRY_MIN, RETRY_MAX = 30.0, 300.0
+#: lines of a server's stderr that explain a failure
+STDERR_TAIL = 15
 CALL_TIMEOUT = 60.0
 #: what a tool's answer may weigh in the conversation
 MAX_RESULT = 4000
@@ -98,6 +106,8 @@ class _Server:
     client: Any = None
     ready: threading.Event = field(default_factory=threading.Event)
     stop: Optional[asyncio.Event] = None
+    kick: Optional[asyncio.Event] = None    # set: retry now instead of at the next backoff
+    retry: bool = True                      # False: the config is wrong, trying again cannot help
     future: Any = None
 
 
@@ -124,7 +134,15 @@ def _why(e: BaseException) -> str:
     return f"{type(e).__name__}: {e}".strip(": ")
 
 
-def _fail(s: _Server, why: str) -> None:
+def connect_timeout(cfg: Dict[str, Any]) -> float:
+    try:
+        return float(cfg.get("connect_timeout", CONNECT_TIMEOUT))
+    except (TypeError, ValueError):
+        return CONNECT_TIMEOUT
+
+
+def _fail(s: _Server, why: str, retry: bool = True) -> None:
+    s.retry = retry
     s.state, s.error = "failed", why
     print(f"⚠️  MCP server {s.name}: {why}")
     s.ready.set()
@@ -139,19 +157,26 @@ async def _serve(s: _Server) -> None:
     try:
         from mcp import Client, StdioServerParameters
     except ImportError:
-        return _fail(s, "the `mcp` package is missing — pip install 'loquivox[mcp]'")
+        return _fail(s, "the `mcp` package is missing — pip install 'loquivox[mcp]'", retry=False)
     cfg = s.cfg
+    errlog = None
     if cfg.get("url"):
         target: Any = str(cfg["url"])
     elif cfg.get("command"):
-        target = StdioServerParameters(
+        from mcp.client.stdio import stdio_client
+        params = StdioServerParameters(
             command=str(cfg["command"]), args=[str(a) for a in cfg.get("args", [])],
             env={str(k): str(v) for k, v in dict(cfg.get("env", {})).items()} or None)
+        # The server's stderr (ha-mcp writes dozens of INFO lines) goes to a
+        # file, not to ours: only its tail is shown, and only when it fails.
+        # ponytail: the file lives as long as the server and grows with it.
+        errlog = tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace")
+        target = stdio_client(params, errlog=errlog)
     else:
-        return _fail(s, "needs a `command` (stdio) or a `url` (HTTP)")
+        return _fail(s, "needs a `command` (stdio) or a `url` (HTTP)", retry=False)
     client = Client(target)
     try:
-        async with asyncio.timeout(CONNECT_TIMEOUT):
+        async with asyncio.timeout(connect_timeout(cfg)):
             await client.__aenter__()
             tools, cursor = [], None
             while True:
@@ -167,7 +192,13 @@ async def _serve(s: _Server) -> None:
             pass
         if not isinstance(e, Exception):    # cancelled: _stop already said "off"
             raise
-        return _fail(s, _why(e)) if s.state == "starting" else None
+        why = _why(e)
+        if errlog is not None:
+            errlog.flush()
+            errlog.seek(0)
+            tail = "\n".join(errlog.read().splitlines()[-STDERR_TAIL:])
+            why += f"\n{tail}" if tail else ""
+        return _fail(s, why) if s.state == "starting" else None
     try:
         if s.state != "starting":           # stopped while connecting: leave no trace
             return
@@ -219,7 +250,10 @@ def call_tool(server: str, tool: str, args: Dict[str, Any]) -> str:
     s = _servers.get(server)
     if s is None:
         raise RuntimeError(f"MCP server {server!r} is not declared or not enabled")
-    s.ready.wait(CONNECT_TIMEOUT)
+    if s.state == "failed" and s.retry and s.kick is not None:     # first use: try again now
+        s.ready.clear()
+        _loop.call_soon_threadsafe(s.kick.set)
+    s.ready.wait(connect_timeout(s.cfg))
     if s.state != "up":
         raise RuntimeError(f"MCP server {server!r} is {s.state}" + (f": {s.error}" if s.error else ""))
     result = _submit(s.client.call_tool(tool, args), _loop).result(CALL_TIMEOUT)
@@ -370,19 +404,33 @@ def sync(timeout: float = 0.0) -> None:
 
 
 def _launch(loop, s: _Server):
-    s.stop = asyncio.Event()
+    s.stop, s.kick = asyncio.Event(), asyncio.Event()
     return loop.create_task(_guarded(s))
 
 
 async def _guarded(s: _Server) -> None:
-    try:
-        await _serve(s)
-    except Exception as e:          # nothing may escape into the loop
-        _fail(s, _why(e))
+    delay = RETRY_MIN
+    while True:
+        try:
+            await _serve(s)
+        except Exception as e:      # nothing may escape into the loop
+            _fail(s, _why(e))
+        if s.state != "failed" or not s.retry:
+            return
+        try:                        # backoff, cut short by a call (see call_tool)
+            await asyncio.wait_for(s.kick.wait(), delay)
+        except asyncio.TimeoutError:
+            pass
+        s.kick.clear()
+        if s.state != "failed":     # switched off meanwhile
+            return
+        delay = min(delay * 2, RETRY_MAX)
+        s.state, s.error = "starting", ""
+        s.ready.clear()
 
 
 def _stop(s: _Server) -> None:
-    if s.state == "starting" and _loop is not None:    # still connecting: cancel the task
+    if s.state in ("starting", "failed") and _loop is not None:    # connecting or waiting to retry: cancel the task
         _loop.call_soon_threadsafe(lambda: s.future and s.future.cancel())
     if s.state == "up" and s.stop is not None and _loop is not None:
         _loop.call_soon_threadsafe(s.stop.set)

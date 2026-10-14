@@ -432,6 +432,9 @@ chat_auto_hide = 3
 # args = ["-y", "some-mcp-server"]
 # env = { API_TOKEN = "..." }    # added to a minimal environment, not ours
 # enabled = true
+# connect_timeout = 30           # seconds to start and list tools (default 30). A server
+#                                # that fails to start is retried (30 s, doubling to 5 min,
+#                                # or at once when a rule calls it).
 # description = "Kanban cards"   # the line the model sees about this server
 # always = ["list_cards"]        # offered from the start; ["*"] = every tool.
 #                                # The others load when the model calls find_tools

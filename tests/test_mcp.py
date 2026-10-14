@@ -180,6 +180,76 @@ def test_stopping_a_starting_server_cancels_it():
     print("✓ a server stopped while starting is cancelled")
 
 
+def _script(body: str):
+    return {"command": sys.executable, "args": ["-c", body], "env": {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}}
+
+
+def _then_fixture(pre: str) -> str:
+    return pre + f"; import runpy; runpy.run_path({str(ROOT / 'tests/mcp_fixture_server.py')!r}, run_name='__main__')"
+
+
+def test_a_slow_server_gets_its_connect_timeout():
+    assert mcp_tools.CONNECT_TIMEOUT >= 30
+    _servers(slow=_script(_then_fixture("import time; time.sleep(3)")) | {"connect_timeout": 15})
+    mcp_tools.sync(timeout=20)
+    assert mcp_tools.status()[0]["state"] == "up", mcp_tools.status()
+    _servers(slow=_script(_then_fixture("import time; time.sleep(3)")) | {"connect_timeout": 1})
+    mcp_tools.sync(timeout=20)
+    assert mcp_tools.status()[0]["state"] == "failed"
+    print("✓ connect_timeout is per server")
+
+
+def test_a_failed_server_is_retried(tmp_path="/tmp/loquivox_mcp_retry"):
+    import pathlib
+    marker = pathlib.Path(tmp_path)
+    marker.unlink(missing_ok=True)
+    body = _then_fixture(f"import pathlib,sys; m=pathlib.Path({tmp_path!r}); "
+                         "(m.exists() or (m.touch(), sys.exit(3)))")
+    saved = mcp_tools.RETRY_MIN
+    mcp_tools.RETRY_MIN = 0.5
+    try:
+        _servers(flaky=_script(body))
+        mcp_tools.sync(timeout=20)
+        assert mcp_tools._servers["flaky"].state in ("failed", "starting")
+        deadline = time.monotonic() + 15
+        while mcp_tools.status()[0]["state"] != "up" and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert mcp_tools.status()[0]["state"] == "up", mcp_tools.status()
+        assert mcp_tools.call_tool("flaky", "weather", {"city": "Nice"})
+        # first use retries at once, whatever the backoff
+        marker.unlink()
+        mcp_tools.RETRY_MIN = 3600
+        _servers(flaky2=_script(body))
+        mcp_tools.sync(timeout=20)
+        assert mcp_tools._servers["flaky2"].state == "failed"
+        assert "Nice" in mcp_tools.call_tool("flaky2", "weather", {"city": "Nice"})
+    finally:
+        mcp_tools.RETRY_MIN = saved
+        marker.unlink(missing_ok=True)
+    print("✓ a failed server comes back, by backoff or on first use")
+
+
+def test_server_stderr_stays_out_of_our_output():
+    import tempfile
+    noisy = _then_fixture("import sys; sys.stderr.write('NOISE-LINE\\n'); sys.stderr.flush()")
+    dying = "import sys; sys.stderr.write('WHY-IT-DIED\\n'); sys.exit(2)"
+    _servers(noisy=_script(noisy), dying=_script(dying))
+    with tempfile.TemporaryFile("w+") as cap:
+        saved = os.dup(2)
+        os.dup2(cap.fileno(), 2)
+        try:
+            mcp_tools.sync(timeout=20)
+        finally:
+            os.dup2(saved, 2)
+            os.close(saved)
+        cap.seek(0)
+        seen = cap.read()
+    states = {r["name"]: r for r in mcp_tools.status()}
+    assert states["noisy"]["state"] == "up" and "NOISE-LINE" not in seen, (states, seen)
+    assert states["dying"]["state"] == "failed" and "WHY-IT-DIED" in states["dying"]["error"], states
+    print("✓ a server's stderr is kept for the failure message only")
+
+
 def test_the_toml_schema_is_read():
     import tomllib
     data = tomllib.loads('[mcp.servers.a]\ncommand = "x"\nargs = ["y"]\n'
@@ -202,6 +272,9 @@ if __name__ == "__main__":
         test_apply_never_blocks_nor_retries_a_failed_server()
         test_stopping_a_starting_server_cancels_it()
         test_switching_a_server_off_takes_its_tools_away()
+        test_a_slow_server_gets_its_connect_timeout()
+        test_a_failed_server_is_retried()
+        test_server_stderr_stays_out_of_our_output()
         test_the_toml_schema_is_read()
     finally:
         config_module.CFG = real

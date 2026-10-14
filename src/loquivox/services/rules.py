@@ -226,7 +226,8 @@ def check(raw_rules: List[Dict[str, Any]], tools_of) -> Dict[str, List[str]]:
 def _connected():
     """Bring the declared servers up (as the app would) and return ``tools_of``."""
     from loquivox.services import mcp_tools
-    mcp_tools.sync(timeout=mcp_tools.CONNECT_TIMEOUT + 1)
+    wait = max([mcp_tools.connect_timeout(c) for c in config_module.CFG.MCP_SERVERS.values()] or [0])
+    mcp_tools.sync(timeout=wait + 1)
     return mcp_tools, mcp_tools.describe
 
 
