@@ -3,12 +3,37 @@ AI chat and vision completion service.
 """
 from __future__ import annotations
 
+import json
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from loquivox.api import get_ai_client
 from loquivox.config import CFG
 from loquivox.decorators import safe_execute
 from loquivox.state import STATE
+
+
+TEXT_ONLY = ("Do not call any tool: answer in plain text only, in the "
+             "user's language.")
+
+
+def _failed_call(error: Exception) -> Optional[tuple]:
+    """
+    ``(name, arguments)`` the model tried to call when the provider rejected
+    the generation with ``tool_use_failed`` (Groq: "Tool choice is none, but
+    model called a tool"), else None. ``name`` is "" if it cannot be read.
+    """
+    body = getattr(error, "body", None)
+    body = body.get("error", body) if isinstance(body, dict) else {}
+    if body.get("code") != "tool_use_failed":
+        return None
+    raw = str(body.get("failed_generation") or "")
+    try:
+        data = json.loads(raw)
+        return str(data.get("name", "")), json.dumps(data.get("arguments") or {})
+    except (ValueError, AttributeError):
+        m = re.search(r"<function=([\w-]+)[ >]*(\{.*?\})?\s*(?:</function>|$)", raw, re.S)
+        return (m.group(1), m.group(2) or "{}") if m else ("", "{}")
 
 
 class AIService:
@@ -106,10 +131,27 @@ class AIService:
         """
         model = model or STATE.ai_chat_model
         extra = {"tools": tools} if tools else {}
-        if on_delta is None and not tools:
-            return AIService._complete(messages, model)
-        return AIService._stream(messages, model, on_delta or (lambda _t: None),
-                                 tool_calls_out, **extra)
+        try:
+            if on_delta is None and not tools:
+                return AIService._complete(messages, model)
+            return AIService._stream(messages, model, on_delta or (lambda _t: None),
+                                     tool_calls_out, **extra)
+        except Exception as e:
+            # The model called a tool this request did not offer (or garbled
+            # the call) and the provider threw the whole generation away. A
+            # turn must not die of that: a call we can read is handed to the
+            # caller as a real one; anything else is asked again, in text.
+            failed = _failed_call(e)
+            if failed is None:
+                raise
+            name, arguments = failed
+            print(f"⚠️  tool_use_failed ({name or '?'}) — recovering")
+            if tool_calls_out is not None and tools and name:
+                tool_calls_out.append({"id": "recovered", "name": name,
+                                       "arguments": arguments})
+                return ""
+            return AIService._complete(
+                messages + [{"role": "system", "content": TEXT_ONLY}], model)
 
     @staticmethod
     @safe_execute("AI Vision")

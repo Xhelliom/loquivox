@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
-from loquivox.services.ai import AIService
+from loquivox.services.ai import TEXT_ONLY, AIService
 from loquivox.services.plugins import Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
@@ -209,6 +209,9 @@ def log_companion_cut(how: str, user_turns: int) -> None:
     is a misfire: ``grep -c "faux déclenchement"`` is the false-wake rate."""
     print("🫧 Companion: " + (f"faux déclenchement ({how})" if not user_turns
                               else f"fin de session ({how})"))
+
+
+NOT_DONE = "Je n'ai pas pu faire ça."
 
 
 class TalkSession:
@@ -392,24 +395,41 @@ class TalkSession:
         it and what it *says* is what lands in the conversation — so the caller
         decides what becomes of the text rather than this deciding for it.
         """
-        calls: List[Dict[str, str]] = []
-        answer = AIService.complete(base, on_delta=stream,
-                                    tools=self.desks.chat_tools or None,
-                                    tool_calls_out=calls)
-        routed = [(c, desk) for c, desk in
-                  ((c, self.desks.get(c["name"])) for c in calls) if desk]
-        if routed:
+        # ponytail: a few rounds, not unbounded — a model that keeps calling
+        # tools instead of answering is cut off by the last, tool-less, one.
+        tools = self.desks.chat_tools or None
+        exchange: List[Dict[str, Any]] = []
+        answer = None
+        for round_ in range(3):
+            calls: List[Dict[str, str]] = []
+            last = round_ == 2
+            # The follow-up offers the tools too: its context is full of tool
+            # calls and the model calls one again, which a request without
+            # tools makes the provider reject (Groq: tool_use_failed).
+            answer = AIService.complete(base + exchange, on_delta=stream,
+                                        tools=None if last else tools,
+                                        tool_calls_out=calls)
+            routed = [(c, desk) for c, desk in
+                      ((c, self.desks.get(c["name"])) for c in calls) if desk]
+            if calls and not routed and not last:
+                # Calls to tools this session does not hold (a deferred one
+                # not loaded yet): nothing to run, so ask again, in text.
+                answer = AIService.complete(
+                    base + exchange + [{"role": "system", "content": TEXT_ONLY}],
+                    on_delta=stream)
+            if not routed or last:
+                break
             for call, desk in routed:
                 desk.ask(call["arguments"])
-            exchange = [{"role": "assistant", "content": answer or None,
-                         "tool_calls": [{"id": c["id"], "type": "function",
-                                         "function": {"name": c["name"],
-                                                      "arguments": c["arguments"]}}
-                                        for c, _ in routed]}]
+            exchange += [{"role": "assistant", "content": answer or None,
+                          "tool_calls": [{"id": c["id"], "type": "function",
+                                          "function": {"name": c["name"],
+                                                       "arguments": c["arguments"]}}
+                                         for c, _ in routed]}]
             exchange += [{"role": "tool", "tool_call_id": c["id"],
                           "content": desk.plugin.started} for c, desk in routed]
-            answer = AIService.complete(base + exchange, on_delta=stream)
-        return answer
+        # Never an empty turn: the user must hear something.
+        return answer if (answer or "").strip() else NOT_DONE
 
     def consult(self) -> Optional[str]:
         """

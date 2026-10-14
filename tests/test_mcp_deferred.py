@@ -117,7 +117,7 @@ def test_the_cascade_calls_it_on_the_next_turn():
 
     def _fake(messages, on_delta=None, tools=None, tool_calls_out=None):
         names = [t["function"]["name"] for t in (tools or [])]
-        if tool_calls_out is not None:
+        if not any(m.get("role") == "tool" for m in messages):  # a turn's first pass
             seen.append(names)
             if "mcp_fz_weather" not in names:
                 tool_calls_out.append({"id": "c1", "name": "find_tools",

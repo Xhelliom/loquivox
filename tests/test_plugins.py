@@ -113,7 +113,7 @@ def test_the_cascade_routes_by_tool_name(case=WEATHER_CASE):
     seen = {}
 
     def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None):
-        if tool_calls_out is not None:          # first pass: ask for the tool
+        if not any(m.get("role") == "tool" for m in messages):  # first pass
             seen["tools"] = [t["function"]["name"] for t in (tools or [])]
             tool_calls_out.append({"id": "c1", "name": case.name,
                                    "arguments": '{"city": "Lyon"}'})
@@ -261,7 +261,7 @@ def test_client_delegation_reaches_the_plugin_through_our_backend(case=WEATHER_C
     def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None,
                        **kw):
         offered.append([t["function"]["name"] for t in (tools or [])])
-        if tool_calls_out is not None:
+        if not any(m.get("role") == "tool" for m in messages):
             tool_calls_out.extend(calls)
             return ""
         return "Il pleut à Lyon."
