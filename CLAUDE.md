@@ -679,7 +679,10 @@ Settings applies without a restart). **Applied before a source can wake
 anything**: `Desk.put` asks `memory.discards(source, content)` and a covered
 message is never queued — no wake, no session, nothing said; the rule's
 `dropped` counter goes up and the journal notes it *without quoting* the
-message or the rule. With no rule it costs nothing, otherwise ONE completion on
+message or the rule. A rule's `source` is a free hint the model typed, not a plugin name (it
+cannot know them): every rule goes to the judge, scope shown as
+`[source: …]`, and the judge weighs it against the real source and the
+content. With no rule it costs nothing, otherwise ONE completion on
 the chat model (`memory.JUDGE`, swapped by tests; never the Live session); any
 failure lets the message through. The rules also reach the conversation:
 `memory.clause()` is in `TalkSession.system_prompt()` (all engines) and in the

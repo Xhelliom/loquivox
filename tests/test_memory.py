@@ -131,13 +131,18 @@ def test_a_covered_source_message_wakes_nothing_and_the_others_pass():
     print("✓ covered message: no wake, no session, counted; others pass")
 
 
-def test_a_scoped_rule_is_not_even_asked_about_another_source():
+def test_a_scope_that_is_not_a_plugin_name_still_applies():
     _reset()
-    memory.add("Copilot reviews", source="beacon")
-    assert not memory.discards("elsewhere", "Copilot reviews again")
-    assert ASKED == [], "the judge was called for a rule that cannot apply"
-    assert memory.discards("beacon", "Copilot reviews again")
-    print("✓ a scope narrows what the judge is asked")
+    memory.add("reviews", source="Copilot")      # the model's words, not "beacon"
+    seen: list = []
+
+    def judge(rules, source, content):
+        seen.append(source)
+        return [i for i, r in enumerate(rules) if r["source"].lower() in content.lower()]
+    memory.JUDGE = judge
+    assert memory.discards("beacon", "Copilot reviews again"), "free scope never applied"
+    assert not memory.discards("beacon", "Deploy failed"), "unrelated message dropped"
+    print("✓ a free-text scope reaches the judge, which decides")
 
 
 def test_no_rules_means_no_judge_and_a_failing_judge_lets_through():
