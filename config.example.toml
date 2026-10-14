@@ -151,11 +151,11 @@ click_mode = "silent"
 # (LockedHint is ignored: stuck at "yes" on niri + Noctalia).
 silence_on_lock = true
 # Same silence after this many minutes without keyboard/mouse input (Wayland,
-# 10 = Noctalia's own idle lock; it sets only logind's LockedHint, never emits
-# Lock, so on Noctalia this is what catches its lock. To also catch a manual
-# lock, bind it to `loginctl lock-session` (emits Lock; whether Noctalia
-# then locks too is untested).
 # via swayidle); 0 = off. Read at startup. Any input brings the mode back.
+# 10 = Noctalia's own idle lock: it only sets logind's LockedHint and never
+# emits Lock, so this is what catches its lock. A manual lock is caught only
+# if bound to `loginctl lock-session` (emits Lock; whether Noctalia then locks
+# too is untested).
 silence_idle_min = 10
 # Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
 # Applied live from Settings → Companion.
