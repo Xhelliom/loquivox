@@ -11,6 +11,8 @@ never ends, or ends mid-sentence once max_silence runs out.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import types
 from pathlib import Path

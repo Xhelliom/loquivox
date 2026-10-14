@@ -9,6 +9,8 @@ holds the line, and it does nothing without a session or a description.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 from pathlib import Path
 

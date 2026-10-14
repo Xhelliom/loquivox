@@ -7,6 +7,8 @@ Presence, bubble and the cloud session are injected; no microphone, no GTK windo
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import time
 from pathlib import Path

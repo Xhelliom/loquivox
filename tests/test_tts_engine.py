@@ -8,6 +8,8 @@ which fail only at speaking time, in a background thread.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import threading
 from pathlib import Path

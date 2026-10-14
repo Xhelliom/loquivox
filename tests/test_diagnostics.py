@@ -9,6 +9,8 @@ the error message the report exists to carry.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import io
 import os
 import sys

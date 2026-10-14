@@ -5,6 +5,8 @@ Self-check for TALK_ECHO_GUARD (config reading, old keys included):
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 from pathlib import Path
 

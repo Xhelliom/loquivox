@@ -6,6 +6,8 @@ must never flash on screen, and the throttle in front of the overlay.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import sys
 import types
 from pathlib import Path

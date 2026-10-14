@@ -7,6 +7,8 @@ original volume.
 """
 from __future__ import annotations
 
+import _hermetic  # noqa: F401  (must precede any loquivox import)
+
 import json
 import subprocess
 import sys
