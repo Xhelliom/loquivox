@@ -120,6 +120,7 @@ network, no key, API error.
 | `F10` | **TTS** | Toggle spoken read-back of AI answers |
 | `Esc` | **Cancel** | Abort the active recording / transcription (nothing inserted) |
 | `Space` | **Pause** | Pause / resume the current recording |
+| *(unbound)* | **Companion wake** | Open a companion session without the wake word (also in silence mode); pressed again during the session, it ends it |
 | *(unbound)* | **Refine** | Stop, then pick this dictation's refinement level |
 
 Keys are **hold-to-talk** by default; tick *Toggle Mode* in the tray menu for press-to-start / press-to-stop.

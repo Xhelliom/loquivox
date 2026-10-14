@@ -147,9 +147,10 @@ class Companion:
             self._voice = voice
             self.bubble.set_state(voice)
 
-    def wake(self) -> None:
-        """Wake word heard (on its own thread): run one conversation, block until over."""
-        if (not self.presence_on() or STATE.talk_active or STATE.recording
+    def wake(self, force: bool = False) -> None:
+        """Wake word heard (on its own thread): run one conversation, block until over.
+        ``force`` (the wake key) opens it in silence mode too."""
+        if (not (force or self.presence_on()) or STATE.talk_active or STATE.recording
                 or STATE.companion_session):
             return
         from loquivox.services.talk import TalkSession
@@ -182,6 +183,13 @@ class Companion:
                 self.presence.resume()
             self.bubble.set_state(self._standby())
 
+    def wake_key(self) -> None:
+        """The wake key: open a session, or end the one that is open."""
+        if STATE.companion_session:
+            STATE.talk_click.put("finish")
+        else:
+            threading.Thread(target=self.wake, kwargs={"force": True}, daemon=True).start()
+
     def on_wake(self) -> None:   # Presence callback
         self.wake()
 
@@ -206,6 +214,11 @@ def set_wake_word(name: str) -> None:
 def toggle_silence() -> None:
     if _companion is not None:
         _companion.toggle_silence()
+
+
+def wake_key() -> None:
+    if _companion is not None:
+        _companion.wake_key()
 
 
 def pause_for_talk() -> None:

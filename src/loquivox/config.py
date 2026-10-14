@@ -53,6 +53,7 @@ HOTKEY_DESCRIPTIONS: Dict[str, str] = {
     "pause":      "Pause / resume the recording",
     "refine":     "Stop & pick this dictation's refinement",
     "companion":  "Companion: toggle silence mode",
+    "companion_wake": "Companion: open / end a session",
 }
 
 
@@ -632,6 +633,7 @@ class Config:
         # The companion shows no overlay (its bubble is the whole UI); the entry
         # keeps the table complete for anything that iterates it.
         "companion":  {"icon": "🫧", "text": "Companion...",    "bg": "bg", "fg": "accent"},
+        "companion_wake": {"icon": "🫧", "text": "Companion...", "bg": "bg", "fg": "accent"},
     })
 
     #: The modes whose hotkey records audio while it is held. MODES above is the
@@ -663,6 +665,9 @@ class Config:
         "refine":     ("(unset)", []),
         # Companion: toggle silence mode (the wake word stops being listened for).
         "companion":  ("F7",  ["F7"]),
+        # Companion: open a session without the wake word (also in silence
+        # mode), or end the open one. Unbound by default.
+        "companion_wake": ("(unset)", []),
     })
 
 
