@@ -80,7 +80,7 @@ backend = "whispercpp"          # 100% local — nothing leaves your machine
 whispercpp_model = "large-v3-turbo"
 ```
 
-Or select it in **Settings → Models**. Set `backend = "auto"` to prefer the cloud when
+Or select it in **Settings → Dictation**. Set `backend = "auto"` to prefer the cloud when
 a key is available and fall back to the local engine otherwise — the local engine is also the
 automatic **fallback** (`fallback = "whispercpp"`) whenever the cloud backend fails: no
 network, no key, API error.
@@ -99,9 +99,9 @@ network, no key, API error.
 > **Scope of the offline mode today:** local execution covers *speech-to-text*, which is what
 > dictation needs — so **dictation works fully offline**. The AI features (chat, talk,
 > web search and the optional dictation refinement) call a cloud provider: **Groq** or
-> **OpenAI**, picked in Settings → Models. Pointing them at a self-hosted chat model is
+> **OpenAI**, picked in Settings → Models & keys. Pointing them at a self-hosted chat model is
 > not supported yet. In talk mode's cascade engine the voice and the turn detection are
-> local too — Settings → Models offers OpenAI's multilingual voices (`OPENAI_API_KEY`,
+> local too — Settings → Models & keys offers OpenAI's multilingual voices (`OPENAI_API_KEY`,
 > Groq's Orpheus only speaks English) and **Piper**, which speaks French on your machine
 > with no key and no network; the *Private* preset picks all of that at once, so nothing
 > but the conversation itself leaves the machine.
@@ -128,13 +128,13 @@ All of them are remappable in **Settings → Hotkeys**, combos included. `Refine
 assign a key to use it.
 
 Both conversations (`F4` and `F6`) can **look things up**: when the model needs a fact it
-hands the question to a web-searching model (Settings → Models → Search) and keeps talking;
+hands the question to a web-searching model (Settings → Tools → Search) and keeps talking;
 the answer is spoken as soon as it is back. Inside a conversation, `S` looks at the screen
 again and `T` sends the current selection — see the key table under Talk mode.
 
 > [!TIP]
 > Forgot a key? A thin tab sits at the top-center of your screen — hover it and the full list
-> drops down. Turn it off in **Settings → Appearance & comfort**.
+> drops down. Turn it off in **Settings → Appearance**.
 
 ---
 
@@ -155,7 +155,7 @@ stopping**. So the next sentence can be *"non, plus court, et enlève le dernier
 and the one after that too. That is the difference between an assistant you brief and one
 you work with.
 
-**Speech to speech, two ways** — in Settings → Models, or with one of the presets there
+**Speech to speech, two ways** — in Settings → Conversation, or with one of the presets there
 (*Fast*, *Natural*, *Private*):
 
 | Engine | How | Latency | What you get |
@@ -174,7 +174,7 @@ it is looking it up and **keeps the conversation going**, while a web-searching 
 (Groq's compound model by default, ~2 s, or OpenAI's Responses API with `web_search`)
 fetches the answer on a thread. The result is handed back **between turns**, never
 mid-sentence, and stays in the brief so the final text has the facts. Pick the provider in
-Settings → Models → Search; `research = false` under `[talk]` turns the tool off.
+Settings → Tools → Search; `research = false` under `[talk]` turns the tool off.
 
 **You can watch it happen.** A bubble opens on the hotkey, just above the recording
 indicator: your words appear as they are heard, the reply as it is written — sentence by
@@ -183,13 +183,13 @@ the exchange, stays translucent enough to read what is behind it, and closes wit
 (the pin hotkey brings it back). Live text needs a streaming transcription backend; with a
 batch one your turn simply appears when you finish it.
 
-**Or skip the review entirely.** Settings → Talk → *Paste the finished text
+**Or skip the review entirely.** Settings → Conversation → *Paste the finished text
 straight away* pastes it where your cursor was the moment the conversation
 ended, with no key to press — the trade being that there is then no redo and
 no going back. Off by default: talk mode otherwise never types anything you
 have not accepted.
 
-**Tell it how to talk to you.** Settings → Talk has an *Instructions* box for the standing
+**Tell it how to talk to you.** Settings → Conversation has an *Instructions* box for the standing
 things: the language to answer in, the tone, the kind of work you usually discuss. It is
 added to the built-in prompt rather than replacing it, so the conversation still asks one
 question at a time and still knows when to stop.
@@ -199,7 +199,7 @@ stops mid-sentence and listens — your first words are kept as the start of you
 not lost to the interruption. It works out how loudly it can hear itself by listening
 to its own reply, so a headset normally needs no setting. If it ignores you or
 you cannot get a word in on a headset, set *Anti-echo* to **Off (headset)** in
-Settings → Talk (`echo_guard = "off"`): nothing holds the microphone back any more,
+Settings → Conversation (`echo_guard = "off"`): nothing holds the microphone back any more,
 and talking over the reply still stops it. *Headset, no calibration*
 (`"headset"`) only skips the measurement. On speakers with the volume up, keep
 *Speakers* and use `libpipewire-module-echo-cancel` so it does not cut itself off.
@@ -219,12 +219,12 @@ actually want — the unstated assumption, the objection your reader will raise.
 | *"I'm done"*, *"go ahead"*, *"that's it"* (French phrases work too) | said out loud, caught on the transcript before the model is even called | `finish_on_phrase` |
 | the assistant decides | it hands itself over once it could write the text well | `finish_by_model` |
 
-The last two are independent toggles — in **Settings → Talk**, or under `[talk]` in
+The last two are independent toggles — in **Settings → Conversation**, or under `[talk]` in
 `config.toml`. Turn both off and nothing writes the text until *you* press the key.
 
 **It can look at your screen.** Half of what you're about to dictate is already in
 front of you — the error dialog, the thread you're answering, the page you're describing —
-and you won't say it out loud. Tick *Send a screenshot as context* in **Settings → Talk** and
+and you won't say it out loud. Tick *Send a screenshot as context* in **Settings → Conversation** and
 the focused window is captured when the session opens, described once by the vision model, and
 handed to the conversation as context. It runs **in parallel with your first sentence**, so it
 costs no startup delay, and it's one vision call per session — not one per turn. Press `S`
@@ -338,7 +338,7 @@ export GROQ_API_KEY="your_key"   # optional if you only use the local backend
 loquivox                         # or: python -m loquivox
 ```
 
-The key can also be set from the tray → **Settings → API Keys**, and is stored for you.
+The key can also be set from the tray → **Settings → Models & keys**, and is stored for you.
 Get a free one at [console.groq.com](https://console.groq.com).
 
 ---
@@ -381,8 +381,8 @@ layer-rule {
 
 ## ⚙️ Configuration
 
-Most things are adjustable from the tray icon (**Settings**: Models, Talk, Refinement, Hotkeys,
-Appearance & comfort, API Keys, Support). Everything else lives in an optional TOML file:
+Most things are adjustable from the tray icon (**Settings**: Dictation, Conversation, Companion,
+Tools, Models & keys, Appearance, Hotkeys, Support). Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml
@@ -415,7 +415,7 @@ source loads the MCP server named `board` as soon as it announces something.
 A tool that is not marked read-only by its server (no `readOnlyHint`, or none at all) is
 **confirmed out loud** before it runs, and what a tool returns is treated as data, never as an
 instruction. A server that is missing or crashes is a warning, not a failed start.
-**Settings → Plugins → MCP servers** lists each server, its state and its tools (⚡ = acts), with
+**Settings → Tools → MCP servers** lists each server, its state and its tools (⚡ = acts), with
 an on/off switch.
 
 ---
@@ -427,7 +427,7 @@ an on/off switch.
 and no spoken confirmation — you wrote them. Format, event list and a worked example (a light turns
 blue while the companion speaks, and goes back afterwards) are in `config.example.toml`.
 `loquivox --rules-catalog` lists the events and each server's tools; `loquivox --rules-check`
-validates your rules (exit code 1 if one is wrong). Settings → Plugins → Rules shows each rule's last result.
+validates your rules (exit code 1 if one is wrong). Settings → Tools → Rules shows each rule's last result.
 
 ## 🐛 Reporting a bug
 

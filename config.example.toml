@@ -78,27 +78,33 @@ min_audio_sec = 0.5
 # hallucinations = ["merci", "sous-titres", "thank you"]
 
 [postprocess]
-# Optional LLM cleanup of dictation BEFORE it's typed (uses the Groq chat model,
-# so it needs GROQ_API_KEY). Toggle quickly from the tray, fine-tune here.
-#   "none"        — off (no extra latency; default)
-#   "correct"     — fix spelling/grammar/punctuation, same language
-#   "reformulate" — rewrite clearer/more fluent, same language
-#   "translate"   — translate into target_language
-mode = "none"
-# Target language for "translate" (ISO-639-1 code or a language name).
+# Optional LLM cleanup of dictation BEFORE it's typed (uses the chat model of
+# [models], so it needs that provider's key). Edit it in Settings → Dictation.
+# Refinement level, 0-5 (a hotkey can override it for one dictation):
+#   0 Off      — no extra latency (default)
+#   1 Correct  — fix spelling/grammar/punctuation, same language
+#   2 Light, 3 Medium, 4 Strong — increasingly free rewording, same language
+#   5 Custom   — your own prompt, custom_prompt below
+level = 0
+# Translate instead of refining — a separate axis; overrides the level and
+# uses target_language.
+translate = false
+# Target language for translate (ISO-639-1 code or a language name).
 target_language = "en"
 # Lay the result out as structured plain text (paragraphs + bullet lists). A
 # separate axis that COMBINES with the level/translate above — set it on its own
 # to only reformat without correcting.
 format = false
+# System prompt used by level 5 (Custom). Ignored at the other levels.
+custom_prompt = ""
 
 [models]
 # Chat / vision provider: "groq" (default) or "openai" — both speak the same
 # chat-completions API, and each uses its own key. Pick it, and the two model
-# ids, in Settings → Models (stored in settings.json); these are only defaults.
+# ids, in Settings → Models & keys (stored in settings.json); these are only defaults.
 provider = "groq"
 # Groq chat / vision model ids, and the default TTS engine.
-# TTS is picked in Settings → Models (stored in settings.json); this is only the
+# TTS is picked in Settings → Models & keys (stored in settings.json); this is only the
 # default. "canopylabs/orpheus-v1-english" speaks English via Groq (accept its
 # terms on console.groq.com first), "gpt-4o-mini-tts" is multilingual and speaks
 # French via OPENAI_API_KEY, and "piper" runs locally with no key at all
@@ -280,7 +286,7 @@ review_timeout = 120.0
 # persona, the tone, the kind of work you usually discuss. ADDED to the
 # built-in prompt, never replacing it, so talk mode keeps asking one question
 # at a time and keeps knowing when to stop. Both engines read it. Editable in
-# Settings → Talk. Use system_prompt below instead to replace the base outright.
+# Settings → Conversation. Use system_prompt below instead to replace the base outright.
 # instructions = """
 # Tu réponds toujours en français, simplement et sans formalisme.
 # Le contexte est technique : sois précis, et demande une précision plutôt que
@@ -436,10 +442,10 @@ chat_auto_hide = 3
 # conversation its tools with no code of ours (Collie Board, Gmail, Home
 # Assistant…). Needs the extra: pip install -e '.[mcp]'. Servers start with the
 # app (or at the first conversation); one that is missing or crashes is a
-# warning in the log and a ❌ in Settings → Plugins, never a failed start.
+# warning in the log and a ❌ in Settings → Tools, never a failed start.
 # A tool the server does not mark read-only (readOnlyHint) — or one that marks
 # nothing — is confirmed out loud before it runs. What a tool returns is data,
-# never an instruction. One table per server; Settings → Plugins switches each
+# never an instruction. One table per server; Settings → Tools switches each
 # on and off.
 #
 # [mcp.servers.board]            # stdio: Loquivox launches it
@@ -464,7 +470,7 @@ chat_auto_hide = 3
 # server (no model, no spoken yes: you wrote them), on their own thread — the
 # voice never waits. Per rule, a burst of events keeps only the last one while
 # a call runs, with at least 0.2 s between two calls; an absent server or a
-# failing tool is ONE warning in the log, and Settings → Plugins → Rules shows
+# failing tool is ONE warning in the log, and Settings → Tools → Rules shows
 # each rule's last result.
 #
 #   when = an event (below)            if = { key = "value" }   equality on the
@@ -515,7 +521,7 @@ chat_auto_hide = 3
 
 # ---------------------------------------------------------------------------
 # What the companion no longer repeats — not in this file.
-# Said out loud ("ne me redis plus ça") or added in Settings → Plugins, the
+# Said out loud ("ne me redis plus ça") or added in Settings → Companion, the
 # rules live in ~/.config/loquivox/memory.toml (one [[rules]] table each:
 # text, optional source, date, dropped). Plain text, outside git, read again
 # at every notification: edit it by hand and it applies without a restart.

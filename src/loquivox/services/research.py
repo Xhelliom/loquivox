@@ -11,7 +11,7 @@ never waits in silence.
 
 Two providers, one call each and no agent loop: OpenAI's Responses API with
 its built-in ``web_search`` tool, or a Groq "compound" model that searches on
-its own. Picked in Settings → Models.
+its own. Picked in Settings → Tools → Search.
 
 This is also the reference plugin: everything below the prompts is the
 quintuplet ``services/plugins.py`` asks for — the tool, the background work,
@@ -118,7 +118,7 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
 
 def _settings(dialog, vbox, labels) -> None:
     """
-    This plugin's card in Settings → Plugins, built with the dialog's own
+    This plugin's card in Settings → Tools, built with the dialog's own
     helpers so it lines up with every other group on the page.
 
     The widgets live in this closure rather than on the dialog class: a plugin
@@ -155,6 +155,13 @@ def _settings(dialog, vbox, labels) -> None:
         pid = provider.get_active_id() or "openai"
         model.get_child().set_text(cfg.RESEARCH_DEFAULT_MODELS.get(pid, ""))
     provider.connect("changed", _default_model)
+
+    # Without the switch there is no search, so nothing to choose.
+    def _follow_switch(_check=None) -> None:
+        provider.set_sensitive(check.get_active())
+        model.set_sensitive(check.get_active())
+    check.connect("toggled", _follow_switch)
+    _follow_switch()
 
     status = Gtk.Label()
 
