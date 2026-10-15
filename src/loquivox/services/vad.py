@@ -35,6 +35,8 @@ from typing import List, Optional
 
 import numpy as np
 
+from loquivox.i18n import N_, _
+
 
 class VoiceActivityDetector:
     """Energy-based end-of-turn detector for one conversation turn."""
@@ -276,12 +278,18 @@ class EchoGate:
         """
         if self.echo_peak < self.threshold * self.ADVICE_GAIN:
             return ""
-        return ("🔇 The speakers come back into the microphone louder than "
-                f"speech itself ({self.echo_peak:.3f} against a "
-                f"{self.threshold:.3f} threshold): interrupting a reply cannot "
-                "work reliably here. Use a headset, or echo cancellation "
-                "(PipeWire's libpipewire-module-echo-cancel), selected as the "
-                "microphone.")
+        return self._ADVICE.format(peak=self.echo_peak, threshold=self.threshold)
+
+    def advice_ui(self) -> str:
+        """``advice`` in the UI language (the log keeps the English one)."""
+        return _(self._ADVICE).format(peak=self.echo_peak, threshold=self.threshold) if self.advice else ""
+
+    _ADVICE = N_("🔇 The speakers come back into the microphone louder than "
+                 "speech itself ({peak:.3f} against a "
+                 "{threshold:.3f} threshold): interrupting a reply cannot "
+                 "work reliably here. Use a headset, or echo cancellation "
+                 "(PipeWire's libpipewire-module-echo-cancel), selected as the "
+                 "microphone.")
 
     @property
     def report(self) -> str:
@@ -303,16 +311,16 @@ if __name__ == "__main__":
     quiet = np.zeros(CHUNK, dtype=np.float32)
     voice = (np.random.default_rng(0).standard_normal(CHUNK) * 0.2).astype(np.float32)
 
-    for _ in range(3):                  # 300 ms calibrating on a quiet room
+    for _i in range(3):                  # 300 ms calibrating on a quiet room
         vad.feed(quiet)
     assert not vad.speech_started, "calibration must not count as speech"
-    for _ in range(5):                  # 500 ms of speech
+    for _i in range(5):                  # 500 ms of speech
         vad.feed(voice)
     assert vad.speech_started and not vad.ended
-    for _ in range(3):                  # 300 ms pause — shorter than silence_ms
+    for _i in range(3):                  # 300 ms pause — shorter than silence_ms
         vad.feed(quiet)
     assert not vad.ended, "a short pause must not end the turn"
-    for _ in range(3):                  # 600 ms of silence — the turn is over
+    for _i in range(3):                  # 600 ms of silence — the turn is over
         vad.feed(quiet)
     assert vad.ended
     # A barge-in turn: primed mid-sentence, it must still be able to end.
@@ -320,22 +328,22 @@ if __name__ == "__main__":
                                    min_speech_ms=200, calibration_ms=300)
     barged.prime(0.8)
     assert barged.speech_started and barged.speech_seconds >= 0.8
-    for _ in range(3):                  # speech carrying on past the interruption
+    for _i in range(3):                  # speech carrying on past the interruption
         barged.feed(voice)
     assert not barged.ended
-    for _ in range(8):                  # 800 ms of silence closes it
+    for _i in range(8):                  # 800 ms of silence closes it
         barged.feed(quiet)
     assert barged.ended, "a primed turn must still end (calibration ate the level?)"
     # The calibration window catches the user already mid-sentence (they
     # answered the moment the microphone opened): the turn must still end.
     late = VoiceActivityDetector(RATE, threshold=0.02, silence_ms=500,
                                  min_speech_ms=200, calibration_ms=400)
-    for _ in range(4):                  # 400 ms of calibration, all speech
+    for _i in range(4):                  # 400 ms of calibration, all speech
         late.feed(voice)
-    for _ in range(5):                  # they carry on
+    for _i in range(5):                  # they carry on
         late.feed(voice)
     assert late.speech_started, "speech during calibration left the level deaf"
-    for _ in range(8):                  # 800 ms of real silence
+    for _i in range(8):                  # 800 ms of real silence
         late.feed(quiet)
     assert late.ended, f"the turn never ends (level {late._level:.3f})"
     print("✓ VoiceActivityDetector turn detection OK")
@@ -345,11 +353,11 @@ if __name__ == "__main__":
     rng = np.random.default_rng(1)
     echo = (rng.standard_normal(CHUNK) * 0.03).astype(np.float32)
     gate = EchoGate(RATE, threshold=0.02, margin=2.0, calibration_ms=600)
-    for _ in range(30):                 # 3 s of reply leaking into the mic
+    for _i in range(30):                 # 3 s of reply leaking into the mic
         gate.feed(echo)
     assert gate.speech_seconds == 0, (
         f"the assistant would cut itself off (bar {gate.bar:.3f})")
-    for _ in range(5):                  # the user talks over it, louder
+    for _i in range(5):                  # the user talks over it, louder
         gate.feed(voice)
     assert gate.speech_seconds >= 0.4, "a real interruption went unheard"
     assert "×6" in gate.report or "×7" in gate.report, gate.report
@@ -359,7 +367,7 @@ if __name__ == "__main__":
     # tracking level gets wrong.
     loud = EchoGate(RATE, threshold=0.02, margin=2.0, calibration_ms=600)
     quiet_block = np.zeros(CHUNK, dtype=np.float32)
-    for _ in range(6):
+    for _i in range(6):
         for block in [(rng.standard_normal(CHUNK) * 0.12).astype(np.float32)] * 8 \
                 + [quiet_block] * 6:
             loud.feed(block)
@@ -369,7 +377,7 @@ if __name__ == "__main__":
     # A headset — no echo at all — and a voice that comes up over several
     # blocks the way a real one does: a bar that tracks climbs ahead of it.
     head = EchoGate(RATE, threshold=0.02, margin=2.0, calibration_ms=600)
-    for _ in range(20):                 # 2 s of reply, nothing leaking back
+    for _i in range(20):                 # 2 s of reply, nothing leaking back
         head.feed((rng.standard_normal(CHUNK) * 0.002).astype(np.float32))
     for i in range(40):                 # the user starts talking, gradually
         head.feed((rng.standard_normal(CHUNK) * 0.004 * 1.15 ** i).astype(np.float32))
@@ -387,7 +395,7 @@ if __name__ == "__main__":
     hs = EchoGate(RATE, threshold=0.02, margin=2.0, calibration_ms=600,
                   headset=True)
     assert hs.bar == 0.02, hs.bar
-    for _ in range(4):                  # the user cuts in the moment it starts
+    for _i in range(4):                  # the user cuts in the moment it starts
         hs.feed(voice)
     assert hs.echo_peak == 0.0, hs.echo_peak
     assert hs.speech_seconds >= 0.3, "headset barge-in waited out calibration"

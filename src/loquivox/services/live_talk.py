@@ -49,6 +49,7 @@ import numpy as np
 import sounddevice as sd
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.talk import _strip_marker, echo_note, user_said_done, user_said_stop
@@ -548,7 +549,7 @@ class LiveTalk:
         self._session.turns.append(message)
         if plugin.result_note:
             from loquivox.managers.chat import ChatManager
-            ChatManager.add_message("note", plugin.result_note)
+            ChatManager.add_message("note", _(plugin.result_note))
         try:
             self._append("commentary", message["content"])
         except Exception as e:
@@ -586,7 +587,7 @@ class LiveTalk:
 
         try:
             self._settle(expect_new=True)
-            ChatManager.add_message("note", "🧠 Thinking…")
+            ChatManager.add_message("note", _("🧠 Thinking…"))
             started = time.time()
             answer = self._session.consult()
             took = time.time() - started
@@ -685,7 +686,7 @@ class LiveTalk:
         if message is not None:
             self._session.turns.append(message)
             if desk.plugin.result_note:
-                ChatManager.add_message("note", desk.plugin.result_note)
+                ChatManager.add_message("note", _(desk.plugin.result_note))
         # Something must go back either way: the backend response is paused
         # until this call is answered, so an unusable result is still an answer.
         output = message["content"] if message is not None else "No result."
@@ -1160,7 +1161,7 @@ if __name__ == "__main__":
         talk._queued = 4800
         voice = np.full(480, 0.3, dtype=np.float32)
         flushed = False
-        for _ in range(60):
+        for _i in range(60):
             out = talk._mic_chunks(voice)
             assert len(out) == 1 and out[0] is voice, "guard off held the microphone"
             flushed = flushed or not talk._chunks

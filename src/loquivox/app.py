@@ -73,13 +73,14 @@ def _start_companion() -> bool:
     try:
         from loquivox import config as config_module
         from loquivox.handlers import companion
+        from loquivox.i18n import _
         from loquivox.services.presence import Presence
         from loquivox.ui.companion_bubble import CompanionBubble
 
         holder = []
         bubble = CompanionBubble(
             on_click=lambda: holder[0].click(),
-            modes=[(label, lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES])
+            modes=[(_(label), lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES])
         presence = Presence(lambda: holder[0].on_wake(),
                              wake_model=config_module.CFG.COMPANION_WAKE_WORD)
         holder.append(companion.install(presence, bubble))
@@ -135,6 +136,8 @@ def _run() -> None:
     # Load UI-managed API keys into the environment before any backend reads
     # them (keys present in the file win; inherited env keys still apply).
     load_secrets()
+    from loquivox import i18n
+    i18n.init()
 
     print(f"🚀 Loquivox {__version__} is running.")
     if log_path is not None:

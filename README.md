@@ -382,7 +382,9 @@ layer-rule {
 ## ⚙️ Configuration
 
 Most things are adjustable from the tray icon (**Settings**: Dictation, Conversation, Companion,
-Tools, Models & keys, Appearance, Hotkeys, Support). Everything else lives in an optional TOML file:
+Tools, Models & keys, Appearance, Hotkeys, Support). The interface is in English by default and
+fully available in French: it follows your locale, or pick **Auto / English / Français** in
+**Appearance → Language**. Everything else lives in an optional TOML file:
 
 ```bash
 cp config.example.toml ~/.config/loquivox/config.toml

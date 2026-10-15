@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Callable, Dict
 
+from loquivox.i18n import _
 from loquivox.config import CFG
 from loquivox.decorators import run_on_main_thread
 from loquivox.state import STATE, HAS_APP_INDICATOR
@@ -39,7 +40,7 @@ class TrayManager:
             AppIndicator.IndicatorCategory.APPLICATION_STATUS
         )
         STATE.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
-        STATE.indicator.set_title("Loquivox")
+        STATE.indicator.set_title(_("Loquivox"))
         TrayManager.refresh_icon()
         TrayManager.update_menu()
         Gtk.main()
@@ -95,37 +96,37 @@ class TrayManager:
                 menu.append(menu_item)
             menu.append(Gtk.SeparatorMenuItem())
         else:
-            empty = Gtk.MenuItem(label="(No History)")
+            empty = Gtk.MenuItem(label=_("(No History)"))
             empty.set_sensitive(False)
             menu.append(empty)
             menu.append(Gtk.SeparatorMenuItem())
 
         # Clear history
-        clear = Gtk.MenuItem(label="Clear History")
+        clear = Gtk.MenuItem(label=_("Clear History"))
         clear.connect("activate", lambda w: HistoryManager.clear_all())
         menu.append(clear)
         
         menu.append(Gtk.SeparatorMenuItem())
         
         # Companion silence: the same switch as F7, ticked while silent
-        silence = Gtk.CheckMenuItem(label="Companion silence")
+        silence = Gtk.CheckMenuItem(label=_("Companion silence"))
         silence.set_active(STATE.presence_mode == "silent")
         silence.connect("toggled", TrayManager._toggle_silence)
         menu.append(silence)
 
-        chat_toggle = Gtk.CheckMenuItem(label="Show chat")
+        chat_toggle = Gtk.CheckMenuItem(label=_("Show chat"))
         chat_toggle.set_active(STATE.chat_enabled)
         chat_toggle.connect("toggled", TrayManager._toggle_chat)
         menu.append(chat_toggle)
 
-        settings_item = Gtk.MenuItem(label="Settings…")
+        settings_item = Gtk.MenuItem(label=_("Settings…"))
         settings_item.connect("activate", lambda w: SettingsDialog.show())
         menu.append(settings_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
         # Quit
-        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item = Gtk.MenuItem(label=_("Quit"))
         quit_item.connect("activate", TrayManager._quit)
         menu.append(quit_item)
 

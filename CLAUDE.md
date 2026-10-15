@@ -999,8 +999,19 @@ through the same `redact()`.
   A preset writes several slots at once (config.toml *and* settings.json), so
   `_refresh_engine_widgets` puts every combo back in step — and it must read
   `config_module.CFG`, since `reload_config()` rebinds the singleton the
-  module-level `CFG` import no longer points at. The interface is in English;
-  translation is a separate piece of work.
+  module-level `CFG` import no longer points at.
+- **Everything the user reads goes through `_()`** (`loquivox.i18n`, stdlib
+  `gettext` over a plain dict: `locale_fr.py`, no `.mo` to build). English is
+  the source language and the default; the choice is `language` in
+  settings.json (`auto` follows the locale / `en` / `fr`), set in
+  Appearance → Language. A module-level table that holds labels marks them
+  with `N_()` and translates where it shows them (`_(label)`) — `_()` at
+  import time would freeze the language. Placeholders are `.format()`ed after
+  translating, never f-strings. **The log is not translated**: `print()` stays
+  English because `diagnostics.py` reads it. Adding a string means adding its
+  French line to `locale_fr.py`; `tests/test_i18n.py` fails on a missing one,
+  on a dead one, on a placeholder that drifted, and on a bare literal handed to
+  a GTK label. Never bind `_` as a throwaway variable in these modules.
 - Every page in `settings_dialog.py` is built from three helpers, never by
   hand: `_group()` (a title, one dim line of prose, a framed body), `_field()`
   (one label → control row, joined to the page's `Gtk.SizeGroup` so the label

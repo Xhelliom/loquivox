@@ -31,6 +31,7 @@ import numpy as np
 import sounddevice as sd
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.services import media
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.talk import (FINISH_MARKER, _strip_marker, echo_note,
@@ -472,7 +473,7 @@ class RealtimeTalk:
         self._session.turns.append(message)
         if plugin.result_note:
             from loquivox.managers.chat import ChatManager
-            ChatManager.add_message("note", plugin.result_note)
+            ChatManager.add_message("note", _(plugin.result_note))
         try:
             asyncio.run_coroutine_threadsafe(self._say_result(message["content"]),
                                              self._loop)
@@ -592,12 +593,12 @@ if __name__ == "__main__":
     assert len(gate._mic_chunks(echo)) == 1, "nothing playing — the mic goes through"
     gate._handle(_Event(type="response.output_audio.delta",
                         delta=base64.b64encode(b"\x00" * 64).decode()))
-    for _ in range(30):                 # 3 s of the reply leaking back in
+    for _i in range(30):                 # 3 s of the reply leaking back in
         assert not gate._mic_chunks(echo), "the assistant would cut itself off"
     held = sum(len(c) for c in gate._held) / RATE
     assert held <= config_module.CFG.TALK_BARGE_IN_KEEP + 0.1, f"unbounded buffer ({held:.1f}s)"
     opened = []
-    for _ in range(8):                  # the user talks over it, louder
+    for _i in range(8):                  # the user talks over it, louder
         opened += gate._mic_chunks(voice)
     assert len(opened) > 4, "a real interruption never reached the model"
     assert not gate._held, "the words that cut in were dropped"
@@ -605,14 +606,14 @@ if __name__ == "__main__":
     saved = config_module.CFG
     config_module.CFG = dataclasses.replace(saved, TALK_BARGE_IN=False)
     try:
-        assert not [c for _ in range(10) for c in gate._mic_chunks(voice)], \
+        assert not [c for _i in range(10) for c in gate._mic_chunks(voice)], \
             "half duplex still forwarded the room"
     finally:
         config_module.CFG = saved
     # Guard off: no gate at all, the server is the one that hears the user cut in.
     config_module.CFG = dataclasses.replace(saved, TALK_ECHO_GUARD="off")
     try:
-        assert len([c for _ in range(10) for c in gate._mic_chunks(echo)]) == 10, \
+        assert len([c for _i in range(10) for c in gate._mic_chunks(echo)]) == 10, \
             "guard off held the microphone"
     finally:
         config_module.CFG = saved
@@ -630,7 +631,7 @@ if __name__ == "__main__":
     loud._handle(_Event(type="response.output_audio.delta",
                         delta=base64.b64encode(b"\x00" * 64).decode()))
     silence = np.zeros(2400, dtype=np.float32)
-    for _ in range(6):
+    for _i in range(6):
         for chunk in [_noise(rng, 0.12)] * 8 + [silence] * 6:
             assert not loud._mic_chunks(chunk), \
                 f"the reply interrupted itself (bar {loud._gate.bar:.3f})"
@@ -641,7 +642,7 @@ if __name__ == "__main__":
     head = RealtimeTalk(TalkSession())
     head._handle(_Event(type="response.output_audio.delta",
                         delta=base64.b64encode(b"\x00" * 64).decode()))
-    for _ in range(50):                 # 1 s of reply, nothing leaking back
+    for _i in range(50):                 # 1 s of reply, nothing leaking back
         assert not head._mic_chunks(_noise(rng, 0.002, 480)), "a headset leaks?"
     ramp = [_noise(rng, 0.004 * 1.15 ** i, 480) for i in range(40)]  # 20 ms blocks
     assert [c for block in ramp for c in head._mic_chunks(block)], \

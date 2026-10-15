@@ -37,6 +37,7 @@ import threading
 from typing import Any, Dict
 
 import loquivox.config as config_module
+from loquivox.i18n import N_, _
 from loquivox.services.plugins import Plugin, register
 
 #: one text at a time. The generation takes seconds and the model is told so,
@@ -110,16 +111,16 @@ def _settings(dialog, vbox, labels) -> None:
 
     cfg = config_module.CFG
     body = dialog._group(
-        vbox, "Writing",
-        "In chat mode (F4), let the conversation produce a text without ending: "
+        vbox, _("Writing"),
+        _("In chat mode (F4), let the conversation produce a text without ending: "
         "ask for it out loud, it is written from everything said so far and "
         "pasted at your cursor, and the conversation carries on — so the next "
         "sentence can be \"shorter, and drop the last paragraph\". Off, F4 "
-        "writes nothing and F6 remains the way to get a text.")
+        "writes nothing and F6 remains the way to get a text."))
 
-    check = Gtk.CheckButton(label="Let the conversation write and paste a text")
+    check = Gtk.CheckButton(label=_("Let the conversation write and paste a text"))
     check.set_active(bool(cfg.TALK_WRITE_TOOL))
-    dialog._field(body, "Writing", check, labels)
+    dialog._field(body, _("Writing"), check, labels)
 
     status = Gtk.Label()
 
@@ -136,8 +137,9 @@ def _settings(dialog, vbox, labels) -> None:
         config_module.reload_config()
         print(f"✍️  Write tool: {'on' if enabled else 'off'}")
         status.set_markup(
-            f"<small>✓ Writing {'on' if enabled else 'off'} — takes effect on "
-            "the next talk session.</small>")
+            _("<small>✓ Writing on — takes effect on the next talk session.</small>")
+            if enabled else
+            _("<small>✓ Writing off — takes effect on the next talk session.</small>"))
 
     dialog._actions(body, _apply, status)
 
@@ -180,8 +182,8 @@ PLUGIN = Plugin(
     enabled=lambda: bool(config_module.CFG.TALK_WRITE_TOOL),
     # A briefing already ends in a text — see the module docstring.
     chat_only=True,
-    note=lambda args: "✍️ Rédaction en cours…",
-    result_note="📝 Texte rédigé",
+    note=lambda args: _("✍️ Writing…"),
+    result_note=N_("📝 Text written"),
     settings=_settings,
 )
 register(PLUGIN)

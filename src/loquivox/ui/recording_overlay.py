@@ -22,6 +22,7 @@ from typing import List, Optional, Tuple
 import cairo
 import numpy as np
 
+from loquivox.i18n import N_, _
 from loquivox.config import CFG
 from loquivox.platform import SESSION_TYPE
 from loquivox.state import STATE
@@ -51,7 +52,7 @@ def review_hint_line(mode: str) -> str:
     The keys a generated result offers, as one line — shown under talk mode's
     text in the chat bubble. V drops back into the conversation, brief intact.
     """
-    return "Entrée ✓   ·   C ⧉   ·   R ↻   ·   V 🗣️   ·   Échap ✗"
+    return _("Enter ✓   ·   C ⧉   ·   R ↻   ·   V 🗣️   ·   Esc ✗")
 
 
 class GtkOverlay(Gtk.Window):
@@ -259,7 +260,7 @@ class GtkOverlay(Gtk.Window):
             # dictation, so the badge must follow what was actually picked —
             # and the window must be re-measured around the new label.
             if STATE.show_refine_badge:
-                self.refine_badge = dict(POSTPROCESS_LEVELS).get(self.choose_level) \
+                self.refine_badge = _(dict(POSTPROCESS_LEVELS).get(self.choose_level)) \
                     if self.choose_level else None
                 self._base_w = self.width(self.refine_badge, self._hints)
             self._resize(self._base_w, self._base_h)
@@ -389,9 +390,9 @@ class GtkOverlay(Gtk.Window):
         # never spill onto the mic icon.
         live = False
         if self.transcribing:
-            text = "Transcription…"
+            text = _("Transcribing…")
         elif self.paused:
-            text = "Paused ⏸"
+            text = _("Paused ⏸")
         elif self.live_text:
             text = self.live_text
             live = True
@@ -451,13 +452,13 @@ class GtkOverlay(Gtk.Window):
         if not transcribing:
             k = keys("pause")
             if k:
-                items.append((k, "resume" if paused else "pause"))
+                items.append((k, N_("resume") if paused else N_("pause")))
             k = keys("refine")
             if k:
-                items.append((k, "refine"))
+                items.append((k, N_("refine")))
         k = keys("cancel")
         if k:
-            items.append((k, "cancel"))
+            items.append((k, N_("cancel")))
         return items
 
     @classmethod
@@ -480,7 +481,7 @@ class GtkOverlay(Gtk.Window):
                     cx += 2 + cls._draw_text_at(cr, font_family, "+", cx + 2, cy,
                                                 6.5, txt, 0.45 * a) + 4
                 cx += cls._draw_keycap(cr, cx, cy, key, base, txt, a)
-            cx += 5 + cls._draw_text_at(cr, font_family, action, cx + 5, cy,
+            cx += 5 + cls._draw_text_at(cr, font_family, _(action), cx + 5, cy,
                                         7.5, txt, 0.8 * a)
         return cx - x + cls.HINT_PAD_X
 
@@ -775,7 +776,7 @@ class GtkOverlay(Gtk.Window):
                 layout.set_alignment(Pango.Alignment.CENTER)
                 layout.set_height(-2)
                 layout.set_ellipsize(Pango.EllipsizeMode.END)
-            _, th = layout.get_pixel_size()
+            _unused, th = layout.get_pixel_size()
             cr.move_to(cx - max_width / 2, cy - th / 2)
         else:
             tw, th = layout.get_pixel_size()
@@ -796,7 +797,7 @@ class GtkOverlay(Gtk.Window):
         cr.set_line_width(1)
         cr.stroke()
 
-        self._draw_text(cr, self._font_family, "Choose refinement", w / 2, 20, 9.5, fg, a)
+        self._draw_text(cr, self._font_family, _("Choose refinement"), w / 2, 20, 9.5, fg, a)
 
         top, row_h = 38, 22
         for i, (lvl, label) in enumerate(POSTPROCESS_LEVELS):
@@ -811,9 +812,9 @@ class GtkOverlay(Gtk.Window):
                 row_color, weight = txt, Pango.Weight.NORMAL
             mid = y + (row_h - 3) / 2
             self._draw_text_at(cr, self._font_family, str(lvl), 22, mid, 8.5, row_color, a, weight)
-            self._draw_text_at(cr, self._font_family, label, 48, mid, 8.5, row_color, a, weight)
+            self._draw_text_at(cr, self._font_family, _(label), 48, mid, 8.5, row_color, a, weight)
 
-        self._draw_text(cr, self._font_family, "0-5 / ↑↓  ·  Enter ✓  ·  Esc ✗",
+        self._draw_text(cr, self._font_family, _("0-5 / ↑↓  ·  Enter ✓  ·  Esc ✗"),
                         w / 2, h - 13, 7.5, fg, a)
 
     @staticmethod
@@ -960,7 +961,7 @@ if __name__ == "__main__":
     actions = [action for _keys, action in recording]
     assert "pause" in actions, recording
     assert "cancel" in actions, recording
-    assert all(keys for keys, _ in recording), recording   # every hint has a key
+    assert all(keys for keys, _unused in recording), recording   # every hint has a key
     assert "resume" in [a for _k, a in GtkOverlay.hint_items(False, True)]
     # Once transcribing, capture is over: pause/refine go, cancel stays.
     assert GtkOverlay.hint_items(True, False) == [

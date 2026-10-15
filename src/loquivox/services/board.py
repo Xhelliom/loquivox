@@ -46,6 +46,7 @@ import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
 import loquivox.config as config_module
+from loquivox.i18n import N_, _
 from loquivox.services.plugins import Plugin, register
 
 #: ponytail: the poll interval, not a setting. The board debounces for 30s
@@ -265,16 +266,16 @@ def _settings(dialog, vbox, labels) -> None:
     from gi.repository import Gtk
 
     body = dialog._group(
-        vbox, "Board",
-        "Collie Board notifies when one of its cards stops and needs you. "
-        "With this on, a conversation in progress is told too: the assistant "
-        "interrupts itself, says which card wants what, and asks what to do. "
-        f"It only reads the local board ({base_url()}) — nothing is sent, and "
-        "an alert you have already handled is not repeated out loud.")
+        vbox, _("Board"),
+        _("Collie Board notifies when one of its cards stops and needs you. "
+          "With this on, a conversation in progress is told too: the assistant "
+          "interrupts itself, says which card wants what, and asks what to do. "
+          "It only reads the local board ({url}) — nothing is sent, and "
+          "an alert you have already handled is not repeated out loud.").format(url=base_url()))
 
-    check = Gtk.CheckButton(label="Let the board interrupt a conversation")
+    check = Gtk.CheckButton(label=_("Let the board interrupt a conversation"))
     check.set_active(bool(config_module.CFG.TALK_BOARD))
-    dialog._field(body, "Notifications", check, labels)
+    dialog._field(body, _("Notifications"), check, labels)
 
     status = Gtk.Label()
 
@@ -289,10 +290,12 @@ def _settings(dialog, vbox, labels) -> None:
             return
         config_module.reload_config()
         reachable = enabled and _entries() is not None
-        note = "" if not enabled or reachable else " — but the board did not answer"
         status.set_markup(
-            f"<small>✓ Board notifications {'on' if enabled else 'off'}{note}"
-            " — takes effect on the next talk session.</small>")
+            _("<small>✓ Board notifications on — takes effect on the next talk session.</small>")
+            if enabled and reachable else
+            _("<small>✓ Board notifications on — but the board did not answer — takes effect on the next talk session.</small>")
+            if enabled else
+            _("<small>✓ Board notifications off — takes effect on the next talk session.</small>"))
 
     dialog._actions(body, _apply, status)
 
@@ -303,7 +306,7 @@ PLUGIN = Plugin(
     watch=_watch,
     loads="board",      # the MCP server of the same name: its tools are what a notification calls for
     still_true=still_true,
-    result_note="📋 Notification du board",
+    result_note=N_("📋 Board notification"),
     settings=_settings,
 )
 register(PLUGIN)

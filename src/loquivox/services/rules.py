@@ -37,6 +37,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.services import events
 from loquivox.services.plugins import Plugin, register
 
@@ -123,7 +124,7 @@ def _drain() -> None:
             if gap > 0:
                 _cond.wait(gap)     # events arriving now replace the waiting one
                 continue
-            _, rule, data = _pending.pop(name)
+            _name, rule, data = _pending.pop(name)
         _run(rule, data)
         with _cond:
             _ended[name] = time.monotonic()
@@ -272,17 +273,17 @@ def _settings(dialog, vbox, labels) -> None:
     from gi.repository import Gtk
 
     body = dialog._group(
-        vbox, "Rules",
-        "Event → MCP action rules, written under [[rules]] in config.toml "
-        "(see config.example.toml; `loquivox --rules-check` validates them).")
+        vbox, _("Rules"),
+        _("Event → MCP action rules, written under [[rules]] in config.toml "
+        "(see config.example.toml; `loquivox --rules-check` validates them)."))
     rows = rules()
     if not rows:
-        body.pack_start(Gtk.Label(label="No rule declared.", xalign=0), False, False, 0)
+        body.pack_start(Gtk.Label(label=_("No rule declared."), xalign=0), False, False, 0)
     for rule in rows:
         did = _last.get(rule["name"])
-        outcome = ("not run yet" if did is None else
-                   f"{'✓ ok' if did[0] else '❌ ' + did[2]} · {time.strftime('%H:%M:%S', time.localtime(did[1]))}")
-        label = Gtk.Label(label=f"{'' if rule['enabled'] else '○ off · '}{outcome}",
+        outcome = (_("not run yet") if did is None else
+                   f"{_('✓ ok') if did[0] else '❌ ' + did[2]} · {time.strftime('%H:%M:%S', time.localtime(did[1]))}")
+        label = Gtk.Label(label=f"{'' if rule['enabled'] else _('○ off · ')}{outcome}",
                           xalign=0, wrap=True, selectable=True)
         label.set_tooltip_text(" → ".join(f"{a.get('server')}.{a.get('tool')}" for a in rule["do"]))
         dialog._field(body, f"{rule['when']}" + (f" {rule['if']}" if rule["if"] else ""), label, labels)

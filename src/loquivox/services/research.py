@@ -25,6 +25,7 @@ import time
 from typing import Any, Dict
 
 import loquivox.config as config_module
+from loquivox.i18n import N_, _
 from loquivox.services.plugins import Plugin, register
 
 _PROMPT = (
@@ -128,28 +129,28 @@ def _settings(dialog, vbox, labels) -> None:
 
     cfg = config_module.CFG
     body = dialog._group(
-        vbox, "Search",
-        "The conversational models are quick and lightly read. When one of "
+        vbox, _("Search"),
+        _("The conversational models are quick and lightly read. When one of "
         "them needs a fact, it hands the question to this model, which can "
         "search the web, and keeps talking; the answer is given when it "
         "comes back. OpenAI's Responses API with web search, or a Groq "
-        "compound model.")
+        "compound model."))
 
-    check = Gtk.CheckButton(label="Let the conversation look things up")
+    check = Gtk.CheckButton(label=_("Let the conversation look things up"))
     check.set_active(bool(cfg.TALK_RESEARCH))
-    dialog._field(body, "Research", check, labels)
+    dialog._field(body, _("Research"), check, labels)
 
     provider = Gtk.ComboBoxText()
     for pid in cfg.RESEARCH_PROVIDERS:
         provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid))
     provider.set_active_id(cfg.RESEARCH_PROVIDER)
-    dialog._field(body, "Provider", provider, labels)
+    dialog._field(body, _("Provider"), provider, labels)
 
     model = Gtk.ComboBoxText.new_with_entry()
     for mid in cfg.RESEARCH_DEFAULT_MODELS.values():
         model.append(mid, mid)
     model.get_child().set_text(cfg.MODEL_RESEARCH)
-    dialog._field(body, "Model", model, labels)
+    dialog._field(body, _("Model"), model, labels)
 
     def _default_model(_combo) -> None:
         pid = provider.get_active_id() or "openai"
@@ -173,7 +174,7 @@ def _settings(dialog, vbox, labels) -> None:
         mid = model.get_child().get_text().strip()
         enabled = check.get_active()
         if enabled and not mid:
-            status.set_markup("<small>⚠️ A model id is needed.</small>")
+            status.set_markup(_("<small>⚠️ A model id is needed.</small>"))
             return
         try:
             update_section("models", {"research_provider": pid, "research": mid})
@@ -184,8 +185,9 @@ def _settings(dialog, vbox, labels) -> None:
         config_module.reload_config()
         print(f"🔎 Research: {'on' if enabled else 'off'} — {pid} / {mid}")
         status.set_markup(
-            f"<small>✓ {'Research on' if enabled else 'Research off'} — takes effect "
-            "on the next talk session.</small>")
+            _("<small>✓ Research on — takes effect on the next talk session.</small>")
+            if enabled else
+            _("<small>✓ Research off — takes effect on the next talk session.</small>"))
 
     dialog._actions(body, _apply, status)
 
@@ -225,9 +227,9 @@ PLUGIN = Plugin(
     # settings. Declaring the capability is what lets the Live engine stand
     # this one down without knowing which plugin it is.
     provides="web_search",
-    note=lambda args: (f"🔎 Recherche en cours : {question_of(args)}"
+    note=lambda args: (_("🔎 Research under way: {question}").format(question=question_of(args))
                        if question_of(args) else ""),
-    result_note="🔎 Résultat reçu — l'assistant vous le donne",
+    result_note=N_("🔎 Result received — the assistant will tell you"),
     settings=_settings,
 )
 register(PLUGIN)

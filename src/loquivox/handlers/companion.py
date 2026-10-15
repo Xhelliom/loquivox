@@ -22,11 +22,12 @@ import time
 from typing import Callable, Optional
 
 import loquivox.config as config_module
+from loquivox.i18n import N_
 from loquivox.services import events, media, plugins
 from loquivox.state import STATE, SettingsManager
 
 #: the bubble menu is this list
-MODES = (("active", "Actif"), ("silent", "Silence"))
+MODES = (("active", N_("Active")), ("silent", N_("Silent")))
 
 
 class _NoKeys:
