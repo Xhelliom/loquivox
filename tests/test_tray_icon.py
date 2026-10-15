@@ -42,4 +42,15 @@ for name in ("loquivox-symbolic.svg", "loquivox-recording-symbolic.svg",
              "loquivox-silent-symbolic.svg"):
     assert (Path(tray.__file__).parent.parent / "assets" / name).is_file(), name
 assert "emblem-favorite" not in Path(tray.__file__).read_text()
+
+# A restart in silence: start_modes() restores the mode, the tray must follow.
+from loquivox.handlers.companion import Companion  # noqa: E402
+from loquivox.state import SettingsManager  # noqa: E402
+
+STATE.recording, STATE.presence_mode = False, "active"
+STATE.indicator = FakeIndicator()
+TrayManager.refresh_icon = staticmethod(TrayManager._refresh_icon)  # no GTK loop here
+SettingsManager.load = staticmethod(lambda: {"presence_mode": "silent"})
+Companion.__new__(Companion).start_modes()
+assert STATE.indicator.icons == ["loquivox-silent-symbolic.svg"], STATE.indicator.icons
 print("ok")

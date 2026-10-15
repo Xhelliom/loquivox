@@ -108,6 +108,8 @@ class Companion:
         saved = SettingsManager.load().get("presence_mode")
         if saved in dict(MODES):
             STATE.presence_mode = saved
+            from loquivox.ui.tray import TrayManager  # lazy: GTK
+            TrayManager.refresh_icon()  # the tray may already be up
 
     def start(self) -> None:
         self.start_modes()

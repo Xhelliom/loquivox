@@ -1,0 +1,2 @@
+[console_scripts]
+loquivox = loquivox.app:main
