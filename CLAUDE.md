@@ -692,6 +692,23 @@ written by the single Apply through `memory.replace()` — which keeps an id's
 scope, date and count. The core names no source; `tests/test_memory.py` drives
 one it has never heard of.
 
+### Presence across restarts and absences (`handlers/companion.py`, `platform/`)
+
+`set_mode()` writes `presence_mode` to settings.json and `start_modes()` reads it
+back, so F7 silence survives a restart. A locked screen or a long idle is
+`set_away(reason, on)`: the same silence, `persist=False`, closing a running
+session, with the mode from *before* restored when the last reason goes (a user
+who chose silence stays silent). A mode picked meanwhile forgets the reasons.
+Detection sits behind `AwayBackend` (`platform/base.py`): `LogindAway` (Lock /
+Unlock signals **only**: paired by construction. `LockedHint` is ignored, edges
+included — on niri + Noctalia it sticks at "yes" unlocked, so a true edge with
+no false one would leave the "lock" reason, and the silence, stuck until F7) and, on Wayland, `watch_idle` through swayidle
+(ext-idle-notify, `[companion] silence_idle_min`, startup-only; X11 has no idle
+fallback). `tests/test_away.py`. **Noctalia 5.2.1** is a native binary (not quickshell; `noctalia msg`) whose strings show it *sets* the logind `LockedHint` (`SetLockedHint`) and exposes no lock-state query: its own lock (idle 600 s, Super+L) is seen by neither Lock/Unlock nor, reliably, by the hint — hence the idle fallback, default 10 min (swayidle start and `idle` line verified for real; `active` needs input). **Not verified on the real machine**: the
+**Chosen route: `loginctl lock-session`** (emits Lock, Noctalia obeys it per its log): bind niri's `Mod+L` to it and make Noctalia's idle action call it, otherwise the lock is invisible. The idle fallback (`_on_idle`) never fires during `companion_session`/`talk_active` — talking touches no input device — so only the lock closes a session; but with voice alone it also cuts the wake word after N min. `_on_lock` always forwards an Unlock, even with `silence_on_lock` unticked mid-lock. The niri + Noctalia trial is the operator's to do — run `busctl --system monitor
+org.freedesktop.login1` through a lock then an unlock to see which signals
+Noctalia really emits; if it emits no Lock/Unlock, only the idle fallback works.
+
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
 The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`

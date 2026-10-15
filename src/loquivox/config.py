@@ -427,6 +427,11 @@ class Config:
     #: Presence mode a single click on the bubble switches to ("active" is the
     #: other one; a second click goes back).
     COMPANION_CLICK_MODE: str = "silent"
+    #: silence while the screen is locked (back to the previous mode on unlock)
+    COMPANION_SILENCE_ON_LOCK: bool = True
+    #: minutes without input before the same silence; 0 = off. The fallback for a
+    #: shell whose lock screen tells nobody. Read at startup (the watcher is spawned once).
+    COMPANION_SILENCE_IDLE_MIN: int = 10
     #: Said to the companion, these (short, whole-utterance) close the cloud
     #: session with no reply. Accents and punctuation are ignored.
     COMPANION_STOP_PHRASES: Tuple[str, ...] = (
@@ -905,6 +910,10 @@ def _build_config() -> Config:
         overrides["COMPANION_WAKE_WORD"] = str(companion["wake_word"]).strip()
     if companion.get("bubble_style") in ("goutte", "plasma", "radar", "reacteur"):
         overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
+    if "silence_on_lock" in companion:
+        overrides["COMPANION_SILENCE_ON_LOCK"] = bool(companion["silence_on_lock"])
+    if "silence_idle_min" in companion:
+        overrides["COMPANION_SILENCE_IDLE_MIN"] = max(0, int(companion["silence_idle_min"]))
     if "idle_timeout" in companion:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "source_silence" in companion:

@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from loquivox.config import CFG
 from loquivox.platform.base import ClipboardBackend, InputBackend, ScreenshotBackend
+from loquivox.platform.logind import LogindAway
 
 # Terminal app-ids matched against focused window info (lowercase).
 _TERMINAL_KEYWORDS: Tuple[str, ...] = (
@@ -281,3 +283,36 @@ if __name__ == "__main__":
     assert os.path.getsize(path) == 208 + 12, "returned on a half-written file"
     os.remove(path)
     print("✓ niri screenshot write-settling OK")
+
+
+def _die_with_parent() -> None:
+    """swayidle must not outlive the app (PR_SET_PDEATHSIG=1, SIGTERM)."""
+    import ctypes
+    import signal
+    ctypes.CDLL("libc.so.6").prctl(1, signal.SIGTERM)
+
+
+class WaylandAway(LogindAway):
+    """Lock from logind; idleness from swayidle (ext-idle-notify, which niri serves)."""
+
+    def watch_idle(self, seconds: int, on_idle: Callable[[bool], None]) -> bool:
+        try:
+            proc = subprocess.Popen(
+                ["swayidle", "-w", "timeout", str(seconds), "echo idle", "resume", "echo active"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                preexec_fn=_die_with_parent)
+        except OSError as e:
+            print(f"⚠️  Idle watch unavailable (swayidle): {e}")
+            return False
+
+        def read():
+            for line in proc.stdout:
+                self._idle_line(line, on_idle)
+        threading.Thread(target=read, daemon=True).start()
+        return True
+
+    @staticmethod
+    def _idle_line(line: str, on_idle: Callable[[bool], None]) -> None:
+        word = line.strip()
+        if word in ("idle", "active"):
+            on_idle(word == "idle")

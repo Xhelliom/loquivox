@@ -23,7 +23,7 @@ from typing import Callable, Optional
 
 import loquivox.config as config_module
 from loquivox.services import events, media, plugins
-from loquivox.state import STATE
+from loquivox.state import STATE, SettingsManager
 
 #: the bubble menu is this list
 MODES = (("active", "Actif"), ("silent", "Silence"))
@@ -82,6 +82,8 @@ class Companion:
         self._look, self._converse = look, converse
         self._out = 0.0      # last output level: the companion has the floor above this
         self._loud = float("-inf")   # monotonic time of the last audible output block
+        self._away: set = set()   # why the companion is silent without being asked: "lock", "idle"
+        self._before = "active"   # the user's mode, to return to when the last reason is gone
         self._emitted = None  # last state published as an event
         self._voice = None   # "listening" / "speaking" last posted to the bubble
         self._heard = float("-inf")   # monotonic time of the last word heard in standby
@@ -101,11 +103,19 @@ class Companion:
             events.emit("companion.state", state=state)
 
     # ------------------------------------------------------------------ modes
+    def start_modes(self) -> None:
+        """Restore the mode the user left (F7 / click), written by ``set_mode``."""
+        saved = SettingsManager.load().get("presence_mode")
+        if saved in dict(MODES):
+            STATE.presence_mode = saved
+
     def start(self) -> None:
+        self.start_modes()
         if self.presence_on():
             self.presence.start()
         self._set_state(self._standby())
         plugins.start_sources()
+        self._watch_away()
         threading.Thread(target=self._announce_loop, daemon=True).start()
 
     def presence_on(self) -> bool:
@@ -114,23 +124,71 @@ class Companion:
     def _standby(self) -> str:
         return "idle" if self.presence_on() else "silent"
 
-    def set_mode(self, mode: str) -> None:
+    def _watch_away(self) -> None:
+        from loquivox.platform import get_away
+        away = get_away()
+        away.watch_lock(self._on_lock)
+        if config_module.CFG.COMPANION_SILENCE_IDLE_MIN > 0:
+            away.watch_idle(config_module.CFG.COMPANION_SILENCE_IDLE_MIN * 60, self._on_idle)
+
+    def _on_lock(self, locked: bool) -> None:
+        # CFG is read per event (Settings rebinds it). An Unlock always goes through:
+        # the box unticked during a lock must not leave the silence stuck until F7.
+        if not locked or config_module.CFG.COMPANION_SILENCE_ON_LOCK:
+            self.set_away("lock", locked)
+
+    def _on_idle(self, idle: bool) -> None:
+        # Talking touches neither keyboard nor mouse: idleness must never cut a
+        # conversation. Only the lock closes a session.
+        # ponytail: dropped, not deferred — the edge does not repeat, so a user who
+        # stays idle after the conversation is not silenced until the next activity cycle.
+        if idle and (STATE.companion_session or STATE.talk_active):
+            return
+        self.set_away("idle", idle)
+
+    def set_away(self, reason: str, on: bool) -> None:
+        """Silence for a reason that is not a choice: nothing is persisted, and the
+        mode from before comes back once every reason is gone. A mode the user picks
+        meanwhile wins (``set_mode`` forgets the reasons)."""
+        if on and not self._away:
+            self._before = STATE.presence_mode
+        was = bool(self._away)
+        (self._away.add if on else self._away.discard)(reason)
+        if on and not was:
+            print(f"🫧 Companion: silence ({reason})")
+            if STATE.presence_mode == "silent" and STATE.companion_session:
+                self._cut_session()   # F8 session in silence: set_mode would exit early
+            self.set_mode("silent", persist=False)
+        elif was and not self._away:
+            print(f"🫧 Companion: back to {self._before}")
+            self.set_mode(self._before, persist=False)
+
+    def set_mode(self, mode: str, persist: bool = True) -> None:
         """Switch presence mode. Mid-conversation it also ends the conversation."""
+        if persist:
+            self._away.clear()
         if mode not in dict(MODES) or mode == STATE.presence_mode:
+            if persist and mode in dict(MODES):
+                SettingsManager.update("presence_mode", mode)
             return
         STATE.presence_mode = mode
+        if persist:
+            SettingsManager.update("presence_mode", mode)
         print(f"🫧 Companion: {mode}")
         if STATE.companion_session:
-            from loquivox.services.talk import log_companion_cut
-            session = STATE.talk_session
-            log_companion_cut("touche", session.user_turns if session else 0)
-            STATE.talk_click.put("cancel")   # the session's own exit restores the rest
+            self._cut_session()
             return
         if not self.presence_on():
             self.presence.release()
         elif not STATE.talk_active:   # F4/F6 hold the mic; resume_after_talk reopens it
             self.presence.resume()
         self._set_state(self._standby())
+
+    def _cut_session(self) -> None:
+        from loquivox.services.talk import log_companion_cut
+        session = STATE.talk_session
+        log_companion_cut("touche", session.user_turns if session else 0)
+        STATE.talk_click.put("cancel")   # the session's own exit restores the rest
 
     def toggle_silence(self) -> None:
         self.set_mode("active" if STATE.presence_mode == "silent" else "silent")
@@ -218,7 +276,7 @@ class Companion:
         """Wake word heard (on its own thread): run one conversation, block until over.
         ``force`` (the wake key) opens it in silence mode too. ``cause`` says why
         it opened (wake_word, key, notification), for the events."""
-        if (not (force or self.presence_on()) or STATE.talk_active or STATE.recording
+        if (self._away or not (force or self.presence_on()) or STATE.talk_active or STATE.recording
                 or STATE.companion_session):
             return
         from loquivox.services.talk import TalkSession
