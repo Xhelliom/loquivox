@@ -486,9 +486,15 @@ def test_no_stale_wording():
             texts.append(w.get_label() or "")
         seen += [t for t in texts if bad.search(t)]
     assert not seen, seen
-    for fr in ("Baisser", "Ce que le compagnon", "Supprimer", "Ajouter"):
-        assert not any(isinstance(w, (Gtk.Label, Gtk.CheckButton)) and fr in (w.get_label() or "")
-                       for w in _widgets(SettingsDialog._instance.get_child())), fr
+    french = re.compile(r"[àâçéèêëîïôûùü]|\b(le|la|les|des|une?|pour|quand|jamais|avec|sans|ou|et)\b")
+    found = []
+    for w in _widgets(SettingsDialog._instance.get_child()):
+        texts = [w.get_tooltip_text() or ""]
+        if isinstance(w, (Gtk.Label, Gtk.CheckButton, Gtk.Button)):
+            texts.append(w.get_label() or "")
+        # the instructions placeholder is a sample in the user's own language, on purpose
+        found += [t for t in texts if french.search(t) and not t.startswith("Example:")]
+    assert not found, found
     print("✓ no obsolete or foreign-language text left in the dialog")
 
 

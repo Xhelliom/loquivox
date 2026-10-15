@@ -523,13 +523,13 @@ class SettingsDialog:
         cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
         cls._field(body, "Single click", cls._comp_click, labels)
 
-        cls._comp_lock = Gtk.CheckButton(label="Silence quand l'écran est verrouillé")
+        cls._comp_lock = Gtk.CheckButton(label="Silence when the screen is locked")
         cls._comp_lock.set_active(bool(cfg.COMPANION_SILENCE_ON_LOCK))
         cls._field(body, "Absence", cls._comp_lock, labels)
         cls._comp_idle = Gtk.SpinButton.new_with_range(0, 240, 5)
         cls._comp_idle.set_value(cfg.COMPANION_SILENCE_IDLE_MIN)
-        cls._comp_idle.set_tooltip_text("0 = jamais · pris en compte au prochain lancement")
-        cls._field(body, "Inactivité (min)", cls._comp_idle, labels)
+        cls._comp_idle.set_tooltip_text("0 = never · takes effect at next launch")
+        cls._field(body, "Idle (min)", cls._comp_idle, labels)
 
         cls._comp_style = Gtk.ComboBoxText()
         for name in ("goutte", "plasma", "radar", "reacteur"):
