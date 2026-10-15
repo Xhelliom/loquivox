@@ -183,28 +183,27 @@ def _message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
 
 
 def _settings(dialog, vbox, labels) -> None:
-    """Settings → Plugins → « Ce que le compagnon ne répète plus »."""
+    """Settings → Companion → « What the companion no longer repeats »."""
     from gi.repository import Gtk
 
     body = dialog._group(
-        vbox, "Ce que le compagnon ne répète plus",
-        "Règles apprises à la voix (« ne me redis plus ça ») ou ajoutées ici. "
-        "Une notification couverte par une règle ne réveille pas le compagnon. "
-        "Modifier le texte, cocher « Supprimer » ou ajouter une ligne, puis "
-        "Appliquer. Le fichier : " + str(FILE))
+        vbox, "What the companion no longer repeats",
+        "Rules learned by voice (\"don't tell me that again\") or added here. "
+        "A notification covered by a rule does not wake the companion. Edit "
+        "the text, tick Delete or add a line, then Apply. The file: " + str(FILE))
     rows: List[Tuple[Optional[str], Gtk.Entry, Gtk.CheckButton]] = []
     for r in rules():
         entry = Gtk.Entry(text=r["text"])
-        drop = Gtk.CheckButton(label="Supprimer")
-        count = Gtk.Label(label=f"{r['dropped']} écarté(s)")
+        drop = Gtk.CheckButton(label="Delete")
+        count = Gtk.Label(label=f"{r['dropped']} dropped")
         side = Gtk.Box(spacing=8)
         side.pack_start(count, False, False, 0)
         side.pack_start(drop, False, False, 0)
-        dialog._field(body, r["source"] or "Règle", entry, labels, extra=side)
+        dialog._field(body, r["source"] or "Rule", entry, labels, extra=side)
         rows.append((r["id"], entry, drop))
     new = Gtk.Entry()
-    new.set_placeholder_text("Ne plus me parler de…")
-    dialog._field(body, "Ajouter", new, labels)
+    new.set_placeholder_text("Stop telling me about…")
+    dialog._field(body, "Add", new, labels)
     status = Gtk.Label()
 
     def _apply(_btn=None) -> None:
@@ -216,7 +215,7 @@ def _settings(dialog, vbox, labels) -> None:
             status.set_markup(f"<small>❌ {e}</small>")
             return
         new.set_text("")
-        status.set_markup("<small>✓ Mémoire enregistrée — effective tout de suite.</small>")
+        status.set_markup("<small>✓ Memory saved — effective immediately.</small>")
 
     dialog._actions(body, _apply, status)
 
@@ -249,5 +248,6 @@ PLUGIN = Plugin(
     chat_only=True,
     note=lambda args: "🔇 Règle retenue…",
     settings=_settings,
+    tab="companion",
 )
 register(PLUGIN)

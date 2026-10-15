@@ -31,8 +31,8 @@ from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 #: what _create_dialog asks for; nothing may make the window wider than this
 DEFAULT_WIDTH = 640
 
-TABS = ["Models", "Talk", "Plugins", "Companion", "Refinement", "Hotkeys",
-        "Appearance & comfort", "API Keys", "Support"]
+TABS = ["Dictation", "Conversation", "Companion", "Tools", "Models & keys",
+        "Appearance", "Hotkeys", "Support"]
 
 
 def _notebook(win: Gtk.Window) -> Gtk.Notebook:
@@ -175,6 +175,8 @@ def test_handlers_find_their_widgets():
     cls._on_talk_engine_changed(cls._engine_combo)
     cls._on_talk_shot_toggled(cls._talk_shot_check)
     cls._update_pp_sensitivity()
+    cls._update_media_sensitivity()
+    cls._update_talk_sensitivity()
     cls._sync_model_entry()
     cls._set_capture_enabled(True)
     print("✓ deferred handlers resolve their widgets")
@@ -357,6 +359,145 @@ def test_conversation_settings_say_where_they_apply():
     print("✓ Conversation settings name their mode; cascade-only one greys elsewhere")
 
 
+def _tab(name: str) -> Gtk.Widget:
+    nb = _notebook(SettingsDialog._instance)
+    return nb.get_nth_page(TABS.index(name))
+
+
+def _widgets(widget, found=None):
+    found = [] if found is None else found
+    found.append(widget)
+    if isinstance(widget, Gtk.Container):
+        for child in widget.get_children():
+            _widgets(child, found)
+    return found
+
+
+def _on_tab(widget: Gtk.Widget, name: str) -> bool:
+    return _under(widget, _tab(name))
+
+
+def _control(tab: str, label: str) -> Gtk.Widget:
+    """The control in the row whose field label reads ``label`` on ``tab``."""
+    for w in _widgets(_tab(tab)):
+        if (isinstance(w, Gtk.Label) and w.get_name() == "field-label"
+                and w.get_text() == label):
+            siblings = w.get_parent().get_children()
+            return siblings[siblings.index(w) + 1]
+    raise AssertionError(f"no field {label!r} on tab {tab}")
+
+
+def test_settings_live_where_they_are_used():
+    """Tray-only switches, the companion's sounds and its memory each have their tab."""
+    cls = SettingsDialog
+    for attr, tab in (("_toggle_mode_check", "Dictation"),
+                      ("_chat_enabled_check", "Appearance"),
+                      ("_tts_enabled_check", "Models & keys"),
+                      ("_engine_combo", "Conversation"),
+                      ("_talk_semantic_check", "Conversation"),
+                      ("_media_combo", "Companion"),
+                      ("_media_duck_scale", "Companion"),
+                      ("_comp_duck_ai", "Companion"),
+                      ("_backend_combo", "Dictation"),
+                      ("_pp_scale", "Dictation"),
+                      ("_voice_combo", "Models & keys")):
+        assert _on_tab(getattr(cls, attr), tab), f"{attr} is not on {tab}"
+    assert _on_tab(_control("Models & keys", "Provider"), "Models & keys")
+    assert not any(_on_tab(w, "Models & keys") for w in (cls._engine_combo,))
+    titles = lambda tab: " ".join(w.get_label() for w in _widgets(_tab(tab))
+                                  if isinstance(w, Gtk.Label))
+    assert "no longer repeats" in titles("Companion"), "memory card is not on Companion"
+    assert "no longer repeats" not in titles("Tools")
+    assert "Writing" in titles("Tools") and "Search" in titles("Tools")
+    print("✓ every setting sits on the tab of the thing it changes")
+
+
+def test_tray_only_settings_are_set_from_the_dialog():
+    """toggle_mode (on Apply), chat_enabled and TTS on/off (at once) are set from the dialog."""
+    from loquivox.state import STATE
+    from loquivox.managers.chat import ChatManager
+    cls = SettingsDialog
+    saved = (STATE.toggle_mode, STATE.chat_enabled, STATE.tts_enabled)
+    real = (ChatManager._destroy, ChatManager.refresh_overlay)
+    ChatManager._destroy = ChatManager.refresh_overlay = staticmethod(lambda *a: None)
+    try:
+        cls._toggle_mode_check.set_active(not saved[0])
+        assert STATE.toggle_mode == saved[0], "press-to-record must wait for Apply"
+        cls._on_apply_recording(None)
+        cls._chat_enabled_check.set_active(not saved[1])
+        cls._tts_enabled_check.set_active(not saved[2])
+        assert (STATE.toggle_mode, STATE.chat_enabled, STATE.tts_enabled) == tuple(
+            not v for v in saved)
+    finally:
+        STATE.toggle_mode, STATE.chat_enabled, STATE.tts_enabled = saved
+        ChatManager._destroy, ChatManager.refresh_overlay = real
+    print("✓ press-to-record, show chat and TTS on/off are in the dialog")
+
+
+def test_dependent_fields_grey_out():
+    """Each field that means nothing without another goes dead with it."""
+    cls = SettingsDialog
+    from loquivox.config import POSTPROCESS_CUSTOM_LEVEL
+
+    def on(*ws):
+        return [w.get_sensitive() for w in ws]
+
+    duck = (cls._media_duck_scale, cls._comp_duck_ai, cls._comp_duck_user)
+    for media, want in (("off", False), ("resume", False), ("duck", True)):
+        cls._media_combo.set_active_id(media)
+        assert on(*duck) == [want] * 3, (media, on(*duck))
+
+    for region, want in (("window", False), ("screen", False), ("cursor", True)):
+        cls._talk_shot_check.set_active(True)
+        cls._talk_shot_region.set_active_id(region)
+        assert cls._talk_shot_cursor.get_sensitive() is want, region
+    cls._talk_shot_check.set_active(False)
+    assert not cls._talk_shot_cursor.get_sensitive()
+    assert not cls._talk_shot_region.get_sensitive()
+
+    cls._pp_translate_check.set_active(False)
+    for level, want in ((0, False), (4, False), (POSTPROCESS_CUSTOM_LEVEL, True)):
+        cls._pp_scale.set_value(level)
+        assert cls._pp_prompt_label.get_sensitive() is want, level
+    cls._pp_translate_check.set_active(True)
+    assert not cls._pp_prompt_label.get_sensitive(), "translate overrides Custom"
+    cls._pp_translate_check.set_active(False)
+
+    for guard, want in (("off", False), ("headset", False), ("speakers", True)):
+        cls._talk_echo_guard.set_active_id(guard)
+        assert cls._talk_barge_margin.get_sensitive() is want, guard
+
+    check = _control("Tools", "Research")
+    provider, model = _control("Tools", "Provider"), _control("Tools", "Model")
+    for active in (False, True):
+        check.set_active(active)
+        assert on(provider, model) == [active] * 2, active
+    print("✓ ducking, box width, custom prompt, cutting in and search follow their switch")
+
+
+def test_no_stale_wording():
+    """Rewrite and vision modes are gone, and "hold" alone no longer describes recording."""
+    import re
+    bad = re.compile(r"rewrite|, vision\b|\bhold\b|\bheld down\b|Apparence|onglet", re.I)
+    seen = []
+    for w in _widgets(SettingsDialog._instance.get_child()):
+        texts = [w.get_tooltip_text() or "", w.get_tooltip_markup() or ""]
+        if isinstance(w, (Gtk.Label, Gtk.CheckButton, Gtk.Button)):
+            texts.append(w.get_label() or "")
+        seen += [t for t in texts if bad.search(t)]
+    assert not seen, seen
+    french = re.compile(r"[àâçéèêëîïôûùü]|\b(le|la|les|des|une?|pour|quand|jamais|avec|sans|ou|et)\b")
+    found = []
+    for w in _widgets(SettingsDialog._instance.get_child()):
+        texts = [w.get_tooltip_text() or ""]
+        if isinstance(w, (Gtk.Label, Gtk.CheckButton, Gtk.Button)):
+            texts.append(w.get_label() or "")
+        # the instructions placeholder is a sample in the user's own language, on purpose
+        found += [t for t in texts if french.search(t) and not t.startswith("Example:")]
+    assert not found, found
+    print("✓ no obsolete or foreign-language text left in the dialog")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -368,5 +509,9 @@ if __name__ == "__main__":
     test_wheel_over_a_control_scrolls_the_page()
     test_companion_settings_apply_without_editing_toml()
     test_conversation_settings_say_where_they_apply()
+    test_settings_live_where_they_are_used()
+    test_tray_only_settings_are_set_from_the_dialog()
+    test_dependent_fields_grey_out()
+    test_no_stale_wording()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")

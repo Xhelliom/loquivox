@@ -177,7 +177,7 @@ The cascade, step by step:
    off by default: the session ends by leaving its generated text there anyway,
    so the only loss is something from a minute ago. Whether that matters is the
    user's call, not a default's — like every knob on this feature, it is in
-   Settings → Talk.
+   Settings → Conversation.
 
    Two traps live here. niri's screenshot action returns *before* the PNG is on
    disk (rc=0 at 39 ms, the file at 100 ms), so `_wait_for_png` polls for the
@@ -210,7 +210,7 @@ The cascade, step by step:
    `with keys.exclusive():`, around the waits themselves. Never hold a grab
    across a network call: a hung request would freeze the user's keyboard.
 
-   `CFG.TALK_FREE_KEYBOARD` (Settings → Talk, off by default) drops the grab
+   `CFG.TALK_FREE_KEYBOARD` (Settings → Conversation, off by default) drops the grab
    altogether: `exclusive(grab=False)`, passed by `_talk_listen` and
    `_talk_converse_server`, so the user keeps typing and keeps their shortcuts
    in whatever app has the focus while they talk. The mouse was never grabbed,
@@ -300,7 +300,7 @@ The cascade, step by step:
    `CFG.TALK_FINISH_BY_MODEL` toggle those two independently (the key is never
    a toggle); `TalkSession.system_prompt()` appends the protocol clause for that
    pair — after `CFG.TALK_INSTRUCTIONS`, the user's own persona/language
-   instructions from Settings → Talk, which are *added* to the base prompt
+   instructions from Settings → Conversation, which are *added* to the base prompt
    rather than replacing it — so neither an overridden `system_prompt` nor a
    set of instructions can drop the protocol. The marker is
    stripped before the reply is spoken, shown or stored.
@@ -486,7 +486,7 @@ thing itself, without any core naming it), `chat_only` (offered in an open
 conversation and never in a briefing — the session's *shape*, not a plugin's
 name), and `settings` (its card in Settings, built with the dialog's own
 `_group`/`_field`/`_actions` so it lines up with the rest, on the
-Settings → Plugins page they share).
+Settings → Tools page they share).
 Registering it is a `register()` call at import plus a line in `_MODULES` —
 that tuple is the whole "discovery", deliberately: no entry points, no
 scanning, nothing loaded from outside the tree.
@@ -598,7 +598,7 @@ under client delegation the backend prompt is the only place that can say so.
 
 `research` itself: the model asks a question, `run_research` answers it on a
 thread with OpenAI Responses + `web_search` or a Groq compound model
-(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Plugins → Search),
+(`CFG.RESEARCH_PROVIDER` / `CFG.MODEL_RESEARCH`, Settings → Tools → Search),
 gated by `CFG.TALK_RESEARCH`.
 
 `board` (`services/board.py`) is the first source, and the first integration
@@ -624,7 +624,7 @@ is only emptied at the next gap in the conversation, which can be a minute
 after the poll if the user kept talking. The message carries its entry
 (`board.Alert`, a `dict` that goes on the wire unchanged) so the re-check has
 something to re-read; the core still names no plugin, and a `still_true` that
-raises drops the message rather than speaking it. Off by default (`CFG.TALK_BOARD`, Settings → Plugins → Board): it polls a
+raises drops the message rather than speaking it. Off by default (`CFG.TALK_BOARD`, Settings → Tools → Board): it polls a
 local service most installations do not run.
 
 `mcp_tools` (`services/mcp_tools.py`) is how Loquivox **acts**: an MCP *client*
@@ -660,7 +660,7 @@ Live client read the list each call; Realtime re-declares through `RealtimeTalk.
 (polled beside `push_context`, `Desks.tools_version`); Live `responses` fixes its tools at open,
 so `_config` does `load_all()` — nothing is deferred there. This is a known limit, not an oversight: the Live API gives no documented way to amend `delegation.responses.tools` after `session.started` (`delegation.type` and instructions are frozen), so the sorting cannot apply; Settings → Plugins → MCP says so. `always` given as a single string counts as a one-item list; names are compared exactly. `tests/test_mcp_deferred.py` pins it
 and prints the tool-context size before/after. What a tool returns goes through `RESULT_FRAME`
-(data, never an instruction), like a source's text. Settings → Plugins has its
+(data, never an instruction), like a source's text. Settings → Tools has its
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
 `config_io.update_section` takes dotted sections for the nested table). Not
 done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
@@ -686,8 +686,8 @@ content. With no rule it costs nothing, otherwise ONE completion on
 the chat model (`memory.JUDGE`, swapped by tests; never the Live session); any
 failure lets the message through. The rules also reach the conversation:
 `memory.clause()` is in `TalkSession.system_prompt()` (all engines) and in the
-Live client-delegation prompt. Settings → Plugins → « Ce que le compagnon ne
-répète plus » lists them (editable text, Supprimer, ajout manuel, count),
+Live client-delegation prompt. Settings → Companion → « What the companion no longer
+repeats » lists them (editable text, Delete, manual add, count),
 written by the single Apply through `memory.replace()` — which keeps an id's
 scope, date and count. The core names no source; `tests/test_memory.py` drives
 one it has never heard of.
@@ -826,7 +826,7 @@ which looks like a copy of this one: `gpt-live-1` must receive zeros in place
 of every held block (see the Live engine section). Never "align" the two.
 
 The margin is the room and the volume, not the software, so it is a setting
-(Settings → Talk) and every reply prints the two numbers it is set from
+(Settings → Conversation) and every reply prints the two numbers it is set from
 (`🔉 echo peak … · loudest …`). Sometimes no value works: measured on a
 laptop's speakers, a voice beat the echo by ×1.2. The gate then stays shut and
 loud speakers are half duplex, which is the failure to prefer — not being able
@@ -851,7 +851,7 @@ reaches the speakers. On a headset it measures a quiet room, the bar stays at
 headphones" setting. The exception is a voice caught in that window — typically
 a USB headset, where interrupting the moment the reply starts reads as echo and
 the bar lands at twice the voice, so only shouting gets through. `TALK_ECHO_GUARD = "headset"`
-(Settings → Talk; default `speakers`) skips the calibration for exactly that case;
+(Settings → Conversation; default `speakers`) skips the calibration for exactly that case;
 it must not be used on speakers, where the echo would read as speech instead.
 `"off"` goes further: no gate at all in any engine — nothing is held back or
 replaced by zeros, the microphone goes to the model as is (`reply_blocks_mic` /
@@ -923,7 +923,7 @@ each rule owns a thread and a one-place slot (a burst is one call in flight
 plus the last event; `MIN_GAP` 0.2 s between two runs). Actions call
 `mcp_tools.call_tool` directly: no model, **no spoken yes** (the user wrote them
 in config, unlike a tool the model picks). An absent server or an error is one
-warning per distinct message and a ❌ in Settings → Plugins → Rules (which lists
+warning per distinct message and a ❌ in Settings → Tools → Rules (which lists
 each rule and its last result; editing stays in config.toml). "Back to how it
 was" is two rules (snapshot, restore), never code. `tests/test_rules.py` pins
 it with a test server and test rules, and that the two modules name no
@@ -983,12 +983,24 @@ through the same `redact()`.
   `~/.config/loquivox/settings.json` via `SettingsManager` in `state.py`.
 - Transcription settings apply live (dispatcher reconfigured); some startup-only
   settings (e.g. overlay size) need a restart — see `reload_config()` docstring.
-- Settings → **Models** is the one tab for *who does the work*, in the order the
-  sound travels: presets → conversation engine → transcription → chat/vision →
-  voice. A preset writes several of those at once (config.toml *and*
-  settings.json), so `_refresh_engine_widgets` puts every combo back in step —
-  and it must read `config_module.CFG`, since `reload_config()` rebinds the
-  singleton the module-level `CFG` import no longer points at.
+- Settings has **eight tabs, one per use** (`_create_dialog`, pinned by
+  `tests/test_settings_layout.py`; the audit behind them is
+  `docs/audits/2026-10-15-reglages.md`): **Dictation** (transcription,
+  hold/press-to-record `toggle_mode`, refinement), **Conversation** (F4/F6:
+  engine and its voices, turns, anti-echo, ending, instructions, screen),
+  **Companion** (itself, music/ducking, the memory card), **Tools** (one card
+  per plugin), **Models & keys** (presets, chat/vision, the TTS voice and its
+  on/off, API keys), **Appearance**, **Hotkeys**, **Support**. A setting lives
+  on the tab of the thing it changes — never on the one of what it depends on:
+  a field that needs another is greyed by it *on the same tab* (the engine
+  moved to Conversation so `semantic_turns` no longer hangs on a combo
+  elsewhere). A plugin's card goes to the tab named by `Plugin.tab` (default
+  `"tools"`; `memory` says `"companion"`), so the dialog still names no plugin.
+  A preset writes several slots at once (config.toml *and* settings.json), so
+  `_refresh_engine_widgets` puts every combo back in step — and it must read
+  `config_module.CFG`, since `reload_config()` rebinds the singleton the
+  module-level `CFG` import no longer points at. The interface is in English;
+  translation is a separate piece of work.
 - Every page in `settings_dialog.py` is built from three helpers, never by
   hand: `_group()` (a title, one dim line of prose, a framed body), `_field()`
   (one label → control row, joined to the page's `Gtk.SizeGroup` so the label

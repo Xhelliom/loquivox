@@ -105,7 +105,7 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
 
 
 def _settings(dialog, vbox, labels) -> None:
-    """This plugin's card in Settings → Plugins."""
+    """This plugin's card in Settings → Tools."""
     from gi.repository import Gtk
 
     cfg = config_module.CFG

@@ -94,7 +94,7 @@ class SettingsDialog:
     _trans_status: Optional[Gtk.Label] = None
     _voice_combo: Optional[Gtk.ComboBoxText] = None
 
-    # Models tab
+    # Models & keys tab (and the engine, on Conversation)
     _chat_model: Optional[Gtk.ComboBoxText] = None
     _vision_model: Optional[Gtk.ComboBoxText] = None
     _models_status: Optional[Gtk.Label] = None
@@ -127,6 +127,15 @@ class SettingsDialog:
     _talk_shot_max: Optional[Gtk.SpinButton] = None
     _talk_status: Optional[Gtk.Label] = None
 
+    # Switches that used to live in the tray only, and the companion's sounds
+    _toggle_mode_check: Optional[Gtk.CheckButton] = None
+    _recording_status: Optional[Gtk.Label] = None
+    _chat_enabled_check: Optional[Gtk.CheckButton] = None
+    _tts_enabled_check: Optional[Gtk.CheckButton] = None
+    _media_combo: Optional[Gtk.ComboBoxText] = None
+    _media_duck_scale: Optional[Gtk.Scale] = None
+    _talk_barge_margin: Optional[Gtk.SpinButton] = None
+
     # (writer, its status label) for every group that writes something, in the
     # order the pages are built. The one Apply button runs all of them.
     _appliers: list = []
@@ -153,9 +162,11 @@ class SettingsDialog:
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
 
         # Group the (now numerous) settings into tabs instead of one long scroll.
-        # Order: what the app does (Models → Talk → Plugins → Refinement), then
-        # how you drive it (Hotkeys, Appearance & comfort), then one-time setup
-        # (API Keys), then where to look when something breaks (Support).
+        # One tab per use, in the order you meet them: Dictation (F3), the
+        # Conversation (F4/F6) and the Companion, then the Tools they can
+        # reach, then who does the work and with which keys (Models & keys),
+        # then how it looks (Appearance) and how it is driven (Hotkeys), and
+        # where to look when something breaks (Support).
         notebook = Gtk.Notebook()
         notebook.set_scrollable(True)
         for m in ("top", "start", "end"):
@@ -163,14 +174,13 @@ class SettingsDialog:
 
         cls._appliers = []   # the pages fill it back in as they are built
         for label, build in (
-            ("Models", cls._build_models_section),
-            ("Talk", cls._build_talk_section),
-            ("Plugins", cls._build_plugin_sections),
-            ("Companion", cls._build_companion_section),
-            ("Refinement", cls._build_postprocess_section),
+            ("Dictation", cls._build_dictation_page),
+            ("Conversation", cls._build_conversation_page),
+            ("Companion", cls._build_companion_page),
+            ("Tools", cls._build_tools_page),
+            ("Models & keys", cls._build_models_page),
+            ("Appearance", cls._build_appearance_page),
             ("Hotkeys", cls._build_hotkeys_section),
-            ("Appearance & comfort", cls._build_appearance_page),
-            ("API Keys", cls._build_api_keys_section),
             ("Support", cls._build_support_page),
         ):
             page = cls._page()
@@ -422,28 +432,49 @@ class SettingsDialog:
         body.pack_start(lbl, False, False, 0)
 
     # -----------------------------------------------------------------
-    # Models tab: which provider answers, and with which models
+    # Pages: one per use. Each only assembles groups built further down.
     # -----------------------------------------------------------------
     @classmethod
-    def _build_models_section(cls, vbox: Gtk.Box) -> None:
-        """
-        Everything that decides *who* does the work: a preset, the talk-mode
-        engine, the chat/vision provider, and the voice.
+    def _build_dictation_page(cls, vbox: Gtk.Box) -> None:
+        """The ears, how recording starts, and what is done to the text."""
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        cls._build_transcription_section(vbox, labels)
+        cls._build_recording_section(vbox, labels)
+        cls._build_postprocess_section(vbox)
 
-        Four slots — transcription, turn detection, LLM, voice — each of which
-        can run here or in the cloud. Spelling that out as four menus reads
-        like a kernel config, so the presets fill them in one click and the
-        sections below stay for whoever wants to disagree.
+    @classmethod
+    def _build_conversation_page(cls, vbox: Gtk.Box) -> None:
+        """
+        The F4/F6 conversation, whole: the engine and its voice, then how it
+        behaves. They used to sit on two tabs, which is why one checkbox here
+        was greyed out by a combo there.
+        """
+        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        cls._build_engine_section(vbox, labels)
+        cls._build_talk_section(vbox, labels)
+
+    @classmethod
+    def _build_tools_page(cls, vbox: Gtk.Box) -> None:
+        """What the conversation can reach: one card per plugin."""
+        cls._build_plugin_cards(vbox, "tools",
+                                Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL))
+
+    @classmethod
+    def _build_models_page(cls, vbox: Gtk.Box) -> None:
+        """
+        Who does the work and with which keys: a preset, the chat/vision
+        provider, the voice that reads answers aloud, the API keys.
 
         One size group for the whole page: the label column lines up across
-        five separate cards, which is most of what stops it reading as a heap.
+        separate cards, which is most of what stops it reading as a heap. The
+        presets reach into the Dictation and Conversation tabs too — the
+        slots live where they are used, the shortcut lives here.
         """
         labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         cls._build_presets(vbox)
-        cls._build_engine_section(vbox, labels)
-        cls._build_transcription_section(vbox, labels)   # slot 1 — the ears
-        cls._build_chat_section(vbox, labels)            # slot 2 — the brain
-        cls._build_voice_section(vbox, labels)           # slot 3 — the mouth
+        cls._build_chat_section(vbox, labels)            # the brain
+        cls._build_voice_section(vbox, labels)           # the mouth
+        cls._build_api_keys_section(vbox, labels)
 
     # -----------------------------------------------------------------
     # Companion tab: the always-present bubble
@@ -454,9 +485,16 @@ class SettingsDialog:
                     ("active", "Wake the companion"))
 
     @classmethod
-    def _build_companion_section(cls, vbox: Gtk.Box) -> None:
-        cfg = config_module.CFG
+    def _build_companion_page(cls, vbox: Gtk.Box) -> None:
+        """Everything about the companion: itself, its sounds, what it forgets."""
         labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
+        cls._build_companion_section(vbox, labels)
+        cls._build_music_section(vbox, labels)
+        cls._build_plugin_cards(vbox, "companion", labels)
+
+    @classmethod
+    def _build_companion_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        cfg = config_module.CFG
         body = cls._group(
             vbox, "Companion",
             "A small bubble that listens for its wake word on this machine and "
@@ -485,13 +523,13 @@ class SettingsDialog:
         cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
         cls._field(body, "Single click", cls._comp_click, labels)
 
-        cls._comp_lock = Gtk.CheckButton(label="Silence quand l'écran est verrouillé")
+        cls._comp_lock = Gtk.CheckButton(label="Silence when the screen is locked")
         cls._comp_lock.set_active(bool(cfg.COMPANION_SILENCE_ON_LOCK))
         cls._field(body, "Absence", cls._comp_lock, labels)
         cls._comp_idle = Gtk.SpinButton.new_with_range(0, 240, 5)
         cls._comp_idle.set_value(cfg.COMPANION_SILENCE_IDLE_MIN)
-        cls._comp_idle.set_tooltip_text("0 = jamais · pris en compte au prochain lancement")
-        cls._field(body, "Inactivité (min)", cls._comp_idle, labels)
+        cls._comp_idle.set_tooltip_text("0 = never · takes effect at next launch")
+        cls._field(body, "Idle (min)", cls._comp_idle, labels)
 
         cls._comp_style = Gtk.ComboBoxText()
         for name in ("goutte", "plasma", "radar", "reacteur"):
@@ -499,19 +537,60 @@ class SettingsDialog:
         cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
         cls._field(body, "Bubble style", cls._comp_style, labels)
 
-        cls._comp_duck_ai = Gtk.CheckButton(label="Baisser les autres sons quand le compagnon parle")
-        cls._comp_duck_ai.set_active(bool(cfg.COMPANION_DUCK_ON_ASSISTANT))
-        cls._field(body, "Music", cls._comp_duck_ai, labels)
-        cls._comp_duck_user = Gtk.CheckButton(label="Baisser les autres sons quand je parle")
-        cls._comp_duck_user.set_active(bool(cfg.COMPANION_DUCK_ON_USER))
-        cls._field(body, "", cls._comp_duck_user, labels)
-
-        cls._note(body, "Les autres sons ne baissent qu'avec <i>media = duck</i> "
-                        "(onglet Apparence).")
         cls._note(body, "The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>); it applies right away.")
         cls._comp_status = Gtk.Label()
         cls._actions(body, cls._on_apply_companion, cls._comp_status)
+
+    @classmethod
+    def _build_music_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        """
+        What happens to other sounds while the microphone is open — both when
+        you dictate (``media``) and when the companion talks (the two ducking
+        boxes). They were on two tabs, one of them a prerequisite of the other.
+        Written by the companion's Apply, with the rest of the page.
+        """
+        cfg = config_module.CFG
+        body = cls._group(
+            vbox, "Music and other sounds",
+            "A classic Bluetooth headset pauses every player when its "
+            "microphone opens, and nothing resumes them. Lowering the volume "
+            "instead only shows on speakers, a wired headset or a Bluetooth "
+            "LE Audio headset — on a classic one it behaves like resume.")
+
+        cls._media_combo = Gtk.ComboBoxText()
+        for mid, label in (("off", "Leave it alone"),
+                           ("resume", "Resume playback afterwards"),
+                           ("duck", "Lower every other sound, then restore it and resume")):
+            cls._media_combo.append(mid, label)
+        cls._media_combo.set_active_id(cfg.MEDIA)
+        cls._field(body, "While recording", cls._media_combo, labels)
+
+        cls._media_duck_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        cls._media_duck_scale.set_value(round(cfg.MEDIA_DUCK_VOLUME * 100))
+        cls._media_duck_scale.set_draw_value(True)
+        cls._media_duck_scale.set_value_pos(Gtk.PositionType.RIGHT)
+        cls._field(body, "Lowered volume (%)", cls._media_duck_scale, labels)
+
+        cls._comp_duck_ai = Gtk.CheckButton(label="Lower other sounds while the companion speaks")
+        cls._comp_duck_ai.set_active(bool(cfg.COMPANION_DUCK_ON_ASSISTANT))
+        cls._field(body, "Companion", cls._comp_duck_ai, labels)
+        cls._comp_duck_user = Gtk.CheckButton(label="Lower other sounds while I speak")
+        cls._comp_duck_user.set_active(bool(cfg.COMPANION_DUCK_ON_USER))
+        cls._field(body, "", cls._comp_duck_user, labels)
+
+        cls._note(body, "Lowering only happens with <i>Lower every other sound</i> above.")
+        cls._media_combo.connect("changed", lambda _w: cls._update_media_sensitivity())
+        cls._update_media_sensitivity()
+
+    @classmethod
+    def _update_media_sensitivity(cls) -> None:
+        """Lowering is one choice of ``media``: its volume and both boxes need it."""
+        ducking = (cls._media_combo is not None
+                   and cls._media_combo.get_active_id() == "duck")
+        for w in (cls._media_duck_scale, cls._comp_duck_ai, cls._comp_duck_user):
+            if w is not None:
+                w.set_sensitive(ducking)
 
     _wake_installed = False  # openwakeword installed since the last Apply
 
@@ -577,6 +656,11 @@ class SettingsDialog:
                 "duck_on_assistant": cls._comp_duck_ai.get_active(),
                 "duck_on_user": cls._comp_duck_user.get_active(),
             })
+            # Not a companion key: services/media.py reads it for dictation too.
+            update_section("transcription", {
+                "media": cls._media_combo.get_active_id() or "resume",
+                "media_duck_volume": round(cls._media_duck_scale.get_value() / 100, 2),
+            })
         except ConfigWriteError as e:
             cls._comp_status.set_markup(f"<small>❌ {e}</small>")
             return
@@ -606,28 +690,23 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     # -----------------------------------------------------------------
-    # Plugins tab: what the conversation can reach beyond the models
+    # Plugin cards: what the conversation can reach beyond the models
     # -----------------------------------------------------------------
     @classmethod
-    def _build_plugin_sections(cls, vbox: Gtk.Box) -> None:
+    def _build_plugin_cards(cls, vbox: Gtk.Box, tab: str, labels: Gtk.SizeGroup) -> None:
         """
-        One card per plugin that wants one — a page nothing here writes.
+        One card per plugin that asked for this tab.
 
         The dialog knows none of them by name: a plugin hands over a builder
-        (see ``services/plugins.py``) and gets the page's helpers and its label
-        size group, so its card lines up with the ones written by hand
-        elsewhere. Every plugin is offered a card, enabled or not: a card is
-        how you turn one on.
-
-        A page of its own rather than a corner of Models: a plugin is a tool
-        the conversation can call or a source that speaks to it, not one more
-        answer to "who does the work".
+        (see ``services/plugins.py``) and the tab it belongs on, and gets the
+        page's helpers and its label size group, so its card lines up with the
+        ones written by hand elsewhere. Every plugin is offered a card,
+        enabled or not: a card is how you turn one on.
         """
         from loquivox.services import plugins
 
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         for plugin in plugins.all_plugins():
-            if plugin.settings is None:
+            if plugin.settings is None or plugin.tab != tab:
                 continue
             try:
                 plugin.settings(cls, vbox, labels)
@@ -637,12 +716,15 @@ class SettingsDialog:
     @classmethod
     def _build_chat_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         """Provider + chat/vision models, listed live from the provider's API."""
+        ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
+        talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
         body = cls._group(
             vbox, "Chat &amp; vision",
-            "Who answers F4, the rewrite, vision and talk mode — and who writes "
-            "the final text, whichever conversation engine is in use. The lists "
-            "come from the provider itself, so a model your account no longer "
-            "has stops being offered.")
+            f"Who answers {ai_key} and {talk_key} (the chat model), who reads "
+            "the screen for them (the vision model) — and who writes the final "
+            "text, whichever conversation engine is in use. The lists come "
+            "from the provider itself, so a model your account no longer has "
+            "stops being offered.")
 
         provider = Gtk.ComboBoxText()
         for pid in config_module.CFG.AI_PROVIDERS:
@@ -667,13 +749,14 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     #: label → (description, {section: {key: value}}, {STATE attr: value})
     PRESETS: tuple = (
-        ("Fast", "Cloud cascade — live transcription, Groq answers, cloud voice. "
-                 "The default, ~1.8s before you hear a reply.",
+        ("Fast", "Cloud cascade — live transcription, cloud voice, and your chat "
+                 "provider answers (set in Chat & vision). The default, ~1.8s "
+                 "before you hear a reply.",
          {"talk": {"engine": "cascade"}, "transcription": {"backend": "openai_realtime"}},
          {"tts_model": "gpt-4o-mini-tts", "tts_voice": "marin"}),
         ("Natural", "Speech to speech — one OpenAI Realtime session holds the "
                     "conversation, ~1.0s and it keeps the prosody. Costs more, "
-                    "and the chat model below no longer answers in talk mode.",
+                    "and the chat model no longer answers in talk mode.",
          {"talk": {"engine": "realtime"}}, {}),
         ("Private", "Local voice and offline transcription — nothing but the "
                     "answer itself leaves the machine. Needs piper-tts and the "
@@ -687,8 +770,9 @@ class SettingsDialog:
         """One row of buttons that fill every slot at once."""
         body = cls._group(
             vbox, "Presets",
-            "Fill every slot below in one click. Hover a preset to see what it "
-            "picks; everything stays editable afterwards.")
+            "Fill the engine, the transcription and the voice in one click — "
+            "each lives on its own tab. Hover a preset to see what it picks; "
+            "everything stays editable afterwards.")
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.set_homogeneous(True)
@@ -742,9 +826,9 @@ class SettingsDialog:
     def _build_engine_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         body = cls._group(
             vbox, "Conversation engine",
-            "How talk mode holds the conversation. The cascade chains the "
-            "transcription, chat model and voice below — each swappable, local "
-            "or cloud. Realtime hands the whole conversation to one model that "
+            "How a conversation is held. The cascade chains the transcription, "
+            "the chat model and the voice — each swappable, local or cloud, "
+            "on their own tabs. Realtime hands the whole conversation to one model that "
             "hears and answers directly: faster and more natural, but the chat "
             "model no longer answers. Live splits the difference — an OpenAI "
             "voice holds the conversation and delegates the thinking, which "
@@ -778,7 +862,7 @@ class SettingsDialog:
         cls._realtime_test.set_tooltip_text(
             "Preview this voice (same voice, spoken by the TTS model)")
         cls._realtime_test.connect("clicked", cls._on_test_realtime_voice)
-        cls._field(body, "Its voice", cls._realtime_voice, labels, extra=cls._realtime_test)
+        cls._field(body, "Realtime voice", cls._realtime_voice, labels, extra=cls._realtime_test)
 
         cls._live_voice = Gtk.ComboBoxText()
         for vid in config_module.CFG.TALK_LIVE_VOICES:
@@ -836,7 +920,8 @@ class SettingsDialog:
 
         # Each engine's own fields only mean anything when it is the one
         # running — greying them out is the shortest answer to "why are there
-        # three voices here".
+        # three voices here". The cascade's "end turns on meaning" box is on
+        # this tab too, so it follows the same combo (see _build_talk_section).
         cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
         cls._live_delegation.connect("changed", cls._on_talk_engine_changed)
         cls._on_talk_engine_changed(cls._engine_combo)
@@ -998,11 +1083,20 @@ class SettingsDialog:
     def _build_voice_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         body = cls._group(
             vbox, "Voice",
-            "Reads every AI answer aloud — F4, the rewrite, vision, and talk "
-            "mode on the Cascade engine. Not the Realtime voice above: that one "
-            "is the model speaking for itself, this one is a separate engine "
-            "that speaks written text, so it works everywhere and can be local. "
-            "Applies immediately.")
+            "Reads AI answers aloud — the chat, and talk sessions on the "
+            "Cascade engine. Not the Realtime or Live voice on the "
+            "Conversation tab: those are the model speaking for itself, this "
+            "one is a separate engine that speaks written text, so it works "
+            "everywhere and can be local. Applies immediately.")
+
+        cls._tts_enabled_check = Gtk.CheckButton(label="Read AI answers aloud")
+        cls._tts_enabled_check.set_active(bool(STATE.tts_enabled))
+        cls._tts_enabled_check.set_tooltip_text(
+            f"The same switch as {config_module.CFG.HOTKEY_DEFS['tts'][0]}. "
+            "Talk sessions can still speak their replies with it off "
+            "(Conversation tab).")
+        cls._tts_enabled_check.connect("toggled", cls._on_tts_enabled_toggled)
+        cls._field(body, "Spoken answers", cls._tts_enabled_check, labels)
 
         cls._tts_engine_combo = Gtk.ComboBoxText()
         for model in config_module.CFG.TTS_ENGINES:
@@ -1097,14 +1191,14 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     @classmethod
     def _build_appearance_page(cls, vbox: Gtk.Box) -> None:
-        # The voice lives in the Models tab, with the rest of "who does what".
+        # The voice lives in the Models & keys tab, with the rest of "who does what".
         labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
 
         # The preview leads the page: the two groups below only make sense as
         # changes to the thing being previewed, so it goes first, once.
         body = cls._group(
             vbox, "Recording overlay",
-            "The bubble that appears while you hold a hotkey. Everything here "
+            "The bubble that appears while you record. Everything here "
             "is previewed live below; the style and the two columns apply to "
             "the next recording.")
 
@@ -1169,7 +1263,12 @@ class SettingsDialog:
         # overlay's toggles.
         body = cls._group(
             vbox, "Desktop",
-            "Chrome that lives outside a recording.")
+            "Chrome that lives outside a recording. Applies immediately.")
+        cls._chat_enabled_check = Gtk.CheckButton(
+            label="Show the chat overlay (answers and conversation bubble)")
+        cls._chat_enabled_check.set_active(bool(STATE.chat_enabled))
+        cls._chat_enabled_check.connect("toggled", cls._on_chat_enabled_toggled)
+        body.pack_start(cls._chat_enabled_check, False, False, 0)
         bar_check = Gtk.CheckButton(
             label="Hotkey tab at the top of the screen (hover to expand)"
         )
@@ -1177,41 +1276,17 @@ class SettingsDialog:
         bar_check.connect("toggled", cls._on_hotkey_bar_toggled)
         body.pack_start(bar_check, False, False, 0)
 
-        # Music while the microphone is open — see services/media.py. Written
-        # to config.toml on change, like everything else on this tab.
-        body = cls._group(
-            vbox, "Music",
-            "A classic Bluetooth headset pauses every player when its "
-            "microphone opens, and nothing resumes them. Lowering the volume "
-            "instead only shows on speakers, a wired headset or a Bluetooth "
-            "LE Audio headset — on a classic one it behaves like resume.")
-        media_combo = Gtk.ComboBoxText()
-        for mid, label in (("off", "Leave it alone"),
-                           ("resume", "Resume playback afterwards"),
-                           ("duck", "Baisser tous les autres sons, puis les remettre et reprendre")):
-            media_combo.append(mid, label)
-        media_combo.set_active_id(config_module.CFG.MEDIA)
-        cls._field(body, "While recording", media_combo, labels)
-        duck = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
-        duck.set_value(round(config_module.CFG.MEDIA_DUCK_VOLUME * 100))
-        duck.set_draw_value(True)
-        duck.set_value_pos(Gtk.PositionType.RIGHT)
-        cls._field(body, "Lowered volume (%)", duck, labels)
-        media_combo.connect("changed", lambda w: cls._on_media_changed(w, duck))
-        duck.connect("value-changed", lambda w: cls._on_media_changed(media_combo, w))
-
-    @classmethod
-    def _on_media_changed(cls, combo: Gtk.ComboBoxText, duck: Gtk.Scale) -> None:
-        from loquivox.config_io import ConfigWriteError, update_section
-        try:
-            update_section("transcription", {
-                "media": combo.get_active_id() or "resume",
-                "media_duck_volume": round(duck.get_value() / 100, 2),
-            })
-        except ConfigWriteError as e:
-            print(f"⚠️  Could not save the music setting: {e}")
-            return
-        config_module.reload_config()  # services/media.py reads CFG live
+    @staticmethod
+    def _on_chat_enabled_toggled(check: Gtk.CheckButton) -> None:
+        """Show or hide the chat overlay right away, and remember it."""
+        STATE.chat_enabled = check.get_active()
+        print(f"💬 Chat overlay: {'on' if STATE.chat_enabled else 'off'}")
+        SettingsManager.save(STATE)
+        from loquivox.managers.chat import ChatManager
+        if STATE.chat_enabled:
+            ChatManager.refresh_overlay()
+        else:
+            ChatManager._destroy()
 
     @classmethod
     def _draw_overlay_preview(cls, widget: Gtk.DrawingArea, cr) -> bool:
@@ -1346,6 +1421,29 @@ class SettingsDialog:
         cls._actions(body, cls._on_apply_transcription, cls._trans_status)
 
         cls._sync_model_entry()  # prefill model + capability hint
+
+    @classmethod
+    def _build_recording_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        """Hold the dictation key, or press it once to start and again to stop."""
+        key = config_module.CFG.HOTKEY_DEFS['dictation'][0]
+        body = cls._group(
+            vbox, "Recording",
+            f"How the dictation key ({key}) starts and stops a recording.")
+        cls._toggle_mode_check = Gtk.CheckButton(
+            label="Press once to start, again to stop (instead of holding the key)")
+        cls._toggle_mode_check.set_active(bool(STATE.toggle_mode))
+        cls._field(body, "Dictation key", cls._toggle_mode_check, labels)
+        cls._recording_status = Gtk.Label()
+        cls._actions(body, cls._on_apply_recording, cls._recording_status)
+
+    @classmethod
+    def _on_apply_recording(cls, _btn) -> None:
+        STATE.toggle_mode = bool(cls._toggle_mode_check.get_active())
+        SettingsManager.save(STATE)
+        cls._recording_status.set_markup(
+            "<small>✓ Applied — "
+            + ("press to start, press to stop." if STATE.toggle_mode
+               else "recording while the key is down.") + "</small>")
 
     @staticmethod
     def _row_label(text: str) -> Gtk.Label:
@@ -1522,7 +1620,7 @@ class SettingsDialog:
             if not os.environ.get(env_key):
                 cls._set_trans_status(
                     f"⚠️ {human} needs its API key — set <b>{env_key}</b> in "
-                    "“API Keys”, then Apply. (Offline fallback used meanwhile.)"
+                    "“Models & keys”, then Apply. (Offline fallback used meanwhile.)"
                 )
                 return
         if bid in ("whispercpp", "auto"):
@@ -1637,8 +1735,8 @@ class SettingsDialog:
         body = cls._group(
             vbox, "Refinement",
             "What an LLM does to a dictation before it is typed. Uses the chat "
-            "model from the Models tab (needs its API key); Off adds no "
-            "latency.")
+            "model from the Models &amp; keys tab (needs its API key); Off adds "
+            "no latency.")
 
         # Refinement intensity: Off → Correct → Light → Medium → Strong.
         cls._pp_scale_label = Gtk.Label()
@@ -1658,6 +1756,7 @@ class SettingsDialog:
         # Snap to whole levels while dragging, and show the level name live.
         cls._pp_scale.connect("change-value", cls._on_pp_scale_change)
         cls._pp_scale.connect("value-changed", lambda _s: cls._refresh_pp_scale_label())
+        cls._pp_scale.connect("value-changed", lambda _s: cls._update_pp_sensitivity())
         cls._refresh_pp_scale_label()
         body.pack_start(cls._pp_scale, False, False, 0)
 
@@ -1693,7 +1792,7 @@ class SettingsDialog:
         # and unfolded it dominated a tab whose real control is one slider.
         cls._pp_prompt_label = Gtk.Expander(label="Custom level prompt")
         cls._pp_prompt_label.set_tooltip_text(
-            "Used when the refinement level is set to Custom.")
+            "Used when the refinement level is set to Custom — greyed out otherwise.")
         prompt_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         prompt_box.set_margin_top(8)
 
@@ -1727,14 +1826,24 @@ class SettingsDialog:
 
     @classmethod
     def _update_pp_sensitivity(cls) -> None:
-        """Translate on → only the language matters; off → the level + prompt do."""
+        """
+        Translate on → only the language matters; off → the level does, and
+        the custom prompt only when that level is Custom (the only one that
+        reads it).
+        """
         translate = bool(cls._pp_translate_check.get_active()) if cls._pp_translate_check else False
+        custom = (cls._pp_scale is not None
+                  and int(cls._pp_scale.get_value()) == config_module.POSTPROCESS_CUSTOM_LEVEL)
         if cls._pp_lang:
             cls._pp_lang.set_sensitive(translate)
-        for w in (cls._pp_scale, cls._pp_scale_label,
-                  cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
+        for w in (cls._pp_scale, cls._pp_scale_label):
             if w:
                 w.set_sensitive(not translate)
+        for w in (cls._pp_prompt_view, cls._pp_prompt_scroll, cls._pp_prompt_label):
+            if w:
+                w.set_sensitive(custom and not translate)
+        if custom and not translate and cls._pp_prompt_label:
+            cls._pp_prompt_label.set_expanded(True)   # picking Custom means writing one
 
     @classmethod
     def _on_pp_translate_toggled(cls, _chk: Gtk.CheckButton) -> None:
@@ -1801,7 +1910,7 @@ class SettingsDialog:
         print(f"✨ Post-processing: level={level} translate={translate} format={fmt} lang={lang}")
 
     # -----------------------------------------------------------------
-    # Talk mode section (written to config.toml [talk])
+    # Conversation behaviour (written to config.toml [talk])
     # -----------------------------------------------------------------
     #: (id, label) for the "how far it digs" combo — mirrors CFG.TALK_DEPTH.
     _TALK_DEPTHS = (
@@ -1846,10 +1955,8 @@ class SettingsDialog:
         return True
 
     @classmethod
-    def _build_talk_section(cls, vbox: Gtk.Box) -> None:
-        """Talk-mode knobs: who may end the briefing, and how it converses."""
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-
+    def _build_talk_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        """Conversation knobs: who may end the briefing, and how it converses."""
         ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
         talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
         body = cls._group(
@@ -1873,6 +1980,12 @@ class SettingsDialog:
         cls._talk_semantic_check = Gtk.CheckButton(
             label=cls._SEMANTIC_LABEL_BASE + (
                 " (offers to install onnxruntime)" if cls._semantic_needs_onnx() else ""))
+        # Its label gets "(offers to install onnxruntime)" / "— installing…"
+        # appended: let it wrap rather than set the window's width.
+        _lbl = cls._talk_semantic_check.get_child()
+        _lbl.set_line_wrap(True)
+        _lbl.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        _lbl.set_max_width_chars(52)
         cls._talk_semantic_check.set_active(bool(config_module.CFG.TALK_SEMANTIC_TURNS))
         cls._talk_semantic_check.connect("toggled", cls._on_talk_semantic_toggled)
         cls._talk_semantic_check.set_tooltip_text(
@@ -1880,7 +1993,7 @@ class SettingsDialog:
             "close your turns on their own server, so this does nothing there. "
             "If onnxruntime is missing, ticking asks before installing it.")
         body.pack_start(cls._talk_semantic_check, False, False, 0)
-        # Models is built before Talk, so its own initial call found no box yet.
+        # The engine group is built first, so its own initial call found no box yet.
         cls._on_talk_engine_changed(cls._engine_combo)
 
         cls._talk_speak_check = Gtk.CheckButton(
@@ -1914,6 +2027,7 @@ class SettingsDialog:
             if config_module.CFG.TALK_ECHO_GUARD in dict((g[0], 1) for g in cls._ECHO_GUARDS)
             else "speakers")
         cls._field(body, "Anti-echo", cls._talk_echo_guard, labels)
+        cls._talk_echo_guard.connect("changed", lambda _w: cls._update_talk_sensitivity())
         guard_help = Gtk.Label()
         guard_help.set_halign(Gtk.Align.START)
         guard_help.set_xalign(0)
@@ -1949,12 +2063,12 @@ class SettingsDialog:
         cls._field(body, "Cutting in (× the echo)", cls._talk_barge_margin, labels)
 
         body = cls._group(
-            vbox, "Ending the briefing (F6)",
+            vbox, f"Ending the briefing ({talk_key})",
             "Enter always writes the text — or the talk key itself, with the "
             "keyboard left free. That one can't be turned off, so there is "
-            "always a way out. These are extras. A chat (F4) ends on the key "
-            "alone: it writes through the tool, whenever you ask, without "
-            "ending.")
+            f"always a way out. These are extras. A chat ({ai_key}) ends on "
+            "the key alone: it writes through the tool, whenever you ask, "
+            "without ending.")
 
         cls._talk_phrase_check = Gtk.CheckButton(
             label="When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)")
@@ -1971,7 +2085,7 @@ class SettingsDialog:
         cls._talk_autopaste_check.set_active(bool(config_module.CFG.TALK_AUTO_PASTE))
         cls._talk_autopaste_check.set_tooltip_text(
             "The text is copied and pasted where the cursor was when the "
-            "conversation ended — no Enter, and no chance to rewrite it or go "
+            "conversation ended — no Enter, and no chance to ask for another version or go "
             "back to the conversation. Off by default: talk mode otherwise "
             "never types anything you have not accepted."
         )
@@ -2031,6 +2145,7 @@ class SettingsDialog:
             "pick falls back to the whole screen and says so."
         )
         cls._field(body, "Capture", cls._talk_shot_region, labels)
+        cls._talk_shot_region.connect("changed", lambda _w: cls._update_talk_sensitivity())
 
         cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
         cls._talk_shot_cursor.set_value(int(config_module.CFG.TALK_SCREENSHOT_CURSOR_PX))
@@ -2057,7 +2172,7 @@ class SettingsDialog:
             "whatever you had copied a minute ago. Text only."
         )
         body.pack_start(cls._talk_shot_clip, False, False, 0)
-        cls._on_talk_shot_toggled(cls._talk_shot_check)
+        cls._update_talk_sensitivity()
 
         cls._note(vbox,
                   "Timings, prompts and the turn-detection thresholds live "
@@ -2109,13 +2224,27 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     @classmethod
-    def _on_talk_shot_toggled(cls, check: Gtk.CheckButton) -> None:
-        """Grey out the framing controls while the capture itself is off."""
-        active = bool(check.get_active())
-        for widget in (cls._talk_shot_region, cls._talk_shot_cursor,
-                       cls._talk_shot_max, cls._talk_shot_clip):
+    def _on_talk_shot_toggled(cls, _check: Gtk.CheckButton) -> None:
+        cls._update_talk_sensitivity()
+
+    @classmethod
+    def _update_talk_sensitivity(cls) -> None:
+        """
+        Grey out what the choices above make meaningless: the framing controls
+        while the capture is off, the box width unless the capture is a box
+        around the cursor, and the cutting-in margin unless the anti-echo
+        measures an echo (``speakers``) — every other mode never reads it.
+        """
+        shot = bool(cls._talk_shot_check.get_active())
+        cursor = cls._talk_shot_region.get_active_id() == "cursor"
+        for widget, on in ((cls._talk_shot_region, shot),
+                           (cls._talk_shot_cursor, shot and cursor),
+                           (cls._talk_shot_max, shot),
+                           (cls._talk_shot_clip, shot),
+                           (cls._talk_barge_margin,
+                            cls._talk_echo_guard.get_active_id() == "speakers")):
             if widget is not None:
-                widget.set_sensitive(active)
+                widget.set_sensitive(on)
 
     @classmethod
     def sync_talk_switch(cls) -> None:
@@ -2186,7 +2315,7 @@ class SettingsDialog:
     # API keys section (#stored in secrets.env, applied live)
     # -----------------------------------------------------------------
     @classmethod
-    def _build_api_keys_section(cls, vbox: Gtk.Box) -> None:
+    def _build_api_keys_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         import os
         from loquivox.secrets import MANAGED_KEYS, SECRETS_FILE, read_secrets
 
@@ -2197,7 +2326,6 @@ class SettingsDialog:
             "Applied live on save.")
 
         stored = read_secrets()
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         cls._key_entries = {}
 
         for key, label in MANAGED_KEYS.items():
@@ -2317,19 +2445,21 @@ class SettingsDialog:
 
     @classmethod
     def _build_hotkeys_section(cls, vbox: Gtk.Box) -> None:
-        """Editable per-mode key bindings (evdev key names), applied on restart."""
-        # Two groups, split the way the app splits them: keys you hold to
-        # record, and keys that act on the session in progress. That is the
-        # distinction `KeyboardHandler._is_recording_mode` makes, and reading
-        # ten bindings as one flat list is what hid it.
-        recording = set(config_module.CFG.RECORDING_MODES)
+        """Editable per-mode key bindings (evdev key names), applied live."""
+        # Two groups, split by what a key does: the ones that *open* something
+        # (a recording, a conversation, the companion) and the ones that act on
+        # whatever is already running. Reading ten bindings as one flat list is
+        # what hid the difference.
+        opens = ("dictation", "ai", "talk", "companion_wake")
         labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
         bodies = {
             True: cls._group(
-                vbox, "Recording",
-                "Held down to record — release to transcribe."),
+                vbox, "Start something",
+                "Dictation records while its key is down — or press once to "
+                "start and again to stop, see the Dictation tab. The others "
+                "open a conversation, or the companion's."),
             False: cls._group(
-                vbox, "Session actions",
+                vbox, "Act on a session",
                 "Pressed once, acting on whatever is already running."),
         }
 
@@ -2347,7 +2477,7 @@ class SettingsDialog:
             capture_btn.set_tooltip_text("Press a key to bind it (no need to know its name)")
             capture_btn.connect("clicked", cls._on_capture_hotkey, mode_id, entry)
 
-            cls._field(bodies[mode_id in recording], name, entry, labels,
+            cls._field(bodies[mode_id in opens], name, entry, labels,
                        extra=capture_btn)
             cls._hotkey_entries[mode_id] = entry
             cls._hotkey_capture_btns.append(capture_btn)
@@ -2469,6 +2599,15 @@ class SettingsDialog:
         print(f"🔊 TTS engine changed to: {model} (voice {STATE.tts_voice})")
         SettingsManager.save(STATE)
         cls._fill_voices()
+
+    @classmethod
+    def _on_tts_enabled_toggled(cls, check: Gtk.CheckButton) -> None:
+        """TTS on/off, like the hotkey: lands now and is remembered."""
+        STATE.tts_enabled = check.get_active()
+        print(f"🔊 TTS: {'on' if STATE.tts_enabled else 'off'}")
+        SettingsManager.save(STATE)
+        from loquivox.managers.chat import ChatManager
+        ChatManager.refresh_overlay()
 
     @staticmethod
     def _on_voice_changed(combo: Gtk.ComboBoxText) -> None:
