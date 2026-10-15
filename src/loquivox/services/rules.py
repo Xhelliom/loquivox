@@ -270,7 +270,7 @@ def cli(argv: List[str]) -> int:
 # ------------------------------------------------------------------- Settings
 def _settings(dialog, vbox, labels) -> None:
     """The « Rules » card: each rule and how its last run went (edited in config.toml)."""
-    from gi.repository import Gtk
+    from gi.repository import Gtk, Pango
 
     body = dialog._group(
         vbox, _("Rules"),
@@ -284,7 +284,8 @@ def _settings(dialog, vbox, labels) -> None:
         outcome = (_("not run yet") if did is None else
                    f"{_('✓ ok') if did[0] else '❌ ' + did[2]} · {time.strftime('%H:%M:%S', time.localtime(did[1]))}")
         label = Gtk.Label(label=f"{'' if rule['enabled'] else _('○ off · ')}{outcome}",
-                          xalign=0, wrap=True, selectable=True)
+                          xalign=0, wrap=True, selectable=True,
+                          max_width_chars=40, wrap_mode=Pango.WrapMode.WORD_CHAR)
         label.set_tooltip_text(" → ".join(f"{a.get('server')}.{a.get('tool')}" for a in rule["do"]))
         dialog._field(body, f"{rule['when']}" + (f" {rule['if']}" if rule["if"] else ""), label, labels)
 

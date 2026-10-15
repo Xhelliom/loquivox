@@ -469,7 +469,7 @@ def status() -> List[Dict[str, Any]]:
 
 def _settings(dialog, vbox, labels) -> None:
     """The « MCP servers » card: each server, its state and tools, on/off."""
-    from gi.repository import Gtk
+    from gi.repository import Gtk, Pango
 
     body = dialog._group(
         vbox, _("MCP servers"),
@@ -486,12 +486,20 @@ def _settings(dialog, vbox, labels) -> None:
         mark = {"up": "✓", "starting": "…", "failed": "❌", "off": "○"}[row["state"]]
         state = {"up": _("up"), "starting": _("starting"), "failed": _("failed"), "off": _("off")}[row["state"]]
         tools = ", ".join(f"{n}{' ⚡' if a else ''}" for n, a in row["tools"].items())
-        check = Gtk.CheckButton(label=f"{mark} {state}"
-                                + (f" — {row['error']}" if row["error"] else "")
-                                + (f" — {tools}" if tools else ""))
+        check = Gtk.CheckButton(label=f"{mark} {state}")
         check.set_active(row["enabled"])
         check.set_tooltip_text(_("⚡ = acts: confirmed out loud before it runs"))
+        # The tools and the error wrap beneath: a window is never narrower than its widest child.
+        detail = " — ".join(x for x in (row["error"], tools) if x)
+        side = None
+        if detail:
+            side = Gtk.Label(label=detail, xalign=0, wrap=True, selectable=True,
+                             max_width_chars=60, wrap_mode=Pango.WrapMode.WORD_CHAR)
+            side.get_style_context().add_class("dim-label")
+            side.set_tooltip_text(detail)
         dialog._field(body, row["name"], check, labels)
+        if side is not None:
+            body.pack_start(side, False, False, 0)
         checks[row["name"]] = check
     status_label = Gtk.Label()
 
