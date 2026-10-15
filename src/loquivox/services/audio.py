@@ -165,6 +165,7 @@ class AudioService:
         STATE.stream.start()
         STATE.recording = True
         STATE.recording_generation += 1
+        AudioService._tray_icon()
 
         # Arm the turn detector BEFORE opening the live session. That open
         # takes about a second on a cloud backend, and a detector installed
@@ -184,10 +185,16 @@ class AudioService:
             STATE.stream_session = session  # None → silently uses batch fallback
 
     @staticmethod
+    def _tray_icon() -> None:
+        from loquivox.ui.tray import TrayManager  # lazy: GTK
+        TrayManager.refresh_icon()
+
+    @staticmethod
     def stop_recording() -> Optional[np.ndarray]:
         """Stop recording and return audio data."""
         STATE.recording = False
         STATE.paused = False
+        AudioService._tray_icon()
         if STATE.stream:
             STATE.stream.stop()
             STATE.stream.close()

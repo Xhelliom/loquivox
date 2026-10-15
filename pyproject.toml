@@ -57,3 +57,6 @@ loquivox = "loquivox.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+loquivox = ["assets/*.svg"]
