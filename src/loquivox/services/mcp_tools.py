@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.services.plugins import _REGISTRY, Plugin, register
 
 #: seconds a server gets to start and list its tools (`connect_timeout` per
@@ -434,7 +435,7 @@ def _stop(s: _Server) -> None:
         _loop.call_soon_threadsafe(lambda: s.future and s.future.cancel())
     if s.state == "up" and s.stop is not None and _loop is not None:
         _loop.call_soon_threadsafe(s.stop.set)
-        for _ in range(100):        # ponytail: bounded wait, 5 s then the daemon thread reaps it
+        for _i in range(100):        # ponytail: bounded wait, 5 s then the daemon thread reaps it
             if s.state != "up":
                 break
             threading.Event().wait(0.05)
@@ -471,22 +472,23 @@ def _settings(dialog, vbox, labels) -> None:
     from gi.repository import Gtk, Pango
 
     body = dialog._group(
-        vbox, "MCP servers",
-        "Servers declared under [mcp.servers.&lt;name&gt;] in config.toml give the "
+        vbox, _("MCP servers"),
+        _("Servers declared under [mcp.servers.&lt;name&gt;] in config.toml give the "
         "conversation their tools. A tool that is not marked read-only is "
         "confirmed out loud before it runs. Needs the `mcp` extra. Under Live with "
         "OpenAI's backend, the backend's tools are fixed when the session opens: "
-        "every tool is declared, `always` sorting does not apply there.")
+        "every tool is declared, `always` sorting does not apply there."))
     checks = {}
     rows = status()
     if not rows:
-        body.pack_start(Gtk.Label(label="No server declared.", xalign=0), False, False, 0)
+        body.pack_start(Gtk.Label(label=_("No server declared."), xalign=0), False, False, 0)
     for row in rows:
         mark = {"up": "✓", "starting": "…", "failed": "❌", "off": "○"}[row["state"]]
+        state = {"up": _("up"), "starting": _("starting"), "failed": _("failed"), "off": _("off")}[row["state"]]
         tools = ", ".join(f"{n}{' ⚡' if a else ''}" for n, a in row["tools"].items())
-        check = Gtk.CheckButton(label=f"{mark} {row['state']}")
+        check = Gtk.CheckButton(label=f"{mark} {state}")
         check.set_active(row["enabled"])
-        check.set_tooltip_text("⚡ = acts: confirmed out loud before it runs")
+        check.set_tooltip_text(_("⚡ = acts: confirmed out loud before it runs"))
         # The tools and the error wrap beneath: a window is never narrower than its widest child.
         detail = " — ".join(x for x in (row["error"], tools) if x)
         side = None
@@ -512,7 +514,7 @@ def _settings(dialog, vbox, labels) -> None:
             return
         config_module.reload_config()
         threading.Thread(target=sync, daemon=True, name="mcp-sync").start()  # off the GTK thread
-        status_label.set_markup("<small>✓ Servers updated — reopen Settings to see their state.</small>")
+        status_label.set_markup(_("<small>✓ Servers updated — reopen Settings to see their state.</small>"))
 
     dialog._actions(body, _apply, status_label)
 

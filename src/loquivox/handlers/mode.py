@@ -12,6 +12,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.config import CFG
 from loquivox.decorators import run_on_main_thread
 from loquivox.managers.chat import ChatManager
@@ -345,7 +346,7 @@ class ModeHandler:
 
         if action == "free":
             ModeHandler._remember_free_keyboard(not KeyboardHandler.free_keyboard())
-        elif any(action == verdict for verdict, *_ in KeyboardHandler.talk_actions()):
+        elif any(action == verdict for verdict, *_rest in KeyboardHandler.talk_actions()):
             STATE.talk_click.put(action)
 
     @staticmethod
@@ -535,7 +536,7 @@ class ModeHandler:
         preview = " ".join(text.split())
         preview = preview if len(preview) <= 60 else preview[:59] + "…"
         print(f"📋 Selection handed to the conversation: {preview}")
-        ChatManager.add_message("note", f"📋 Texte sélectionné envoyé : {preview}")
+        ChatManager.add_message("note", _("📋 Selection sent: {preview}").format(preview=preview))
 
     @staticmethod
     def _talk_screen_worker(session) -> str:
@@ -657,7 +658,7 @@ class ModeHandler:
         quiet = STATE.companion_session   # the companion's bubble is the whole UI
         if not quiet:
             ModeHandler._show_talk_overlay(session.write)
-            OverlayManager.set_status("Connecting…")
+            OverlayManager.set_status(_("Connecting…"))
         talk = engine(session)
         try:
             talk.start()
@@ -772,15 +773,15 @@ class ModeHandler:
                 found = session.desks.take()
                 if found is None:
                     continue
-                OverlayManager.set_status("Thinking…")
+                OverlayManager.set_status(_("Thinking…"))
                 plugin, message = found
                 if plugin.result_note:
-                    ChatManager.add_message("note", plugin.result_note)
+                    ChatManager.add_message("note", _(plugin.result_note))
                 reply = session.reply_with_result(
                     message, on_delta=lambda t: ChatManager.stream("assistant", t))
                 if reply is not None and reply.text:
                     ChatManager.add_message("assistant", reply.text)
-                    OverlayManager.set_status("Speaking…")
+                    OverlayManager.set_status(_("Speaking…"))
                     prefix = ModeHandler._talk_speak(reply.text)
                     if prefix is not None:
                         session.mark_interrupted()
@@ -803,14 +804,14 @@ class ModeHandler:
                 session.add_user(text)
                 return False
 
-            OverlayManager.set_status("Thinking…")
+            OverlayManager.set_status(_("Thinking…"))
             reply = session.reply(
                 text, on_delta=lambda t: ChatManager.stream("assistant", t))
             if reply is None:
                 continue
             if reply.text:
                 ChatManager.add_message("assistant", reply.text)
-                OverlayManager.set_status("Speaking…")
+                OverlayManager.set_status(_("Speaking…"))
                 prefix = ModeHandler._talk_speak(reply.text)
                 if prefix is not None:
                     session.mark_interrupted()
@@ -879,7 +880,7 @@ class ModeHandler:
                 vad.prime(len(prefix) / rate)
             return vad
 
-        OverlayManager.set_status("Connecting…")
+        OverlayManager.set_status(_("Connecting…"))
         AudioService.start_recording(semantic_turns=cfg.TALK_SEMANTIC_TURNS,
                                      prefix=prefix,
                                      detector=build_vad if cfg.TALK_VAD else None)

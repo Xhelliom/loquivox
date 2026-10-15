@@ -17,6 +17,7 @@ from typing import List, Tuple
 
 import cairo
 
+from loquivox.i18n import _
 from loquivox.config import CFG, HOTKEY_DESCRIPTIONS
 from loquivox.platform import SESSION_TYPE
 from loquivox.state import STATE
@@ -124,7 +125,7 @@ class HotkeyBar(Gtk.Window):
         for action in CFG.HOTKEY_DEFS:
             keys = GtkOverlay.primary_keys(action)
             if keys:
-                out.append((keys, HOTKEY_DESCRIPTIONS.get(action, action)))
+                out.append((keys, _(HOTKEY_DESCRIPTIONS.get(action, action))))
         return out
 
     def _layout(self) -> None:
@@ -138,9 +139,9 @@ class HotkeyBar(Gtk.Window):
         black = (0.0, 0.0, 0.0)
         self._rows = self.rows()
         self._key_w = max((self._draw_keys(cr, 0, 0, keys, black, black, 0.0)
-                           for keys, _ in self._rows), default=0.0)
+                           for keys, _unused in self._rows), default=0.0)
         desc_w = max((GtkOverlay._draw_text_at(cr, self._font, desc, 0, 0, 8.5, black, 0.0)
-                      for _, desc in self._rows), default=0.0)
+                      for _unused, desc in self._rows), default=0.0)
         self._panel_w = int(self.PAD * 2 + self._key_w + self.KEY_GAP + desc_w)
         self._panel_h = int(self.TITLE_H + len(self._rows) * self.ROW_H + self.PAD)
 
@@ -230,7 +231,7 @@ class HotkeyBar(Gtk.Window):
         cr.set_line_width(1)
         cr.stroke()
 
-        GtkOverlay._draw_text_at(cr, self._font, "Loquivox — hotkeys", self.PAD,
+        GtkOverlay._draw_text_at(cr, self._font, _("Loquivox — hotkeys"), self.PAD,
                                  self.TITLE_H / 2 + 2, 9.0, accent, a, Pango.Weight.BOLD)
         for i, (keys, desc) in enumerate(self._rows):
             cy = self.TITLE_H + i * self.ROW_H + self.ROW_H / 2

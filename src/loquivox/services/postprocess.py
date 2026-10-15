@@ -21,6 +21,7 @@ from typing import Optional
 
 import loquivox.config as config_module
 from loquivox.decorators import safe_execute
+from loquivox.i18n import _
 from loquivox.state import STATE
 
 # System prompt per refinement level (1-4); level 0 = off (no call). Each insists
@@ -132,9 +133,9 @@ class PostProcessor:
         else:
             level = int(cfg.POSTPROCESS_LEVEL or 0)
             base = "" if cls._prompt_for_level(level) is None \
-                else dict(config_module.POSTPROCESS_LEVELS).get(level, f"level {level}")
+                else _(dict(config_module.POSTPROCESS_LEVELS).get(level, f"level {level}"))
         if not base:
-            return "Format" if cfg.POSTPROCESS_FORMAT else None
+            return _("Format") if cfg.POSTPROCESS_FORMAT else None
         return f"{base} +fmt" if cfg.POSTPROCESS_FORMAT else base
 
     @staticmethod

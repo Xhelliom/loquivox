@@ -22,6 +22,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk, Pango
 
+from loquivox.i18n import _
 from loquivox.diagnostics import (build_report, default_log_export_path,
                                   default_report_path, export_log)
 
@@ -36,7 +37,7 @@ def save_text_as(parent: Optional[Gtk.Window], default: Path, text: str,
     build the text from a checkbox in the chooser — the log export decides
     whether to keep spoken content at the moment of saving, not before.
     """
-    chooser = Gtk.FileChooserDialog(title="Save for sharing", parent=parent,
+    chooser = Gtk.FileChooserDialog(title=_("Save for sharing"), parent=parent,
                                     action=Gtk.FileChooserAction.SAVE)
     chooser.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
                         Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
@@ -60,8 +61,8 @@ def save_text_as(parent: Optional[Gtk.Window], default: Path, text: str,
 
 def keep_content_check() -> Gtk.CheckButton:
     chk = Gtk.CheckButton(
-        label="Include what was said (transcripts, screen descriptions)")
-    chk.set_tooltip_text("Keys, addresses and names are removed either way.")
+        label=_("Include what was said (transcripts, screen descriptions)"))
+    chk.set_tooltip_text(_("Keys, addresses and names are removed either way."))
     return chk
 
 
@@ -85,7 +86,7 @@ class ReportDialog:
 
     @classmethod
     def _build(cls) -> Gtk.Window:
-        win = Gtk.Window(title="Loquivox — Diagnostic report")
+        win = Gtk.Window(title=_("Loquivox — Diagnostic report"))
         win.set_default_size(720, 560)
         win.set_position(Gtk.WindowPosition.CENTER)
         win.set_keep_above(True)
@@ -100,11 +101,11 @@ class ReportDialog:
         intro.set_xalign(0)
         intro.set_line_wrap(True)
         intro.set_markup(
-            "What a bug report needs: version, system, tools, config and the "
+            _("What a bug report needs: version, system, tools, config and the "
             "recent log. <b>API keys, your user name, home directory, e-mail "
             "and IP addresses are removed.</b> What you said is replaced by "
             "its length unless you tick the box. Read it over, then copy it "
-            "into a GitHub issue or save it to a file.")
+            "into a GitHub issue or save it to a file."))
         root.pack_start(intro, False, False, 0)
 
         scroll = Gtk.ScrolledWindow()
@@ -120,10 +121,10 @@ class ReportDialog:
         root.pack_start(scroll, True, True, 0)
 
         cls._keep = Gtk.CheckButton(
-            label="Include what was said (transcripts, screen descriptions)")
+            label=_("Include what was said (transcripts, screen descriptions)"))
         cls._keep.set_tooltip_text(
-            "Off: a dropped transcript shows as '[… 42 chars]'. On: the "
-            "sentence itself — useful when the bug is about what was heard.")
+            _("Off: a dropped transcript shows as '[… 42 chars]'. On: the "
+            "sentence itself — useful when the bug is about what was heard."))
         cls._keep.connect("toggled", lambda _w: cls._regenerate())
         root.pack_start(cls._keep, False, False, 0)
 
@@ -134,11 +135,11 @@ class ReportDialog:
         cls._status.set_ellipsize(Pango.EllipsizeMode.END)
         actions.pack_start(cls._status, True, True, 0)
 
-        close = Gtk.Button(label="Close")
+        close = Gtk.Button(label=_("Close"))
         close.connect("clicked", lambda _w: win.destroy())
-        save = Gtk.Button(label="Save…")
+        save = Gtk.Button(label=_("Save…"))
         save.connect("clicked", cls._on_save)
-        copy = Gtk.Button(label="Copy")
+        copy = Gtk.Button(label=_("Copy"))
         copy.get_style_context().add_class("suggested-action")
         copy.connect("clicked", cls._on_copy)
         actions.pack_end(copy, False, False, 0)
@@ -158,14 +159,14 @@ class ReportDialog:
         cls._generation += 1
         generation = cls._generation
         keep = cls._keep.get_active()
-        cls._set_text("Collecting… (a few seconds: the journal and the sound card are asked)")
-        cls._say("Collecting…")
+        cls._set_text(_("Collecting… (a few seconds: the journal and the sound card are asked)"))
+        cls._say(_("Collecting…"))
 
         def work() -> None:
             try:
                 text = build_report(keep_content=keep)
             except Exception as e:      # the window must still say something
-                text = f"Could not build the report: {e}"
+                text = _("Could not build the report: {e}").format(e=e)
             GLib.idle_add(cls._deliver, generation, text)
 
         threading.Thread(target=work, daemon=True, name="loquivox-report").start()
@@ -174,8 +175,8 @@ class ReportDialog:
     def _deliver(cls, generation: int, text: str) -> bool:
         if generation == cls._generation and cls._view is not None:
             cls._set_text(text)
-            cls._say(f"{len(text.splitlines())} lines · "
-                     f"{'with' if cls._keep and cls._keep.get_active() else 'without'} spoken content")
+            cls._say((_("{n} lines · with spoken content") if cls._keep and cls._keep.get_active()
+                      else _("{n} lines · without spoken content")).format(n=len(text.splitlines())))
         return False
 
     @classmethod
@@ -201,17 +202,17 @@ class ReportDialog:
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(cls._text(), -1)
         clipboard.store()
-        cls._say("📋 Copied — paste it into the issue")
+        cls._say(_("📋 Copied — paste it into the issue"))
 
     @classmethod
     def _on_save(cls, _btn: Gtk.Button) -> None:
         try:
             target = save_text_as(cls._instance, default_report_path(), cls._text())
         except OSError as e:
-            cls._say(f"❌ Could not save: {e}")
+            cls._say(_("❌ Could not save: {e}").format(e=e))
             return
         if target:
-            cls._say(f"💾 Saved to {target}")
+            cls._say(_("💾 Saved to {target}").format(target=target))
 
     @classmethod
     def _on_destroy(cls, _win: Gtk.Window) -> None:
@@ -255,7 +256,7 @@ class LogDialog:
         from loquivox.diagnostics import log_file_path
 
         path = log_file_path()
-        win = Gtk.Window(title="Loquivox — Log")
+        win = Gtk.Window(title=_("Loquivox — Log"))
         win.set_default_size(760, 520)
         win.set_position(Gtk.WindowPosition.CENTER)
         win.set_keep_above(True)
@@ -271,10 +272,10 @@ class LogDialog:
         intro.set_line_wrap(True)
         intro.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         intro.set_markup(
-            f"<tt>{GLib.markup_escape_text(str(path) if path else '(disabled)')}</tt> — "
-            f"last {cls.LINES} lines, refreshed live. Nothing on screen is "
-            "redacted; <b>Save for sharing…</b> writes the whole log with keys, "
-            "names and addresses removed.")
+            _("<tt>{path}</tt> — last {LINES} lines, refreshed live. Nothing on "
+                       "screen is redacted; <b>Save for sharing…</b> writes the whole "
+                       "log with keys, names and addresses removed.").format(
+                path=GLib.markup_escape_text(str(path) if path else _('(disabled)')), LINES=cls.LINES))
         root.pack_start(intro, False, False, 0)
 
         scroll = Gtk.ScrolledWindow()
@@ -296,20 +297,20 @@ class LogDialog:
         cls._status.set_ellipsize(Pango.EllipsizeMode.END)
         actions.pack_start(cls._status, True, True, 0)
 
-        close = Gtk.Button(label="Close")
+        close = Gtk.Button(label=_("Close"))
         close.connect("clicked", lambda _w: win.destroy())
-        report = Gtk.Button(label="Diagnostic report…")
+        report = Gtk.Button(label=_("Diagnostic report…"))
         report.connect("clicked", lambda _w: ReportDialog.show())
-        open_btn = Gtk.Button(label="Open file")
-        open_btn.set_tooltip_text("Open the whole log in your text editor")
+        open_btn = Gtk.Button(label=_("Open file"))
+        open_btn.set_tooltip_text(_("Open the whole log in your text editor"))
         open_btn.set_sensitive(path is not None)
         open_btn.connect("clicked", cls._on_open)
-        copy = Gtk.Button(label="Copy")
+        copy = Gtk.Button(label=_("Copy"))
         copy.connect("clicked", cls._on_copy)
-        share = Gtk.Button(label="Save for sharing…")
+        share = Gtk.Button(label=_("Save for sharing…"))
         share.get_style_context().add_class("suggested-action")
-        share.set_tooltip_text("The whole log, with keys, names and addresses "
-                               "removed — the file to attach to a bug report")
+        share.set_tooltip_text(_("The whole log, with keys, names and addresses "
+                               "removed — the file to attach to a bug report"))
         share.set_sensitive(path is not None)
         share.connect("clicked", lambda _w: cls.save_for_sharing(cls._instance, cls._say))
         actions.pack_end(share, False, False, 0)
@@ -328,14 +329,14 @@ class LogDialog:
 
         path = log_file_path()
         if path is None:
-            return "(log file disabled via LOQUIVOX_LOG_FILE)"
+            return _("(log file disabled via LOQUIVOX_LOG_FILE)")
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 lines = fh.readlines()
         except FileNotFoundError:
-            return f"(no log yet at {path})"
+            return _("(no log yet at {path})").format(path=path)
         except OSError as e:
-            return f"(unreadable: {e})"
+            return _("(unreadable: {e})").format(e=e)
         return "".join(lines[-cls.LINES:])
 
     @classmethod
@@ -356,7 +357,7 @@ class LogDialog:
             # After the buffer settles, not now: the upper bound is stale.
             GLib.idle_add(cls._scroll_to_end)
         if cls._status is not None:
-            cls._status.set_text(f"{len(text.splitlines())} lines")
+            cls._status.set_text(_("{n} lines").format(n=len(text.splitlines())))
 
     @classmethod
     def _scroll_to_end(cls) -> bool:
@@ -389,19 +390,19 @@ class LogDialog:
             target = save_text_as(
                 parent, default_log_export_path(), "", extra=chk,
                 produce=lambda: export_log(keep_content=chk.get_active())
-                or "(the log is empty)\n")
+                or _("(the log is empty)") + "\n")
         except OSError as e:
-            say(f"❌ Could not save: {e}")
+            say(_("❌ Could not save: {e}").format(e=e))
             return
         if target:
-            say(f"💾 Redacted log saved to {target}")
+            say(_("💾 Redacted log saved to {target}").format(target=target))
 
     @classmethod
     def _on_copy(cls, _btn: Gtk.Button) -> None:
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(cls._shown, -1)
         clipboard.store()
-        cls._say("📋 Copied (unredacted)")
+        cls._say(_("📋 Copied (unredacted)"))
 
     @classmethod
     def _on_open(cls, _btn: Gtk.Button) -> None:
@@ -413,7 +414,7 @@ class LogDialog:
         try:
             Gtk.show_uri_on_window(cls._instance, path.as_uri(), Gdk.CURRENT_TIME)
         except Exception as e:
-            cls._say(f"❌ Could not open: {e}")
+            cls._say(_("❌ Could not open: {e}").format(e=e))
 
     @classmethod
     def _on_destroy(cls, _win: Gtk.Window) -> None:

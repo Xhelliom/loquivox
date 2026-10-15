@@ -20,18 +20,20 @@ from typing import Any, Dict, List, Tuple
 
 from evdev import ecodes
 
+from loquivox.i18n import N_
+
 CONFIG_FILE: Path = Path.home() / ".config" / "loquivox" / "config.toml"
 
 # Refinement levels for post-processing — single source of truth for the
 # settings slider and the tray submenu. 0 = off; higher = more rewriting. The
 # per-level system prompts live in services.postprocess (_LEVEL_PROMPTS).
 POSTPROCESS_LEVELS: tuple = (
-    (0, "Off"),
-    (1, "Correct"),
-    (2, "Light"),
-    (3, "Medium"),
-    (4, "Strong"),
-    (5, "Custom"),   # uses POSTPROCESS_CUSTOM_PROMPT
+    (0, N_("Off")),
+    (1, N_("Correct")),
+    (2, N_("Light")),
+    (3, N_("Medium")),
+    (4, N_("Strong")),
+    (5, N_("Custom")),   # uses POSTPROCESS_CUSTOM_PROMPT
 )
 POSTPROCESS_MAX_LEVEL: int = 5
 
@@ -44,16 +46,16 @@ POSTPROCESS_CUSTOM_LEVEL: int = 5
 # One-line description per hotkey action — single source of truth for the
 # startup banner and the hover hotkey bar. Keys match HOTKEY_DEFS.
 HOTKEY_DESCRIPTIONS: Dict[str, str] = {
-    "dictation":  "Dictate at the cursor",
-    "ai":         "Talk about what's on screen",
-    "talk":       "Talk it through, then get the text",
-    "pin":        "Pin the chat overlay on top",
-    "tts":        "Read AI answers aloud",
-    "cancel":     "Cancel recording / transcription",
-    "pause":      "Pause / resume the recording",
-    "refine":     "Stop & pick this dictation's refinement",
-    "companion":  "Companion: toggle silence mode",
-    "companion_wake": "Companion: open / end a session",
+    "dictation":  N_("Dictate at the cursor"),
+    "ai":         N_("Talk about what's on screen"),
+    "talk":       N_("Talk it through, then get the text"),
+    "pin":        N_("Pin the chat overlay on top"),
+    "tts":        N_("Read AI answers aloud"),
+    "cancel":     N_("Cancel recording / transcription"),
+    "pause":      N_("Pause / resume the recording"),
+    "refine":     N_("Stop & pick this dictation's refinement"),
+    "companion":  N_("Companion: toggle silence mode"),
+    "companion_wake": N_("Companion: open / end a session"),
 }
 
 
@@ -73,63 +75,63 @@ class Config:
             "surface":   "#335c67",
             "accent":    "#669bbc",
             "text":      "#f1faee",
-            "desc":      "Infinite polar blues echoing the cosmos and the soft light of evening snow."
+            "desc":      N_("Infinite polar blues echoing the cosmos and the soft light of evening snow.")
         },
         "Volcanic Dawn": {
             "bg":        "#003049",
             "surface":   "#669bbc",
             "accent":    "#780000",
             "text":      "#fdf0d5",
-            "desc":      "Intense, blazing crimson radiates energy; a bold and dramatic command of attention."
+            "desc":      N_("Intense, blazing crimson radiates energy; a bold and dramatic command of attention.")
         },
         "Spring Blossom": {
             "bg":        "#a2d2ff",
             "surface":   "#cdb4db",
             "accent":    "#ffafcc",
             "text":      "#322659",
-            "desc":      "Delicate pastel petals and whimsical sky blues, bringing a soft, elegant charm."
+            "desc":      N_("Delicate pastel petals and whimsical sky blues, bringing a soft, elegant charm.")
         },
         "Deep Sea Myth": {
             "bg":        "#0B0C10",
             "surface":   "#1F2833",
             "accent":    "#66FCF1",
             "text":      "#C5C6C7",
-            "desc":      "Mysterious abyssal depths where cyan phosphorescence meets resilient silent strength."
+            "desc":      N_("Mysterious abyssal depths where cyan phosphorescence meets resilient silent strength.")
         },
         "Boreal Silence": {
             "bg":        "#041C06",
             "surface":   "#064E3B",
             "accent":    "#10B981",
             "text":      "#ECFDF5",
-            "desc":      "Lush, dark greens of ancient forests whispering beneath the mint-bright aurora."
+            "desc":      N_("Lush, dark greens of ancient forests whispering beneath the mint-bright aurora.")
         },
         "Oceanic Zen": {
             "bg":        "#002b36",
             "surface":   "#073642",
             "accent":    "#2aa198",
             "text":      "#eee8d5",
-            "desc":      "Mathematically balanced depths of solarized teal, a classic of modern interface harmony."
+            "desc":      N_("Mathematically balanced depths of solarized teal, a classic of modern interface harmony.")
         },
         "Amber Harvest": {
             "bg":        "#282828",
             "surface":   "#3c3836",
             "accent":    "#d65d0e",
             "text":      "#fbf1c7",
-            "desc":      "Warm engineered earth tones of copper and cream, evoking a retro-industrial rustic elegance."
+            "desc":      N_("Warm engineered earth tones of copper and cream, evoking a retro-industrial rustic elegance.")
         },
         "Neon Nightshade": {
             "bg":        "#282a36",
             "surface":   "#44475a",
             "accent":    "#bd93f9",
             "text":      "#f8f8f2",
-            "desc":      "Vibrant high-contrast purple and deep ink-blue, capturing the electric glow of a bioluminescent forest."
+            "desc":      N_("Vibrant high-contrast purple and deep ink-blue, capturing the electric glow of a bioluminescent forest.")
         },
         "Mediterranean Shore": {
             "bg":        "#264653",
             "surface":   "#2a9d8f",
             "accent":    "#f4a261",
             "text":      "#fdf1d3",
-            "desc":      "Sun-drenched golden sands meet the smoky blue of midnight tides and crystalline waters."
+            "desc":      N_("Sun-drenched golden sands meet the smoky blue of midnight tides and crystalline waters.")
         },
     })
     DEFAULT_SCHEME: str = "Oceanic Zen"

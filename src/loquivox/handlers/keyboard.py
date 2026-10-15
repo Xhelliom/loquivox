@@ -19,6 +19,7 @@ from loquivox.config import (
     CFG, MODIFIER_CODES, POSTPROCESS_MAX_LEVEL, modifier_name, resolve_hotkeys,
 )
 from loquivox.handlers.mode import ModeHandler
+from loquivox.i18n import _
 from loquivox.managers.chat import ChatManager
 from loquivox.managers.overlay import OverlayManager
 from loquivox.services.audio import AudioService
@@ -149,7 +150,7 @@ class GrabbedKeys:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            for key_obj, _ in self._selector.select(timeout=remaining):
+            for key_obj, _mask in self._selector.select(timeout=remaining):
                 try:
                     events = list(key_obj.fileobj.read())
                 except Exception:
@@ -318,7 +319,7 @@ class KeyboardHandler:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return None
-                for key_obj, _ in sel.select(timeout=remaining):
+                for key_obj, _mask in sel.select(timeout=remaining):
                     try:
                         events = list(key_obj.fileobj.read())
                     except Exception:
@@ -663,13 +664,13 @@ class KeyboardHandler:
         """
         actions = []
         if STATE.talk_engine == "cascade":
-            actions.append(("send", (ecodes.KEY_SPACE,), "Space", "end turn"))
+            actions.append(("send", (ecodes.KEY_SPACE,), "Space", _("end turn")))
         actions.append(("finish", tuple(_CONFIRM_CODES), "Enter",
-                        "write it" if STATE.current_mode == "talk" else "end"))
-        actions.append(("cancel", (ecodes.KEY_ESC,), "Esc", "cancel"))
+                        _("write it") if STATE.current_mode == "talk" else _("end")))
+        actions.append(("cancel", (ecodes.KEY_ESC,), "Esc", _("cancel")))
         if cls._talk_looks():
-            actions.append(("screen", (ecodes.KEY_S,), "S", "look again"))
-        actions.append(("select", (ecodes.KEY_T,), "T", "send selection"))
+            actions.append(("screen", (ecodes.KEY_S,), "S", _("look again")))
+        actions.append(("select", (ecodes.KEY_T,), "T", _("send selection")))
         return tuple(actions)
 
     @classmethod
@@ -838,7 +839,7 @@ class KeyboardHandler:
         last_scan = time.monotonic()
         try:
             while not cls._stop:
-                for key, _ in sel.select(timeout=cls._RESCAN_INTERVAL_SEC):
+                for key, _mask in sel.select(timeout=cls._RESCAN_INTERVAL_SEC):
                     device = key.fileobj
                     try:
                         for event in device.read():

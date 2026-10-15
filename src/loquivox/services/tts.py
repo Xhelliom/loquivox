@@ -24,6 +24,7 @@ from scipy.io import wavfile
 
 from loquivox.api import get_ai_client
 from loquivox.config import CFG
+from loquivox.i18n import _
 from loquivox.state import STATE
 
 #: the cloud engines stream raw 24 kHz mono int16, no header
@@ -197,7 +198,7 @@ class TTSService:
             return
         _NOTED.add(key)
         from loquivox.managers.chat import ChatManager  # lazy: avoid import cycle
-        ChatManager.add_message("note", f"🔇 La voix n'a pas pu être lue : {error}")
+        ChatManager.add_message("note", _("🔇 The voice could not be read aloud: {error}").format(error=error))
 
     @staticmethod
     def _synthesize_and_play(text: str, stop: Optional[threading.Event] = None,

@@ -13,6 +13,7 @@ from typing import Callable, Dict, List, Optional
 
 import cairo
 
+from loquivox.i18n import N_, _
 from loquivox.config import CFG
 from loquivox.platform import SESSION_TYPE, get_clipboard
 from loquivox.state import STATE
@@ -541,8 +542,8 @@ CHAT_HTML_TEMPLATE = '''<!DOCTYPE html>
   </div>
   {talk_bar}
   <div class="chat-input-bar">
-    <textarea id="chat-input" rows="1" placeholder="Type a message…"></textarea>
-    <button class="send-btn" onclick="sendMessage()" title="Send">&#10148;</button>
+    <textarea id="chat-input" rows="1" placeholder="{placeholder}"></textarea>
+    <button class="send-btn" onclick="sendMessage()" title="{send}">&#10148;</button>
   </div>
 </div>
 <script>window.TALK = {TALK};
@@ -901,22 +902,22 @@ class ChatOverlay(Gtk.Window):
         # the session's own keys are shown instead.
         if self.talk:
             from loquivox.handlers.keyboard import KeyboardHandler  # lazy: cycle
-            labels = ["🗣️ Talk"] + [f"{'+'.join(keys)}: {what}"
+            labels = [_("🗣️ Talk")] + [f"{'+'.join(keys)}: {what}"
                                     for keys, what in KeyboardHandler.talk_hints()]
         else:
             pin_label = CFG.HOTKEY_DEFS["pin"][0]
             tts_label = CFG.HOTKEY_DEFS["tts"][0]
             labels = [
-                f"{pin_label}: Unpin" if is_pinned else f"{pin_label}: Pin",
-                f"{tts_label}: Mute" if is_tts else f"{tts_label}: Voice",
+                _("{key}: Unpin").format(key=pin_label) if is_pinned else _("{key}: Pin").format(key=pin_label),
+                _("{key}: Mute").format(key=tts_label) if is_tts else _("{key}: Voice").format(key=tts_label),
             ]
         separator = '<span style="opacity:0.2; margin:0 4px">|</span>'
         pin_hint = (
             '<div class="pin-hint">'
             + separator.join(f'<span>{label}</span>' for label in labels)
             + separator
-            + '<a href="settings://open" class="settings-link" title="Settings">⚙️</a>'
-            + '<a href="#" onclick="signalClose(); return false;" title="Hide">✕</a>'
+            + '<a href="settings://open" class="settings-link" title="' + _("Settings") + '">⚙️</a>'
+            + '<a href="#" onclick="signalClose(); return false;" title="' + _("Hide") + '">✕</a>'
             + '</div>'
         )
 
@@ -961,7 +962,10 @@ class ChatOverlay(Gtk.Window):
             black_alpha40=hex_to_rgba(scheme["bg"], 0.4)
         )
 
-        html = CHAT_HTML_TEMPLATE.replace("{messages}", "\n".join(html_messages))
+        html = (CHAT_HTML_TEMPLATE
+                .replace("{placeholder}", html_lib.escape(_("Type a message…")))
+                .replace("{send}", html_lib.escape(_("Send")))
+                .replace("{messages}", "\n".join(html_messages)))
         html = html.replace("{pin_hint}", pin_hint)
         html = html.replace("{talk_class}", " talk" if self.talk else "")
         html = html.replace("{TALK}", "true" if self.talk else "false")
@@ -976,11 +980,11 @@ class ChatOverlay(Gtk.Window):
         self.webview.load_html(html, None)
 
     #: Why the keyboard switch is worth a button, said once.
-    _FREE_TIP = ("The session takes the keyboard while it waits on you. Click to "
+    _FREE_TIP = N_("The session takes the keyboard while it waits on you. Click to "
                  "leave it yours: you keep typing and your shortcuts keep working "
                  "in whatever app has the focus, and these buttons become the way "
                  "to drive the conversation.")
-    _FREE_LABELS = ("🔒 Keyboard held", "🔓 Keyboard free")
+    _FREE_LABELS = (N_("🔒 Keyboard held"), N_("🔓 Keyboard free"))
 
     def _talk_bar(self) -> str:
         """
@@ -1007,10 +1011,10 @@ class ChatOverlay(Gtk.Window):
         free = KeyboardHandler.free_keyboard()
         buttons = [
             f'<button class="keys{" free" if free else ""}" id="keys-btn"'
-            f' data-on="{self._FREE_LABELS[1]}" data-off="{self._FREE_LABELS[0]}"'
+            f' data-on="{_(self._FREE_LABELS[1])}" data-off="{_(self._FREE_LABELS[0])}"'
             f' onclick=\'talkAction("free")\''
-            f' title="{html_lib.escape(self._FREE_TIP)}"'
-            f'>{self._FREE_LABELS[free]}</button>',
+            f' title="{html_lib.escape(_(self._FREE_TIP))}"'
+            f'>{_(self._FREE_LABELS[free])}</button>',
             '<span class="spacer"></span>',
         ]
         import loquivox.config as config_module
@@ -1067,7 +1071,7 @@ class ChatOverlay(Gtk.Window):
             code_content = match.group(1).strip()
             return (
                 f'<div class="code-block-wrapper">'
-                f'<button class="code-copy-btn" onclick="copyCode(this)" title="Copy Code">{SVG_COPY_ICON}</button>'
+                f'<button class="code-copy-btn" onclick="copyCode(this)" title="{html_lib.escape(_("Copy Code"))}">{SVG_COPY_ICON}</button>'
                 f'<pre><code>{code_content}</code></pre>'
                 f'</div>'
             )

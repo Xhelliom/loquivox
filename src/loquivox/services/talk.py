@@ -149,7 +149,7 @@ def echo_note(gate) -> None:
     STATE.echo_advised = True
     print(advice)
     from loquivox.managers.chat import ChatManager
-    ChatManager.add_message("note", advice)
+    ChatManager.add_message("note", getattr(gate, "advice_ui", lambda: advice)() or advice)
 
 
 def _normalize(text: str) -> str:

@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 import loquivox.config as config_module
+from loquivox.i18n import N_, _
 from loquivox.services.plugins import Plugin, register
 
 
@@ -59,7 +60,7 @@ PLUGIN = Plugin(
     message=result_message,
     enabled=lambda: bool(config_module.CFG.TALK_LOOK_TOOL),
     chat_only=True,
-    note=lambda args: "👁️ Je regarde…",
-    result_note="👁️ Fenêtre vue",
+    note=lambda args: _("👁️ Looking…"),
+    result_note=N_("👁️ Window seen"),
 )
 register(PLUGIN)
