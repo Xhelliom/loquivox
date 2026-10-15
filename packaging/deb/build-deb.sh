@@ -66,6 +66,8 @@ install -Dm644 packaging/loquivox.desktop \
   "$PKGROOT/usr/share/applications/loquivox.desktop"
 install -Dm644 assets/logo.png \
   "$PKGROOT/usr/share/pixmaps/loquivox.png"
+install -Dm644 assets/logo.svg \
+  "$PKGROOT/usr/share/icons/hicolor/scalable/apps/loquivox.svg"
 install -Dm644 LICENSE \
   "$PKGROOT/usr/share/doc/loquivox/copyright"
 

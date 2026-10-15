@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="Loquivox Logo" width="160" height="auto" />
+<img src="assets/logo.png" alt="Loquivox logo" width="160" height="auto" />
 
 # Loquivox
 

@@ -76,6 +76,8 @@ package() {
     "$pkgdir/usr/share/applications/$pkgname.desktop"
   install -Dm644 assets/logo.png \
     "$pkgdir/usr/share/pixmaps/$pkgname.png"
+  install -Dm644 assets/logo.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
   install -Dm644 LICENSE \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
