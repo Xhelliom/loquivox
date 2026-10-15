@@ -238,6 +238,8 @@ class SettingsDialog:
             if status.get_text().lstrip().startswith(("❌", "⚠️")):
                 unhappy += 1
 
+        from loquivox.ui.tray import TrayManager
+        TrayManager.update_menu()   # no stale tick after an Apply
         if cls._apply_status is None:
             return
         if unhappy:
@@ -1287,6 +1289,8 @@ class SettingsDialog:
             ChatManager.refresh_overlay()
         else:
             ChatManager._destroy()
+        from loquivox.ui.tray import TrayManager
+        TrayManager.update_menu()
 
     @classmethod
     def _draw_overlay_preview(cls, widget: Gtk.DrawingArea, cr) -> bool:
