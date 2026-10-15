@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Callable, Dict
 
 from loquivox.config import CFG
@@ -34,13 +35,33 @@ class TrayManager:
 
         STATE.indicator = AppIndicator.Indicator.new(
             "loquivox",
-            "emblem-favorite",
+            str(TrayManager._icon_path()),
             AppIndicator.IndicatorCategory.APPLICATION_STATUS
         )
         STATE.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         STATE.indicator.set_title("Loquivox")
+        TrayManager.refresh_icon()
         TrayManager.update_menu()
         Gtk.main()
+
+    @staticmethod
+    def _icon_path() -> Path:
+        """Shipped icon for the current state; recording wins over silence."""
+        name = ("loquivox-recording-symbolic" if STATE.recording
+                else "loquivox-silent-symbolic" if STATE.presence_mode == "silent"
+                else "loquivox-symbolic")
+        return Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"
+
+    @staticmethod
+    def _refresh_icon() -> None:
+        if STATE.indicator:
+            STATE.indicator.set_icon_full(str(TrayManager._icon_path()), "Loquivox")
+
+    @staticmethod
+    @run_on_main_thread
+    def refresh_icon() -> None:
+        """Pick the icon for the current state; callable from any thread."""
+        TrayManager._refresh_icon()
 
     @staticmethod
     @run_on_main_thread
@@ -50,6 +71,7 @@ class TrayManager:
             return
         STATE.gtk_menu = TrayManager._build_menu()
         STATE.indicator.set_menu(STATE.gtk_menu)
+        TrayManager._refresh_icon()   # silence changes rebuild the menu
 
     @staticmethod
     def _build_menu() -> Gtk.Menu:
