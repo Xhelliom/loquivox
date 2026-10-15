@@ -498,6 +498,31 @@ def test_no_stale_wording():
     print("✓ no obsolete or foreign-language text left in the dialog")
 
 
+def test_long_contents_keep_the_window_narrow():
+    """A 30-tool MCP server, a long rule and a long error must not widen the window."""
+    from loquivox.services import mcp_tools, memory, rules
+
+    long = "x" * 120
+    saved = mcp_tools.status, rules.rules, memory.rules
+    mcp_tools.status = lambda: [{
+        "name": "homeassistant", "enabled": True, "state": "failed", "error": long,
+        "tools": {f"ha_a_very_long_tool_name_number_{i}": bool(i % 2) for i in range(30)}}]
+    rules.rules = lambda: [{"name": "r", "enabled": True, "when": long, "if": {"k": long},
+                            "do": [{"server": "s", "tool": "t"}]}]
+    rules._last["r"] = (False, 0.0, long)
+    memory.rules = lambda: [{"id": "1", "text": long * 3, "source": long, "dropped": 0}]
+    try:
+        SettingsDialog._instance.destroy()
+        SettingsDialog._instance = None
+        SettingsDialog.show()
+        minimum, _ = SettingsDialog._instance.get_preferred_width()
+    finally:
+        mcp_tools.status, rules.rules, memory.rules = saved
+        rules._last.pop("r", None)
+    assert minimum < 800, f"minimum width {minimum}px with long contents (limit 800)"
+    print(f"✓ long MCP/rule/memory contents: minimum width {minimum}px")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -513,5 +538,6 @@ if __name__ == "__main__":
     test_tray_only_settings_are_set_from_the_dialog()
     test_dependent_fields_grey_out()
     test_no_stale_wording()
+    test_long_contents_keep_the_window_narrow()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")

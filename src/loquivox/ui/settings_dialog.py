@@ -1453,6 +1453,10 @@ class SettingsDialog:
     def _row_label(text: str) -> Gtk.Label:
         lbl = Gtk.Label(label=text)
         lbl.set_halign(Gtk.Align.START)
+        # A row name can be data (a rule's condition): cap it, the full text in the tooltip.
+        lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        lbl.set_max_width_chars(28)
+        lbl.set_tooltip_text(text)
         return lbl
 
     @classmethod
