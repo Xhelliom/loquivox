@@ -165,6 +165,13 @@ class Companion:
 
     def set_mode(self, mode: str, persist: bool = True) -> None:
         """Switch presence mode. Mid-conversation it also ends the conversation."""
+        try:
+            self._set_mode(mode, persist)
+        finally:   # the tray's ticked "silence" follows, whoever asked (F7, click, lock)
+            from loquivox.ui.tray import TrayManager  # lazy: GTK
+            TrayManager.update_menu()
+
+    def _set_mode(self, mode: str, persist: bool) -> None:
         if persist:
             self._away.clear()
         if mode not in dict(MODES) or mode == STATE.presence_mode:

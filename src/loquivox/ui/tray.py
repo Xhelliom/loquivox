@@ -57,7 +57,6 @@ class TrayManager:
         # Late imports to avoid circular dependencies
         from loquivox.managers.history import HistoryManager
         from loquivox.services.clipboard import ClipboardService
-        from loquivox.ui.report_dialog import ReportDialog
         from loquivox.ui.settings_dialog import SettingsDialog
 
         menu = Gtk.Menu()
@@ -86,31 +85,20 @@ class TrayManager:
         
         menu.append(Gtk.SeparatorMenuItem())
         
-        # Chat toggle
-        chat_toggle = Gtk.CheckMenuItem(label="Show Chat Overlay")
+        # Companion silence: the same switch as F7, ticked while silent
+        silence = Gtk.CheckMenuItem(label="Companion silence")
+        silence.set_active(STATE.presence_mode == "silent")
+        silence.connect("toggled", TrayManager._toggle_silence)
+        menu.append(silence)
+
+        chat_toggle = Gtk.CheckMenuItem(label="Show chat")
         chat_toggle.set_active(STATE.chat_enabled)
         chat_toggle.connect("toggled", TrayManager._toggle_chat)
         menu.append(chat_toggle)
 
-        # Toggle mode (hold vs press-to-toggle)
-        toggle_mode = Gtk.CheckMenuItem(label="Toggle Mode (Press to Record)")
-        toggle_mode.set_active(STATE.toggle_mode)
-        toggle_mode.connect("toggled", TrayManager._toggle_mode)
-        menu.append(toggle_mode)
-
-        # Post-processing submenu (quick toggle; fine-tune in Settings)
-        menu.append(TrayManager._build_postprocess_item())
-
-        # Settings
-        settings_item = Gtk.MenuItem(label="Settings")
+        settings_item = Gtk.MenuItem(label="Settings…")
         settings_item.connect("activate", lambda w: SettingsDialog.show())
         menu.append(settings_item)
-
-        # Diagnostics: the redacted report to attach to a bug — reachable
-        # from where a user in trouble looks first, without a terminal.
-        report_item = Gtk.MenuItem(label="Diagnostic report…")
-        report_item.connect("activate", lambda w: ReportDialog.show())
-        menu.append(report_item)
 
         menu.append(Gtk.SeparatorMenuItem())
 
@@ -121,59 +109,6 @@ class TrayManager:
 
         menu.show_all()
         return menu
-
-    @staticmethod
-    def _build_postprocess_item() -> Gtk.MenuItem:
-        """A 'Refinement' entry: a radio submenu of levels + a Translate toggle."""
-        import loquivox.config as config_module
-
-        cfg = config_module.CFG
-        current = int(cfg.POSTPROCESS_LEVEL or 0)
-
-        item = Gtk.MenuItem(label="Refinement")
-        submenu = Gtk.Menu()
-        group = None
-        for level, label in config_module.POSTPROCESS_LEVELS:
-            radio = Gtk.RadioMenuItem(label=label, group=group)
-            group = radio
-            radio.set_active(level == current and not cfg.POSTPROCESS_TRANSLATE)
-            radio.connect("toggled", TrayManager._on_postprocess_level, level)
-            submenu.append(radio)
-
-        submenu.append(Gtk.SeparatorMenuItem())
-        translate = Gtk.CheckMenuItem(label=f"Translate → {cfg.POSTPROCESS_TARGET_LANG}")
-        translate.set_active(bool(cfg.POSTPROCESS_TRANSLATE))
-        translate.connect("toggled", TrayManager._on_translate_toggled)
-        submenu.append(translate)
-
-        item.set_submenu(submenu)
-        return item
-
-    @staticmethod
-    def _save_postprocess(values: dict) -> None:
-        """Persist [postprocess] changes and reload config live."""
-        from loquivox import config as config_module
-        from loquivox.config_io import ConfigWriteError, update_section
-        try:
-            update_section("postprocess", values)
-        except ConfigWriteError as e:
-            print(f"⚠️ Could not save post-processing: {e}")
-            return
-        config_module.reload_config()  # PostProcessor reads config_module.CFG live
-
-    @staticmethod
-    def _on_postprocess_level(widget, level: int) -> None:
-        """Pick a refinement level from the tray (also turns Translate off)."""
-        if not widget.get_active():
-            return  # only the newly-selected radio acts
-        TrayManager._save_postprocess({"level": level, "translate": False})
-        print(f"✨ Refinement level → {level}")
-
-    @staticmethod
-    def _on_translate_toggled(widget) -> None:
-        """Toggle Translate from the tray (takes precedence over the level)."""
-        TrayManager._save_postprocess({"translate": bool(widget.get_active())})
-        print(f"✨ Translate → {widget.get_active()}")
 
     @staticmethod
     def _make_history_callback(item: Dict[str, str], clipboard_service) -> Callable:
@@ -198,11 +133,13 @@ class TrayManager:
             ChatManager.refresh_overlay()
 
     @staticmethod
-    def _toggle_mode(widget) -> None:
-        """Toggle between hold-to-record and press-to-toggle mode."""
-        STATE.toggle_mode = widget.get_active()
-        from loquivox.state import SettingsManager
-        SettingsManager.save(STATE)
+    def _toggle_silence(widget) -> None:
+        """Same effect as F7; the menu is rebuilt by ``set_mode`` (also when F7 acts)."""
+        want = widget.get_active()
+        if want == (STATE.presence_mode == "silent"):
+            return   # the menu is only catching up with the state
+        from loquivox.handlers import companion
+        companion.toggle_silence()
 
     @staticmethod
     def _quit(widget) -> None:

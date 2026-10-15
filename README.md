@@ -123,7 +123,7 @@ network, no key, API error.
 | `Space` | **Pause** | Pause / resume the current recording |
 | *(unbound)* | **Refine** | Stop, then pick this dictation's refinement level |
 
-Keys are **hold-to-talk** by default; tick *Toggle Mode* in the tray menu for press-to-start / press-to-stop.
+Keys are **hold-to-talk** by default; tick *Toggle mode* in Settings → Dictation for press-to-start / press-to-stop.
 All of them are remappable in **Settings → Hotkeys**, combos included. `Refine` ships unbound —
 assign a key to use it.
 
@@ -434,7 +434,7 @@ validates your rules (exit code 1 if one is wrong). Settings → Tools → Rules
 Loquivox keeps a log at `~/.local/state/loquivox/loquivox.log` (everything it would
 have printed to a terminal, timestamped, rotated at 2 MB). To send a report, use either:
 
-- **tray icon → Diagnostic report…**, or **Settings → Support** — shows the report, with
+- **Settings → Support** — shows the report, with
   **Copy** and **Save…**. The same tab has **View log…** (live, unredacted, for your own
   eyes) and **Save log…**, which writes the *whole* log with the same redaction — the file
   to attach when 400 lines are not enough.
