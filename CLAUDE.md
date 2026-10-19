@@ -353,7 +353,7 @@ differs is who decides to call it and who waits:
 |---|---|---|
 | decides to call | OpenAI's backend model | ours |
 | the arguments | structured, from a real tool call | inferred from the transcript |
-| a slow plugin | the backend waits (see below) | nothing waits |
+| a slow plugin | the backend waits (see below) | the agent loop waits on its own thread; the voice keeps the floor |
 | the answer reaches the backend | directly, as its tool result | through `session.turns`, next turn |
 
 Under `client` that last row has a price the cascade never pays: there, the
@@ -470,6 +470,29 @@ spends. Sessions have a duration limit (`session.closed` with
 given its context back.
 
 ### Plugins (`services/plugins.py`)
+
+**The agent loop (`TalkSession._with_tools`, shared by the cascade's `_answer` and
+the Live client delegation's `consult()`).** Tools are not "started and swept
+later" on these two routes any more: each call runs in place (`Desk.execute`,
+on the worker thread, never GTK) and its *real* result goes back into the
+exchange, so a chain "read the state → find the lot → launch it" works inside
+one request. It runs until the model answers in text, bounded by
+`CFG.AGENT_MAX_TURNS` rounds and `CFG.AGENT_MAX_SEC` seconds
+(`[talk] agent_max_turns` / `agent_max_sec`), and the tools stay on the table
+on the last round. The loop runs on the chat model and names no provider or
+model (`tests/test_agent_loop.py` checks the source). `find_tools` loads
+deferred tools in the same request, the list being re-read every round — also
+under Live client delegation, the one Live route where that works (`responses`
+fixes its tools at open); so `client` is the better pairing for MCP.
+What is *said* follows the real status, never the model's story:
+`Desk.execute` returns `done` / `ask` / `failed` read from the result itself
+(`plugins.Held` = held for the yes, `plugins.FAILED` = isError). `ask` ends the
+loop and the reply is the question the plugin built from the arguments it froze
+(`Held.question`, e.g. "Run launch_lot (collie) with project=loquivox, lot=13?"),
+not a paraphrase; a yes covers that exact action once, as before. A `failed`
+call not followed by a success is announced as the failure. The journal prints
+❌ on isError. Realtime and the Live `responses` route still use `ask` /
+`run_now` as described below.
 
 The extension surface both engines share, and `services/research.py` is its
 first client. The pattern it generalizes: **one tool** the model may call whose

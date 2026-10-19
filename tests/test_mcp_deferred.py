@@ -111,12 +111,14 @@ def test_a_call_to_a_deferred_tool_loads_it_and_runs():
     session = STATE.talk_session = TalkSession()
     assert "mcp_fz_weather" not in _offered(session.desks)
     assert session.desks.get("no_such_tool") is None, "a hallucinated name was routed"
-    texts = []
+    texts, ran = [], []
 
     def _fake(messages, on_delta=None, tools=None, tool_calls_out=None):
+        ran.append(messages)
         texts.append(any(m.get("content") == talk_module.TEXT_ONLY for m in messages))
         if tool_calls_out is not None and not any(m.get("role") == "tool" for m in messages):
-            tool_calls_out.append({"id": "c1", "name": "mcp_fz_weather", "arguments": "{}"})
+            tool_calls_out.append({"id": "c1", "name": "mcp_fz_weather",
+                                   "arguments": '{"city": "Lyon"}'})
         return "ok"
 
     real = talk_module.AIService.complete
@@ -124,7 +126,8 @@ def test_a_call_to_a_deferred_tool_loads_it_and_runs():
     try:
         session.reply("quelle météo ?")
         assert "mcp_fz_weather" in _offered(session.desks), "the named tool was not loaded"
-        assert _wait(session.desks.ready), "the tool never ran"
+        assert any(m.get("role") == "tool" and "raining" in m["content"] for m in ran[-1]), \
+            "the tool never ran"
         assert not any(texts), "fell back to text instead of running the tool"
     finally:
         talk_module.AIService.complete = real
@@ -157,7 +160,6 @@ def test_the_cascade_calls_it_on_the_next_turn():
     talk_module.AIService.complete = staticmethod(_fake)
     try:
         session.reply("quelle météo à Lyon ?")
-        assert _wait(session.desks.ready)
         session.reply("alors ?")
     finally:
         talk_module.AIService.complete = real

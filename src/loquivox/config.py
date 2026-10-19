@@ -540,6 +540,10 @@ class Config:
     #: moment the conversation ended.
     TALK_AUTO_PASTE: bool = False
     TALK_SPEAK_REPLIES: bool = True
+    #: the tool agent loop (``TalkSession._with_tools``): at most this many
+    #: model rounds, and this many seconds, for one request
+    AGENT_MAX_TURNS: int = 8
+    AGENT_MAX_SEC: float = 90.0
     #: let the conversation call ``research`` (services/research.py)
     TALK_RESEARCH: bool = True
     #: let a chat (F4) call ``write_text`` (services/write.py): the text is
@@ -1061,6 +1065,13 @@ def _build_config() -> Config:
         overrides["RESEARCH_PROVIDER"] = str(models["research_provider"])
     if str(models.get("research", "")).strip():
         overrides["MODEL_RESEARCH"] = str(models["research"]).strip()
+    for key, name, kind in (("agent_max_turns", "AGENT_MAX_TURNS", int),
+                            ("agent_max_sec", "AGENT_MAX_SEC", float)):
+        try:
+            if kind(talk.get(key, 0)) > 0:
+                overrides[name] = kind(talk[key])
+        except (TypeError, ValueError):
+            pass
     if "research" in talk:
         overrides["TALK_RESEARCH"] = bool(talk["research"])
     if "write_tool" in talk:

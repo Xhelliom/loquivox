@@ -262,6 +262,11 @@ finish_by_model = false    # the assistant ends it once it has enough context
 # utterance of six words or fewer — so "quand j'ai fini le rapport, envoie-le"
 # stays part of the brief. Ignored when finish_on_phrase = false.
 # finish_phrases = ["j'ai fini", "vas-y", "that's it"]
+# The tool agent (F4/F6 cascade and Live client delegation): tools run in place,
+# their real result goes back to the model, and the loop continues until a text
+# answer. Bounds for one request: model rounds and seconds.
+# agent_max_turns = 8
+# agent_max_sec = 90
 # Let the conversation call the research tool ([models] research). Off = the
 # model answers from what it knows.
 research = true

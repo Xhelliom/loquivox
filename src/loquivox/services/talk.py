@@ -34,6 +34,7 @@ thread — see ``handlers/mode.py``.
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -41,7 +42,8 @@ from typing import Any, Callable, Dict, List, Optional
 import loquivox.config as config_module
 from loquivox.services.ai import TEXT_ONLY, AIService
 from loquivox.services import memory
-from loquivox.services.plugins import NO_FALSE_DONE, Desks
+from loquivox.i18n import _
+from loquivox.services.plugins import FAILED, NO_FALSE_DONE, Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
 FINISH_MARKER: str = "[[WRITE]]"
@@ -396,58 +398,65 @@ class TalkSession:
     def _with_tools(self, base: List[Dict[str, Any]],
                     stream: Optional[Callable[[str], None]]) -> Optional[str]:
         """
-        One completion over ``base``, with every enabled plugin's tool on the
-        table and any call it makes started on its desk.
+        The agent loop: our model, every enabled plugin's tool on the table,
+        calls run *here* and their real result goes back into the exchange,
+        until the model answers in text.
 
-        Split out of ``_answer`` because the Live engine's client delegation
-        needs exactly this and nothing else around it: our model, our tools,
-        text back. There the answer is not a turn — the voice model paraphrases
-        it and what it *says* is what lands in the conversation — so the caller
-        decides what becomes of the text rather than this deciding for it.
+        Shared by the cascade and the Live engine's client delegation — the
+        voice or the turn is the caller's, the doing is this. What makes a chain
+        possible ("read the state → find the lot → launch it") is that round N+1
+        sees round N's actual result, with the tools still on the table: a
+        request without them makes the provider reject a model whose context
+        is full of tool calls (tool_use_failed). The loop names no
+        provider and no model; it is bounded by ``AGENT_MAX_TURNS`` rounds and
+        ``AGENT_MAX_SEC`` seconds.
+
+        What is said afterwards follows the calls' real status, not the
+        model's account of them: a call held for the user's yes ends the loop
+        with the question the plugin built from the arguments it froze, and a
+        call that failed (and was not followed by one that worked) is
+        announced as the failure it was.
         """
-        # ponytail: a few rounds, not unbounded — a model that keeps calling
-        # tools instead of answering is cut off by the last, tool-less, one.
-        tools = self.desks.chat_tools or None
+        cfg = config_module.CFG
+        deadline = time.monotonic() + cfg.AGENT_MAX_SEC
         exchange: List[Dict[str, Any]] = []
-        answer = None
-        for round_ in range(3):
-            calls: List[Dict[str, str]] = []
-            last = round_ == 2
-            # The follow-up offers the tools too: its context is full of tool
-            # calls and the model calls one again, which a request without
-            # tools makes the provider reject (Groq: tool_use_failed).
-            answer = AIService.complete(base + exchange, on_delta=stream,
-                                        tools=None if last else tools,
-                                        tool_calls_out=calls)
-            routed = [(c, desk) for c, desk in
-                      ((c, self.desks.get(c["name"])) for c in calls) if desk]
-            if calls and not routed and not last:
-                # Calls to tools this session does not hold (invented, or a
-                # deferred one that cannot load): tell the model so as that
-                # call's result and go round again WITH the tools — asked in
-                # text only, it calls the search tool anyway and the provider
-                # rejects the whole generation (Groq: tool_use_failed).
-                exchange += [{"role": "assistant", "content": answer or None,
-                              "tool_calls": [{"id": c["id"], "type": "function",
-                                              "function": {"name": c["name"],
-                                                           "arguments": c["arguments"]}}
-                                             for c in calls]}]
-                exchange += [{"role": "tool", "tool_call_id": c["id"],
-                              "content": UNKNOWN_TOOL.format(name=c["name"])} for c in calls]
-                continue
-            if not routed or last:
+        failure = ""
+        for _round in range(max(1, int(cfg.AGENT_MAX_TURNS))):
+            if time.monotonic() > deadline:
                 break
-            for call, desk in routed:
-                desk.ask(call["arguments"])
-            exchange += [{"role": "assistant", "content": answer or None,
-                          "tool_calls": [{"id": c["id"], "type": "function",
-                                          "function": {"name": c["name"],
-                                                       "arguments": c["arguments"]}}
-                                         for c, _ in routed]}]
-            exchange += [{"role": "tool", "tool_call_id": c["id"],
-                          "content": desk.plugin.started} for c, desk in routed]
-        # Never an empty turn: the user must hear something.
-        return answer if (answer or "").strip() else NOT_DONE
+            calls: List[Dict[str, str]] = []
+            answer = AIService.complete(base + exchange, on_delta=stream,
+                                        tools=self.desks.chat_tools or None,
+                                        tool_calls_out=calls)
+            if not calls:
+                if failure:
+                    return failure
+                # Never an empty turn: the user must hear something.
+                return answer if (answer or "").strip() else NOT_DONE
+            exchange.append({"role": "assistant", "content": answer or None,
+                             "tool_calls": [{"id": c["id"], "type": "function",
+                                             "function": {"name": c["name"],
+                                                          "arguments": c["arguments"]}}
+                                            for c in calls]})
+            for call in calls:
+                desk = self.desks.get(call["name"])
+                if desk is None:
+                    # invented, or a deferred tool that cannot load: say so as
+                    # that call's result and go round again WITH the tools
+                    exchange.append({"role": "tool", "tool_call_id": call["id"],
+                                     "content": UNKNOWN_TOOL.format(name=call["name"])})
+                    continue
+                status, content, question = desk.execute(call["arguments"])
+                if status == "ask":
+                    return question
+                if status == "failed":
+                    reason = re.search(re.escape(FAILED) + r"(.*)", content)
+                    failure = _("{tool} failed: {why}").format(
+                        tool=call["name"], why=(reason.group(1) if reason else content).strip())
+                else:
+                    failure = ""
+                exchange.append({"role": "tool", "tool_call_id": call["id"], "content": content})
+        return failure or _("I could not finish that in time.")
 
     def consult(self) -> Optional[str]:
         """
