@@ -76,6 +76,20 @@ NO_FALSE_DONE = (
     "\"sent\".")
 
 
+#: how a failed call's result opens; ``Desk.execute`` reads the status from it
+FAILED = "ÉCHEC : "
+
+
+class Held(str):
+    """
+    A ``run`` result that is a request for the user's spoken yes, not an
+    outcome: nothing was done. ``question`` is the sentence to say, built by
+    the plugin from the arguments it froze — never from the model's wording.
+    """
+
+    question: str = ""
+
+
 @dataclass(frozen=True)
 class Plugin:
     """
@@ -296,6 +310,28 @@ class Desk:
         args = _arguments(arguments)
         self._note(args)
         return self._answer(args)
+
+    def execute(self, arguments: str) -> Tuple[str, str, str]:
+        """
+        Run the call here and say how it really went: ``(status, content,
+        question)``. ``status`` is ``done``, ``ask`` (held for the user's yes —
+        ``question`` is what to say) or ``failed``, read from the result itself,
+        never from what a model says of it. ``content`` is what goes back to
+        the model as the tool's result. Never raises.
+        """
+        args = _arguments(arguments)
+        self._note(args)
+        try:
+            result = self.plugin.run(args)
+            if isinstance(result, Held):
+                return "ask", str(result), result.question
+            if not result:
+                return "failed", f"{FAILED}the tool returned nothing.", ""
+            status = "failed" if result.startswith(FAILED) else "done"
+            return status, self.plugin.message(args, result)["content"], ""
+        except Exception as e:
+            print(f"⚠️  Plugin {self.plugin.name} failed: {e}")
+            return "failed", f"{FAILED}{e}", ""
 
     def _note(self, args: Dict[str, Any]) -> None:
         """Say in the bubble that the call has started, if the plugin wants to."""

@@ -858,4 +858,10 @@ CATALOG = {
         "Violet vibrant très contrasté et bleu encre profond, qui capturent l'éclat électrique d'une forêt bioluminescente.",
     "Sun-drenched golden sands meet the smoky blue of midnight tides and crystalline waters.":
         "Sables dorés gorgés de soleil qui rencontrent le bleu fumé des marées de minuit et des eaux cristallines.",
+    "{tool} failed: {why}": "{tool} a échoué : {why}",
+    "{tool} was done, but I could not finish the rest in time.": "{tool} a été fait, mais je n'ai pas pu terminer la suite à temps.",
+    "I could not finish that in time.": "Je n'ai pas pu terminer à temps.",
+    "Run {tool} ({server}) with {args}? Say yes to go ahead.":
+        "Lancer {tool} ({server}) avec {args} ? Dis oui pour que j'y aille.",
+    "no arguments": "aucun argument",
 }

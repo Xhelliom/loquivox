@@ -133,13 +133,11 @@ def test_the_cascade_routes_by_tool_name(case=WEATHER_CASE):
 
     assert reply is not None and reply.text == "Je regarde."
     assert case.name in seen["tools"], seen["tools"]
-    assert seen["stub"] and seen["stub"][0]["content"] == case.started, seen["stub"]
+    assert seen["stub"] and case.says(seen["stub"][0]["content"], "Lyon"), seen["stub"]
     assert not any(t.get("role") == "tool" for t in session.turns), \
         "the plumbing leaked into the turns"
-    assert _wait(session.desks.ready), "the desk never took the call"
-    plugin, message = session.desks.take()
-    assert plugin.name == case.name and case.says(message["content"], "Lyon"), message
-    print("✓ the cascade routes an unknown tool by name and answers with its stub")
+    assert not session.desks.ready(), "the answer was queued as well as returned"
+    print("✓ the cascade routes an unknown tool by name and hands the model its real result")
 
 
 def test_the_realtime_engine_routes_the_same_call(case=WEATHER_CASE):
@@ -281,16 +279,15 @@ def test_client_delegation_reaches_the_plugin_through_our_backend(case=WEATHER_C
         ai_module.AIService.complete = real_complete
 
     assert case.name in offered[0], offered
-    # What the backend hands over here is the plugin's stub, and the real
-    # answer cannot follow until `push_result` finds a gap — so the rule to
-    # stop after saying it goes out with it, and goes out *first*: thinking is
-    # silent, the commentary is what sets the model talking.
-    assert sent == [("thinking", AWAIT_RESULT, "item_7"),
-                    ("commentary", "Il pleut à Lyon.", "item_7")], sent
+    # The agent loop ran the plugin in place and read its real result, so
+    # there is nothing left on the way: no rule to hold the floor, just the answer.
+    assert sent == [("commentary", "Il pleut à Lyon.", "item_7")], sent
     # The backend's answer is NOT a turn: the voice model says it in its own
     # words, and that spoken version is what the transcript brings back.
     assert session.turns[-1]["content"] == "quel temps fait-il à Lyon", session.turns
-    assert _wait(session.desks.ready), "the plugin our backend called never ran"
+    assert not session.desks.ready(), "the answer was queued as well as used"
+    desk = session.desks.get(case.name)
+    desk._results.put(desk.plugin.message({"city": "Lyon"}, "It is raining in Lyon."))
 
     # This is the path that still hands a plugin's answer back between turns —
     # nobody is holding the line here — so the gating is checked on it.
