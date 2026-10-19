@@ -220,6 +220,11 @@ UNKNOWN_TOOL = ("There is no tool named {name}. If a tool may exist for this, "
                 "you cannot find that tool.")
 
 
+def _spoken_name(name: str) -> str:
+    """A tool's name as the voice should say it: no ``mcp_<server>_`` prefix."""
+    return re.sub(r"^mcp_[A-Za-z0-9-]+_", "", name).replace("_", " ")
+
+
 class TalkSession:
     """One spoken conversation, and the text it produces."""
 
@@ -379,13 +384,13 @@ class TalkSession:
         One spoken reply for the turns so far, with every enabled plugin's
         tool on the table.
 
-        A tool call is answered on the spot with the plugin's ``started`` stub
-        and the model is asked again for what it actually says out loud; that
-        round trip is the price of a reply that acknowledges the call instead
-        of going quiet. Routing is by tool name — a call this session has no
-        desk for is ignored rather than special-cased. The call and its stub
-        live only in this request: the turns keep the spoken reply, never the
-        plumbing, so the writing pass and the F4 history never see a "tool" role.
+        This is the agent loop (``_with_tools``): each tool call runs in place
+        and its real result goes back into the exchange, so the model answers
+        from what happened rather than from a stub. Routing is by tool name —
+        a call this session has no desk for gets ``UNKNOWN_TOOL`` as its
+        result. The calls and their results live only in this request: the
+        turns keep the spoken reply, never the plumbing, so the writing pass
+        and the F4 history never see a "tool" role.
         """
         stream = None if on_delta is None else (lambda t: on_delta(_strip_marker(t)))
         base = ([{"role": "system", "content": self.system_prompt()}]
@@ -452,7 +457,8 @@ class TalkSession:
                 if status == "failed":
                     reason = re.search(re.escape(FAILED) + r"(.*)", content)
                     failure = _("{tool} failed: {why}").format(
-                        tool=call["name"], why=(reason.group(1) if reason else content).strip())
+                        tool=_spoken_name(call["name"]),
+                        why=(reason.group(1) if reason else content).strip())
                 else:
                     failure = ""
                 exchange.append({"role": "tool", "tool_call_id": call["id"], "content": content})
