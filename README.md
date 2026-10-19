@@ -171,7 +171,7 @@ half is interchangeable, the writing pass never learns which engine ran.
 it shows the moment a fact is needed — a price, a date, a version number, who someone is.
 So both engines get one tool, `research(question)`: the assistant says in one sentence that
 it is looking it up and **keeps the conversation going**, while a web-searching model
-(Groq's compound model by default, ~2 s, or OpenAI's Responses API with `web_search`)
+(Groq's gpt-oss-120b with browser search by default, ~2 s, or OpenAI's Responses API with `web_search`)
 fetches the answer on a thread. The result is handed back **between turns**, never
 mid-sentence, and stays in the brief so the final text has the facts. Pick the provider in
 Settings → Tools → Search; `research = false` under `[talk]` turns the tool off.

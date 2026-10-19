@@ -42,6 +42,11 @@ _PROMPT = (
 _CITATION_RE = re.compile(r"\s*\(\s*\[[^\]]*\]\([^)]*\)\s*\)")   # ([site](url))
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")                     # [text](url) → text
 _URL_RE = re.compile(r"https?://\S+")
+_MARK_RE = re.compile(r"【[^】]*】")                                  # gpt-oss browse marks 【1†L4-L8】
+
+#: opens every text ``run_research`` returns when nothing was found, so
+#: ``result_message`` can tell the model to admit it instead of answering.
+FAILED = "RESEARCH FAILED: "
 
 
 def spoken(text: str) -> str:
@@ -49,6 +54,7 @@ def spoken(text: str) -> str:
     Strip what a voice cannot say: markdown links and bare URLs. The prompt
     asks for none, and the web_search tool appends citations anyway.
     """
+    text = _MARK_RE.sub("", text)
     text = _CITATION_RE.sub("", text)
     text = _LINK_RE.sub(r"\1", text)
     text = re.sub(r"(\d) \.(\d)", r"\1.\2", text)  # compound writes "3 .14 .7"
@@ -73,18 +79,21 @@ def run_research(question: str) -> str:
             text = (response.output_text or "").strip()
         else:
             # Groq's compound models search on their own; no tool to declare.
+            # gpt-oss browses through Groq's browser_search tool; compound ones need none.
+            extra = ({"tools": [{"type": "browser_search"}]}
+                     if cfg.MODEL_RESEARCH.startswith("openai/gpt-oss") else {})
             response = get_ai_client("groq").chat.completions.create(
-                model=cfg.MODEL_RESEARCH,
+                model=cfg.MODEL_RESEARCH, **extra,
                 messages=[{"role": "system", "content": _PROMPT},
                           {"role": "user", "content": question}])
             text = (response.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"⚠️  Research failed ({time.time() - started:.1f}s): {e}")
-        return f"The research could not be done ({e.__class__.__name__}). Say so."
+        return f"{FAILED}{e.__class__.__name__}"
     text = spoken(text)
     print(f"🔎 Research ({time.time() - started:.1f}s): {text[:100]}"
           f"{'…' if len(text) > 100 else ''}")
-    return text or "The research came back empty. Say so."
+    return text or f"{FAILED}empty answer"
 
 
 # --- the plugin -----------------------------------------------------------
@@ -110,6 +119,11 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
     Kept in the session's turns too, so the writing pass and the rest of the
     conversation have the facts, not just the reply that mentioned them.
     """
+    if result.startswith(FAILED):
+        return {"role": "system", "content": (
+            f"The web search for « {question_of(arguments)} » FAILED ({result[len(FAILED):]}). "
+            "Tell the user in one sentence that you could not search, and do NOT "
+            "answer the question from memory or guess: you have no verified fact.")}
     return {"role": "system", "content": (
         f"RESEARCH RESULT for « {question_of(arguments)} »:\n{result}\n\n"
         "Tell the user you have the answer and give it in a few spoken "
@@ -242,10 +256,12 @@ if __name__ == "__main__":
     assert PLUGIN.realtime_tool["name"] == "research"
     assert result_message({"question": "q"}, "r")["role"] == "system"
     assert "q" in result_message({"question": "q"}, "r")["content"]
+    assert "could not search" in result_message({"question": "q"}, FAILED + "X")["content"]
     assert _run({"question": ""}) == "", "an empty question reached the provider"
     assert PLUGIN.note({"question": "x"}) and not PLUGIN.note({})
     assert spoken("Python 3.14.7 est sortie. ([python.org](https://x.y/z)) Voir https://a.b aussi.") \
         == "Python 3.14.7 est sortie. Voir aussi."
     assert spoken("selon [le site](https://x) officiel") == "selon le site officiel"
+    assert spoken("Python 3.15.0【1†L4-L8】.") == "Python 3.15.0."
     assert spoken("la 3 .14 .7") == "la 3.14.7"
     print("✓ research plugin OK")
