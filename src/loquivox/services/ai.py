@@ -40,7 +40,8 @@ class AIService:
     """AI chat and vision completion service."""
 
     @staticmethod
-    def _create(messages: List[Dict[str, Any]], model: str, **extra):
+    def _create(messages: List[Dict[str, Any]], model: str,
+                provider: Optional[str] = None, **extra):
         """
         Start a completion through the provider the user picked.
 
@@ -49,16 +50,33 @@ class AIService:
         would be typed at the cursor and read aloud, and "hidden" is Groq-only
         so it is never sent to OpenAI.
         """
-        provider = STATE.ai_provider
+        provider = provider or STATE.ai_provider
         kwargs = {"reasoning_format": "hidden"} if provider == "groq" else {}
         return get_ai_client(provider).chat.completions.create(
             model=model, messages=messages, **kwargs, **extra
         )
 
     @staticmethod
-    def _complete(messages: List[Dict[str, Any]], model: str) -> Optional[str]:
+    def _complete(messages: List[Dict[str, Any]], model: str,
+                  provider: Optional[str] = None) -> Optional[str]:
         """One completion, waited for."""
-        return AIService._create(messages, model).choices[0].message.content
+        return AIService._create(messages, model, provider).choices[0].message.content
+
+    @staticmethod
+    def agent_target() -> tuple:
+        """
+        ``(provider, model)`` for the tool agent, read at every call so Settings
+        applies without a restart. Unset follows the chat. A model id belongs to
+        its provider, so a provider of its own without a model falls back to the
+        chat's pair whole rather than sending it ids it has never heard of.
+        """
+        provider = STATE.ai_agent_provider or STATE.ai_provider
+        model = STATE.ai_agent_model
+        if not model:
+            if provider != STATE.ai_provider:
+                return STATE.ai_provider, STATE.ai_chat_model
+            model = STATE.ai_chat_model
+        return provider, model
 
     @staticmethod
     def build_messages(user_content: str) -> List[Dict[str, Any]]:
@@ -79,6 +97,7 @@ class AIService:
     def _stream(messages: List[Dict[str, Any]], model: str,
                 on_delta: Callable[[str], None],
                 tool_calls_out: Optional[List[Dict[str, str]]] = None,
+                provider: Optional[str] = None,
                 **extra) -> str:
         """
         The same completion, handed over sentence by sentence as it is written.
@@ -89,7 +108,7 @@ class AIService:
         """
         text = ""
         calls: Dict[int, Dict[str, str]] = {}
-        for chunk in AIService._create(messages, model, stream=True, **extra):
+        for chunk in AIService._create(messages, model, provider, stream=True, **extra):
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
@@ -116,7 +135,8 @@ class AIService:
                  model: Optional[str] = None,
                  on_delta: Optional[Callable[[str], None]] = None,
                  tools: Optional[List[Dict[str, Any]]] = None,
-                 tool_calls_out: Optional[List[Dict[str, str]]] = None) -> Optional[str]:
+                 tool_calls_out: Optional[List[Dict[str, str]]] = None,
+                 provider: Optional[str] = None) -> Optional[str]:
         """
         Raw chat completion for callers that build their own message list.
 
@@ -133,9 +153,9 @@ class AIService:
         extra = {"tools": tools} if tools else {}
         try:
             if on_delta is None and not tools:
-                return AIService._complete(messages, model)
+                return AIService._complete(messages, model, provider=provider)
             return AIService._stream(messages, model, on_delta or (lambda _t: None),
-                                     tool_calls_out, **extra)
+                                     tool_calls_out, provider=provider, **extra)
         except Exception as e:
             # The model called a tool this request did not offer (or garbled
             # the call) and the provider threw the whole generation away. A
@@ -151,7 +171,7 @@ class AIService:
                                        "arguments": arguments})
                 return ""
             return AIService._complete(
-                messages + [{"role": "system", "content": TEXT_ONLY}], model)
+                messages + [{"role": "system", "content": TEXT_ONLY}], model, provider)
 
     @staticmethod
     @safe_execute("AI Vision")

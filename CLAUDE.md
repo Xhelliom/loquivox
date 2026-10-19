@@ -496,6 +496,19 @@ call not followed by a success is announced as the failure. The journal prints
 ❌ on isError. Realtime and the Live `responses` route still use `ask` /
 `run_now` as described below.
 
+The loop has its own model slot: `[models] agent` / `agent_provider` (Settings →
+Models & keys, `STATE.ai_agent_*`), read at every round by
+`AIService.agent_target()` so it applies without a restart. Unset follows the
+chat's provider and model; a provider of its own with no model falls back to the
+chat's pair whole, since a model id never crosses providers. `anthropic` is a
+third entry of `CFG.AI_PROVIDERS`, served by `api.get_ai_client` as the `openai`
+SDK on Anthropic's OpenAI-compatible endpoint (`ANTHROPIC_BASE_URL`, key
+`ANTHROPIC_API_KEY` managed in Settings like the others; `sk-ant-…` is masked by
+the `sk-` rule in `diagnostics.redact`). The loop names no provider or model;
+`tests/test_agent_provider.py` pins the slot. Not yet tried against the real
+endpoint: streamed `tool_calls` and `models.list` over the compat layer, and
+`claude-sonnet-5-5` — no key at hand when this was written.
+
 The extension surface both engines share, and `services/research.py` is its
 first client. The pattern it generalizes: **one tool** the model may call whose
 answer is too slow to wait for, so it comes back *between two turns* rather

@@ -622,6 +622,12 @@ CATALOG = {
         "Modèle de chat",
     "Vision model":
         "Modèle de vision",
+    "Agent provider":
+        "Fournisseur de l'agent",
+    "Agent model":
+        "Modèle de l'agent",
+    "Same as chat":
+        "Comme le chat",
     "▶ Test":
         "▶ Essayer",
     "⚠️ Both models need an id.":

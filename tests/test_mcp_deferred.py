@@ -113,7 +113,7 @@ def test_a_call_to_a_deferred_tool_loads_it_and_runs():
     assert session.desks.get("no_such_tool") is None, "a hallucinated name was routed"
     texts, ran = [], []
 
-    def _fake(messages, on_delta=None, tools=None, tool_calls_out=None):
+    def _fake(messages, on_delta=None, tools=None, tool_calls_out=None, **_kw):
         ran.append(messages)
         texts.append(any(m.get("content") == talk_module.TEXT_ONLY for m in messages))
         if tool_calls_out is not None and not any(m.get("role") == "tool" for m in messages):
@@ -147,7 +147,7 @@ def test_the_cascade_calls_it_on_the_next_turn():
     session = STATE.talk_session = TalkSession()
     seen = []
 
-    def _fake(messages, on_delta=None, tools=None, tool_calls_out=None):
+    def _fake(messages, on_delta=None, tools=None, tool_calls_out=None, **_kw):
         names = [t["function"]["name"] for t in (tools or [])]
         if not any(m.get("role") == "tool" for m in messages):  # a turn's first pass
             seen.append(names)

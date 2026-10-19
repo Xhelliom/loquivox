@@ -115,7 +115,7 @@ def test_the_cascade_routes_by_tool_name(case=WEATHER_CASE):
     session = TalkSession()
     seen = {}
 
-    def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None):
+    def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None, **_kw):
         if not any(m.get("role") == "tool" for m in messages):  # first pass
             seen["tools"] = [t["function"]["name"] for t in (tools or [])]
             tool_calls_out.append({"id": "c1", "name": case.name,

@@ -69,6 +69,8 @@ class SettingsManager:
                 "tts_model": state.tts_model,
                 "ai_provider": state.ai_provider,
                 "ai_chat_model": state.ai_chat_model,
+                "ai_agent_provider": state.ai_agent_provider,
+                "ai_agent_model": state.ai_agent_model,
                 "ai_vision_model": state.ai_vision_model,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
@@ -176,6 +178,8 @@ class AppState:
     # --- Chat / vision provider (see api.get_ai_client) ---
     ai_provider: str = CFG.AI_PROVIDER
     ai_chat_model: str = CFG.MODEL_CHAT
+    ai_agent_provider: str = CFG.AGENT_PROVIDER   # "" = the chat's
+    ai_agent_model: str = CFG.MODEL_AGENT         # "" = the chat's
     ai_vision_model: str = CFG.MODEL_VISION
 
     # --- Hotkey Mode ---
@@ -219,8 +223,9 @@ class AppState:
             self.tts_voice = saved["tts_voice"]
         if "tts_model" in saved:
             self.tts_model = saved["tts_model"]
-        for key in ("ai_provider", "ai_chat_model", "ai_vision_model"):
-            if saved.get(key):
+        for key in ("ai_provider", "ai_chat_model", "ai_vision_model",
+                    "ai_agent_provider", "ai_agent_model"):
+            if key in saved and (saved[key] or key.startswith("ai_agent")):
                 setattr(self, key, saved[key])
         if "tts_enabled" in saved:
             self.tts_enabled = saved["tts_enabled"]

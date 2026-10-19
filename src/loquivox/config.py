@@ -160,8 +160,12 @@ class Config:
     # Provider for chat + vision: "groq" or "openai" (same API dialect, see
     # api.get_ai_client). Overridable per-user in Settings → Models.
     AI_PROVIDER: str = "groq"
-    AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai")
+    AI_PROVIDERS: Tuple[str, ...] = ("groq", "openai", "anthropic")
     MODEL_CHAT: str = "openai/gpt-oss-120b"
+    # The tool agent's own slot (services/talk.py _with_tools). Empty = follow the chat
+    # provider / model. A model id never crosses providers: see AIService.agent_target.
+    AGENT_PROVIDER: str = ""
+    MODEL_AGENT: str = ""
     MODEL_VISION: str = "qwen/qwen3.8-27b"
     #: who answers the talk engines' ``research`` tool — a model that can search
     #: the web: OpenAI's Responses API + web_search, or a Groq compound model.
@@ -1059,6 +1063,10 @@ def _build_config() -> Config:
         overrides["AI_PROVIDER"] = str(models["provider"])
     if "chat" in models:
         overrides["MODEL_CHAT"] = str(models["chat"])
+    if models.get("agent_provider", "") in base.AI_PROVIDERS + ("",):
+        overrides["AGENT_PROVIDER"] = str(models.get("agent_provider", ""))
+    if "agent" in models:
+        overrides["MODEL_AGENT"] = str(models["agent"]).strip()
     if "vision" in models:
         overrides["MODEL_VISION"] = str(models["vision"])
     if models.get("research_provider") in base.RESEARCH_PROVIDERS:
