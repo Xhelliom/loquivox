@@ -974,6 +974,32 @@ reachable, tool, args against the schema, `{keys}`) and exits 1 on a wrong one.
 Both are handled in `app.main` before GTK is imported (so `mcp_tools` imports
 `STATE` lazily): write the rules, run the check, fix, repeat.
 
+## Tool-call bench (`tests/bench_mcp.py`)
+
+Does the agent loop call the right tools — checked by hand before trying it by
+voice, and again after adding an MCP server or changing the model. It costs
+tokens (a few completions per scenario), so it is **not** a self-check:
+`python tests/bench_mcp.py` (`--provider`/`--model` to try another pair, `--only
+<part of a name>`, `-v` for every check and what was said; exit 1 if a scenario
+fails). It runs on the agent slot (`AIService.agent_target()`): nothing is coded
+here, so the configured provider and model are the ones scored.
+
+`tests/bench_mcp_scenarios.toml` holds the fake servers (`[servers.<name>]`,
+`args` = script + argv; `tests/mcp_bench_server.py board|ha` log every call that
+reaches them to `BENCH_LOG`) and the scenarios: a few spoken turns, each with the
+calls expected (tool as `server.tool`, argument keys to find), the acting tools
+that must really run (read from that log, never from the reply), and regexes on
+the reply. Two rules are checked on every turn: no action on a turn that is not
+a yes, and no « c'est fait » when the last call was held, failed or absent.
+`tests/test_bench_mcp.py` is the self-check (fake model, no network).
+
+**Adding a server → add its scenarios.** Put a fake of it in
+`tests/mcp_bench_server.py` (a `kind` branch; `@tool()` acts, `@tool(False)` is
+read-only), declare it under `[servers.<name>]`, then write 3–4 scenarios from
+what you actually say to it: the command with a missing argument, the read that
+supplies it, the action held for the yes then run after it, and a tool that
+fails. A real case that went wrong by voice becomes a scenario first.
+
 ## Logs & the diagnostic report (`diagnostics.py`)
 
 The app logs through `print()`, and `install_log_file()` (called first thing

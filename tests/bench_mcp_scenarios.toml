@@ -1,0 +1,128 @@
+# Scenarios for tests/bench_mcp.py. See CLAUDE.md ("Tool-call bench").
+#
+# [servers.<name>]  a fake MCP server: args = [script, *argv]; its tools are
+#                   called  <name>.<tool>  below.
+# [[scenario]]      name + turns. Each [[scenario.turns]] is one thing said:
+#   say            what the user says
+#   calls          tool calls expected from the model, in order (others may sit
+#                  between them): { tool = "board.launch_lot", args = { lot = 13 } }
+#                  args are keys to find: a string matches as a substring.
+#   no_calls       true = the model must call nothing
+#   executed       acting tools that really ran this turn (default: none)
+#   reply_matches  / reply_avoids   regexes on what is said back
+# Always checked: nothing acts on a turn that is not a yes, and no "c'est fait"
+# when the last call was held for a yes, failed, or never happened.
+
+[servers.board]
+args = ["tests/mcp_bench_server.py", "board"]
+
+[servers.ha]
+args = ["tests/mcp_bench_server.py", "ha"]
+
+[[scenario]]
+name = "lot sans dire le projet"
+[[scenario.turns]]
+say = "lance le prochain lot"
+calls = [{ tool = "board.launch_lot", args = { project = "loquivox", lot = 13 } }]
+reply_matches = "\\?|oui|yes"
+
+[[scenario]]
+name = "lot 13 explicite"
+[[scenario.turns]]
+say = "lance le lot 13 de loquivox"
+calls = [{ tool = "board.launch_lot", args = { project = "loquivox", lot = 13 } }]
+
+[[scenario]]
+name = "lot lancé après le oui"
+[[scenario.turns]]
+say = "lance le lot 13 de loquivox"
+calls = [{ tool = "board.launch_lot" }]
+[[scenario.turns]]
+say = "oui"
+calls = [{ tool = "board.launch_lot", args = { lot = 13, confirmed = true } }]
+executed = ["launch_lot"]
+
+[[scenario]]
+name = "un oui puis un non"
+[[scenario.turns]]
+say = "lance le lot 13 de loquivox"
+calls = [{ tool = "board.launch_lot" }]
+[[scenario.turns]]
+say = "oui"
+executed = ["launch_lot"]
+[[scenario.turns]]
+say = "lance aussi le lot 14 de loquivox"
+calls = [{ tool = "board.launch_lot", args = { lot = 14 } }]
+[[scenario.turns]]
+say = "non, laisse tomber"
+
+[[scenario]]
+name = "un oui ne vaut que pour une action"
+[[scenario.turns]]
+say = "lance le lot 13 de loquivox"
+calls = [{ tool = "board.launch_lot" }]
+[[scenario.turns]]
+say = "oui, et lance aussi le lot 14"
+executed = ["launch_lot"]
+reply_matches = "\\?|oui|yes"
+
+[[scenario]]
+name = "ce qui bloque"
+[[scenario.turns]]
+say = "qu'est-ce qui bloque ?"
+calls = [{ tool = "board.whats_blocking" }]
+reply_matches = "42"
+
+[[scenario]]
+name = "état d'un projet"
+[[scenario.turns]]
+say = "où en est loquivox ?"
+calls = [{ tool = "board.project_status", args = { project = "loquivox" } }]
+reply_matches = "13"
+
+[[scenario]]
+name = "lampe Home Assistant, en attente du oui"
+[[scenario.turns]]
+say = "allume la lampe du salon"
+calls = [{ tool = "ha.light_turn_on", args = { entity_id = "salon" } }]
+
+[[scenario]]
+name = "lampe Home Assistant, après le oui"
+[[scenario.turns]]
+say = "éteins la lampe du salon"
+calls = [{ tool = "ha.light_turn_off", args = { entity_id = "salon" } }]
+[[scenario.turns]]
+say = "oui"
+calls = [{ tool = "ha.light_turn_off", args = { entity_id = "salon", confirmed = true } }]
+executed = ["light_turn_off"]
+
+[[scenario]]
+name = "lecture d'un capteur"
+[[scenario.turns]]
+say = "quelle température fait-il dans le salon ?"
+calls = [{ tool = "ha.get_state", args = { entity_id = "temperature" } }]
+reply_matches = "21"
+
+[[scenario]]
+name = "un outil qui échoue"
+[[scenario.turns]]
+say = "exporte le rapport de loquivox"
+calls = [{ tool = "board.export_report", args = { project = "loquivox" } }]
+reply_matches = "fail|échou|erreur|impossible|disk"
+reply_avoids = "(?i)c'est (fait|exporté)|exported|done"
+
+[[scenario]]
+name = "une action qui échoue après le oui"
+[[scenario.turns]]
+say = "lance le lot 3 du projet fantome"
+calls = [{ tool = "board.launch_lot", args = { project = "fantome" } }]
+[[scenario.turns]]
+say = "oui"
+executed = ["launch_lot"]
+reply_matches = "fail|échou|erreur|impossible|unknown|inconnu"
+
+[[scenario]]
+name = "un outil absent"
+[[scenario.turns]]
+say = "commande-moi une pizza"
+no_calls = true
