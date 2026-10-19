@@ -40,6 +40,37 @@ def test_agent_has_its_own_slot_live():
     print("✓ the agent follows its slot at every call, no restart")
 
 
+def test_the_agent_loop_uses_the_agent_target():
+    """_with_tools must ask AIService.agent_target(), at every call."""
+    from loquivox.services.talk import TalkSession
+
+    seen = []
+
+    def complete(messages, model=None, provider=None, **kw):
+        seen.append((provider, model))
+        return "ok"
+
+    def run():
+        return TalkSession()._with_tools([{"role": "user", "content": "x"}], None)
+
+    real = AIService.complete
+    AIService.complete = staticmethod(complete)
+    try:
+        STATE.ai_provider, STATE.ai_chat_model = "groq", "chat-model"
+        STATE.ai_agent_provider, STATE.ai_agent_model = "anthropic", "agent-model"
+        run()
+        assert seen[-1] == ("anthropic", "agent-model"), seen
+        STATE.ai_agent_provider = STATE.ai_agent_model = ""
+        run()
+        assert seen[-1] == ("groq", "chat-model"), seen
+        STATE.ai_agent_provider, STATE.ai_agent_model = "openai", "o-model"   # no restart
+        run()
+        assert seen[-1] == ("openai", "o-model"), seen
+    finally:
+        AIService.complete = real
+    print("✓ _with_tools follows the agent slot, then the chat's, live")
+
+
 def test_complete_routes_to_the_agent_provider():
     seen = []
 
