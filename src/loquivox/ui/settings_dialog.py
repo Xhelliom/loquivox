@@ -99,6 +99,8 @@ class SettingsDialog:
     # Models & keys tab (and the engine, on Conversation)
     _chat_model: Optional[Gtk.ComboBoxText] = None
     _vision_model: Optional[Gtk.ComboBoxText] = None
+    _agent_provider: Optional[Gtk.ComboBoxText] = None
+    _agent_model: Optional[Gtk.Entry] = None
     _models_status: Optional[Gtk.Label] = None
     _preset_status: Optional[Gtk.Label] = None
     _engine_combo: Optional[Gtk.ComboBoxText] = None
@@ -732,7 +734,7 @@ class SettingsDialog:
 
         provider = Gtk.ComboBoxText()
         for pid in config_module.CFG.AI_PROVIDERS:
-            provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid.title()))
+            provider.append(pid, cls._PROVIDER_NAMES.get(pid, pid.title()))
         provider.set_active_id(STATE.ai_provider if STATE.ai_provider in config_module.CFG.AI_PROVIDERS
                                else config_module.CFG.AI_PROVIDERS[0])
         cls._field(body, _("Provider"), provider, labels)
@@ -741,6 +743,20 @@ class SettingsDialog:
             combo = Gtk.ComboBoxText.new_with_entry()   # editable: a new model id still works
             setattr(cls, attr, combo)
             cls._field(body, _(label), combo, labels)
+
+        # The tool agent's own slot; empty follows the chat's provider and model.
+        agent_provider = Gtk.ComboBoxText()
+        agent_provider.append("", _("Same as chat"))
+        for pid in config_module.CFG.AI_PROVIDERS:
+            agent_provider.append(pid, cls._PROVIDER_NAMES.get(pid, pid.title()))
+        agent_provider.set_active_id(STATE.ai_agent_provider
+                                     if STATE.ai_agent_provider in config_module.CFG.AI_PROVIDERS else "")
+        cls._agent_provider = agent_provider
+        cls._field(body, _("Agent provider"), agent_provider, labels)
+        cls._agent_model = Gtk.Entry()
+        cls._agent_model.set_placeholder_text(_("Same as chat"))
+        cls._agent_model.set_text(STATE.ai_agent_model)
+        cls._field(body, _("Agent model"), cls._agent_model, labels)
 
         cls._models_status = Gtk.Label()
         cls._actions(body, cls._on_apply_models, cls._models_status)
@@ -1125,6 +1141,8 @@ class SettingsDialog:
         # Connected last: filling the voices above must not fire the handler.
         cls._tts_engine_combo.connect("changed", cls._on_engine_changed)
 
+    _PROVIDER_NAMES = {"groq": "Groq", "openai": "OpenAI", "anthropic": "Anthropic"}
+
     @classmethod
     def _on_provider_changed(cls, combo: Gtk.ComboBoxText) -> None:
         """Switch provider and re-list its models (the previous ids won't exist)."""
@@ -1187,6 +1205,8 @@ class SettingsDialog:
             cls._set_models_status(_("⚠️ Both models need an id."))
             return
         STATE.ai_chat_model, STATE.ai_vision_model = chat, vision
+        STATE.ai_agent_provider = cls._agent_provider.get_active_id() or ""
+        STATE.ai_agent_model = cls._agent_model.get_text().strip()
         SettingsManager.save(STATE)
         print(f"🧠 Models applied: chat={chat} vision={vision} ({STATE.ai_provider})")
         cls._set_models_status(_("✓ Applied — chat {chat}, vision {vision}.").format(chat=chat, vision=vision))

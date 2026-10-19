@@ -43,7 +43,7 @@ def test_a_readable_call_is_handed_over_as_a_real_one():
 def test_without_tools_the_turn_is_asked_again_in_text():
     seen = []
 
-    def complete(messages, model):
+    def complete(messages, model, provider=None):
         seen.append(messages)
         if len(seen) == 1:
             raise _Rejected(CALL)
@@ -69,14 +69,14 @@ def test_a_call_to_an_unoffered_tool_still_gets_an_answer():
 
     def run():
         return session._with_tools([{"role": "user", "content": "x"}], None)
-    def complete(m, model):
+    def complete(m, model, provider=None):
         seen.append(m)
         return "Il faut d'abord charger l'outil."
     got = _with(complete, stream, run)
     assert got and got != "", got
     assert seen[-1][-1]["role"] == "tool" and "no tool named call_service" in seen[-1][-1]["content"]
     # and when even the retry says nothing, a sentence is spoken
-    assert _with(lambda m, model: "", lambda *a, **k: "", run) == NOT_DONE
+    assert _with(lambda m, model, provider=None: "", lambda *a, **k: "", run) == NOT_DONE
     print("✓ an unoffered tool call is retried in text, never silent")
 
 
@@ -116,7 +116,7 @@ def test_a_failed_tool_says_so():
 
 
 def test_other_errors_still_surface():
-    def complete(messages, model):
+    def complete(messages, model, provider=None):
         raise ValueError("boom")
     # safe_execute prints and returns None: the error is reported, not retried
     assert _with(complete, None, lambda: AIService.complete([])) is None

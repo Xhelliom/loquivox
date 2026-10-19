@@ -431,7 +431,9 @@ class TalkSession:
             if time.monotonic() > deadline:
                 break
             calls: List[Dict[str, str]] = []
-            answer = AIService.complete(base + exchange, on_delta=stream,
+            provider, model = AIService.agent_target()
+            answer = AIService.complete(base + exchange, model=model, provider=provider,
+                                        on_delta=stream,
                                         tools=self.desks.chat_tools or None,
                                         tool_calls_out=calls)
             if not calls:

@@ -229,7 +229,7 @@ def install_log_file() -> Optional[Path]:
 # Redaction
 # ---------------------------------------------------------------------------
 _SECRET_PATTERNS = [
-    # Provider key formats: Groq (gsk_…), OpenAI (sk-…, sk-proj-…), Deepgram
+    # Provider key formats: Groq (gsk_…), OpenAI (sk-…, sk-proj-…), Anthropic (sk-ant-…, same shape), Deepgram
     # (40 hex chars), and the generic bearer header.
     (re.compile(r"\bgsk_[A-Za-z0-9]{16,}"), REDACTED),
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), REDACTED),

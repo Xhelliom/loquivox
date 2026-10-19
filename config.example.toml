@@ -99,10 +99,17 @@ format = false
 custom_prompt = ""
 
 [models]
-# Chat / vision provider: "groq" (default) or "openai" — both speak the same
+# Chat / vision provider: "groq" (default), "openai" or "anthropic" (through its
+# OpenAI-compatible endpoint, ANTHROPIC_API_KEY) — all speak the same
 # chat-completions API, and each uses its own key. Pick it, and the two model
 # ids, in Settings → Models & keys (stored in settings.json); these are only defaults.
 provider = "groq"
+# The tool agent's own provider and model (Settings → Models & keys). Unset = the
+# chat's. A model id belongs to its provider: set both, or an agent_provider
+# without an agent model falls back to the chat's pair. Once settings.json is
+# written (Settings), its empty ai_agent_* values win over these two keys, as for chat.
+# agent_provider = "anthropic"
+# agent = "claude-sonnet-5-5"
 # Groq chat / vision model ids, and the default TTS engine.
 # TTS is picked in Settings → Models & keys (stored in settings.json); this is only the
 # default. "canopylabs/orpheus-v1-english" speaks English via Groq (accept its

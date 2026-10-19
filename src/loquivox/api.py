@@ -5,7 +5,7 @@ Clients are created on first use (not at import time) so a missing key no
 longer crashes the whole service at startup: the tray stays up and the error
 surfaces when transcription/AI is actually invoked.
 
-Groq is the default provider; OpenAI speaks the same chat-completions dialect,
+Groq is the default provider; OpenAI and Anthropic speak the same chat-completions dialect,
 so ``get_ai_client()`` returns whichever one the user picked and the callers in
 ``services/ai.py`` stay identical either way.
 """
@@ -59,14 +59,36 @@ class OpenAIKeyMissing(RuntimeError):
     """Raised when OPENAI_API_KEY is unset and the OpenAI client is needed."""
 
 
+class AnthropicKeyMissing(RuntimeError):
+    """Raised when ANTHROPIC_API_KEY is unset and the Anthropic client is needed."""
+
+
+_anthropic_client: Optional[Any] = None
+#: Anthropic's OpenAI-compatible endpoint: chat completions, streamed
+#: tool_calls and models.list through the ``openai`` SDK, so no second SDK.
+ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1/"
+
+
 def get_ai_client(provider: str):
     """
-    The chat/vision client for ``provider`` ("groq" or "openai"), cached.
+    The chat/vision client for ``provider`` ("groq", "openai" or "anthropic"), cached.
 
-    Both SDKs expose the same ``chat.completions.create`` and ``models.list``,
-    which is why the AI service never has to know which one it holds.
+    All three expose the same ``chat.completions.create`` and ``models.list``
+    (Anthropic through its OpenAI-compatible endpoint), which is why the AI
+    service never has to know which one it holds.
     """
-    global _openai_client
+    global _openai_client, _anthropic_client
+    if provider == "anthropic":
+        with _lock:
+            if _anthropic_client is None:
+                api_key = os.environ.get("ANTHROPIC_API_KEY")
+                if not api_key:
+                    raise AnthropicKeyMissing(
+                        "ANTHROPIC_API_KEY is not set — add it in Settings → API Keys."
+                    )
+                from openai import OpenAI
+                _anthropic_client = OpenAI(api_key=api_key, base_url=ANTHROPIC_BASE_URL)
+            return _anthropic_client
     if provider != "openai":
         return get_client()
     with _lock:

@@ -28,6 +28,7 @@ SECRETS_FILE: Path = Path.home() / ".config" / "loquivox" / "secrets.env"
 MANAGED_KEYS = {
     "GROQ_API_KEY": "Groq",
     "OPENAI_API_KEY": "OpenAI",
+    "ANTHROPIC_API_KEY": "Anthropic",
     "DEEPGRAM_API_KEY": "Deepgram",
 }
 
