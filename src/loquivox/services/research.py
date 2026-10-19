@@ -115,8 +115,12 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
     conversation have the facts, not just the reply that mentioned them.
     """
     if result.startswith(FAILED):   # plugins.FAILED: Desk.execute reads the status from it
+        # the first line is what the agent loop speaks (talk.py reads ÉCHEC : (.*)):
+        # the reason alone; the instruction to the model goes after the newline
+        why = result[len(FAILED):].strip().splitlines()[0][:120] if result[len(FAILED):].strip() else "?"
         return {"role": "system", "content": (
-            f"{FAILED}The web search for « {question_of(arguments)} » failed ({result[len(FAILED):]}). "
+            f"{FAILED}{why}\n"
+            f"The web search for « {question_of(arguments)} » failed. "
             "Tell the user in one sentence that you could not search, and do NOT "
             "answer the question from memory or guess: you have no verified fact.")}
     return {"role": "system", "content": (
@@ -275,11 +279,20 @@ if __name__ == "__main__":
     real = sys.modules.get("loquivox.api")
     sys.modules["loquivox.api"] = NS(get_ai_client=fake_client)   # no groq SDK needed
     try:
-        cfg = config_module.CFG
-        if cfg.RESEARCH_PROVIDER == "groq" and cfg.MODEL_RESEARCH.startswith("openai/gpt-oss"):
+        import dataclasses, re
+        # the dataclass default, whatever the operator's config.toml says
+        real_cfg = config_module.CFG
+        default = config_module.Config()
+        config_module.CFG = dataclasses.replace(
+            real_cfg, RESEARCH_PROVIDER=default.RESEARCH_PROVIDER, MODEL_RESEARCH=default.MODEL_RESEARCH)
+        try:
             assert run_research("q") == "Elle est fusionnée."
             assert seen["tools"] == [{"type": "browser_search"}], seen
-        import dataclasses
+        finally:
+            config_module.CFG = real_cfg
+        # what talk.py speaks from a failure is the reason alone
+        said = re.search(re.escape(FAILED) + r"(.*)", result_message({"question": "q"}, FAILED + "model_not_found")["content"])
+        assert said.group(1).strip() == "model_not_found", said.group(1)
         desk = plugins.Desk(dataclasses.replace(PLUGIN, note=None))   # no bubble in a self-check
         seen["boom"] = True
         status, content, _q = desk.execute('{"question": "q"}')
