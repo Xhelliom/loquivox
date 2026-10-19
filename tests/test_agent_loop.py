@@ -123,6 +123,16 @@ try:
     assert answer and "13" not in answer
     print("✓ the loop stops at its bound with the tools still on the table")
 
+    # 4b. bound hit right after a call that worked: the action happened, say so
+    session = TalkSession()
+    session.add_user("lance")
+    config_module.CFG = config_module.CFG.__class__(
+        **{**config_module.CFG.__dict__, "AGENT_MAX_TURNS": 1})
+    answer, _s = drive(lambda m: [call("find_lot", project="x")], session)
+    assert "find_lot" in answer.lower() or "find lot" in answer.lower(), answer
+    assert "was done" in answer or "a été fait" in answer, answer
+    print("✓ the bound after a done call does not say nothing was done")
+
     # 5. the loop names no provider or model
     src = (ROOT / "src/loquivox/services/talk.py").read_text()
     body = src[src.index("def _with_tools"):src.index("def consult")]

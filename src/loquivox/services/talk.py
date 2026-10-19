@@ -426,6 +426,7 @@ class TalkSession:
         deadline = time.monotonic() + cfg.AGENT_MAX_SEC
         exchange: List[Dict[str, Any]] = []
         failure = ""
+        last_done = ""  # readable name of the last call that really worked
         for _round in range(max(1, int(cfg.AGENT_MAX_TURNS))):
             if time.monotonic() > deadline:
                 break
@@ -461,8 +462,13 @@ class TalkSession:
                         why=(reason.group(1) if reason else content).strip())
                 else:
                     failure = ""
+                    last_done = _spoken_name(call["name"])
                 exchange.append({"role": "tool", "tool_call_id": call["id"], "content": content})
-        return failure or _("I could not finish that in time.")
+        if failure:
+            return failure
+        if last_done:
+            return _("{tool} was done, but I could not finish the rest in time.").format(tool=last_done)
+        return _("I could not finish that in time.")
 
     def consult(self) -> Optional[str]:
         """
