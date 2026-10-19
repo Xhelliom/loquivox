@@ -26,7 +26,7 @@ from typing import Any, Dict
 
 import loquivox.config as config_module
 from loquivox.i18n import N_, _
-from loquivox.services.plugins import Plugin, register
+from loquivox.services.plugins import FAILED, Plugin, register
 
 _PROMPT = (
     "You answer a question asked out loud in the middle of a conversation, so "
@@ -43,11 +43,6 @@ _CITATION_RE = re.compile(r"\s*\(\s*\[[^\]]*\]\([^)]*\)\s*\)")   # ([site](url))
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")                     # [text](url) → text
 _URL_RE = re.compile(r"https?://\S+")
 _MARK_RE = re.compile(r"【[^】]*】")                                  # gpt-oss browse marks 【1†L4-L8】
-
-#: opens every text ``run_research`` returns when nothing was found, so
-#: ``result_message`` can tell the model to admit it instead of answering.
-FAILED = "RESEARCH FAILED: "
-
 
 def spoken(text: str) -> str:
     """
@@ -89,7 +84,7 @@ def run_research(question: str) -> str:
             text = (response.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"⚠️  Research failed ({time.time() - started:.1f}s): {e}")
-        return f"{FAILED}{e.__class__.__name__}"
+        return f"{FAILED}{e.__class__.__name__}: {str(e)[:120]}"
     text = spoken(text)
     print(f"🔎 Research ({time.time() - started:.1f}s): {text[:100]}"
           f"{'…' if len(text) > 100 else ''}")
@@ -119,9 +114,9 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
     Kept in the session's turns too, so the writing pass and the rest of the
     conversation have the facts, not just the reply that mentioned them.
     """
-    if result.startswith(FAILED):
+    if result.startswith(FAILED):   # plugins.FAILED: Desk.execute reads the status from it
         return {"role": "system", "content": (
-            f"The web search for « {question_of(arguments)} » FAILED ({result[len(FAILED):]}). "
+            f"{FAILED}The web search for « {question_of(arguments)} » failed ({result[len(FAILED):]}). "
             "Tell the user in one sentence that you could not search, and do NOT "
             "answer the question from memory or guess: you have no verified fact.")}
     return {"role": "system", "content": (
@@ -250,6 +245,7 @@ register(PLUGIN)
 
 
 if __name__ == "__main__":
+    from loquivox.services import plugins
     assert question_of({"question": " Who won? "}) == "Who won?"
     assert question_of({}) == ""
     assert PLUGIN.chat_tool["function"]["name"] == "research"
@@ -264,4 +260,31 @@ if __name__ == "__main__":
     assert spoken("selon [le site](https://x) officiel") == "selon le site officiel"
     assert spoken("Python 3.15.0【1†L4-L8】.") == "Python 3.15.0."
     assert spoken("la 3 .14 .7") == "la 3.14.7"
+    # the default model gets Groq's browser_search tool, and a failure is "failed" to the agent loop
+    from types import SimpleNamespace as NS
+    import sys
+    seen = {}
+
+    def fake_client(_provider):
+        def create(**kw):
+            seen.update(kw)
+            if seen.get("boom"):
+                raise RuntimeError("model_not_found")
+            return NS(choices=[NS(message=NS(content="Elle est fusionnée."))])
+        return NS(chat=NS(completions=NS(create=create)))
+    real = sys.modules.get("loquivox.api")
+    sys.modules["loquivox.api"] = NS(get_ai_client=fake_client)   # no groq SDK needed
+    try:
+        cfg = config_module.CFG
+        if cfg.RESEARCH_PROVIDER == "groq" and cfg.MODEL_RESEARCH.startswith("openai/gpt-oss"):
+            assert run_research("q") == "Elle est fusionnée."
+            assert seen["tools"] == [{"type": "browser_search"}], seen
+        import dataclasses
+        desk = plugins.Desk(dataclasses.replace(PLUGIN, note=None))   # no bubble in a self-check
+        seen["boom"] = True
+        status, content, _q = desk.execute('{"question": "q"}')
+        assert status == "failed" and "model_not_found" in content, (status, content)
+    finally:
+        if real: sys.modules["loquivox.api"] = real
+        else: del sys.modules["loquivox.api"]
     print("✓ research plugin OK")
