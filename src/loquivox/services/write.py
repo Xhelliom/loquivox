@@ -120,7 +120,7 @@ def _settings(dialog, vbox, labels) -> None:
 
     check = Gtk.CheckButton(label=_("Let the conversation write and paste a text"))
     check.set_active(bool(cfg.TALK_WRITE_TOOL))
-    dialog._field(body, _("Writing"), check, labels)
+    dialog._field(body, _("Write on request"), check, labels)
 
     status = Gtk.Label()
 

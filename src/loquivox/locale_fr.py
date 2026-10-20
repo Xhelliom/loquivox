@@ -90,8 +90,6 @@ CATALOG = {
         "Les serveurs déclarés sous [mcp.servers.&lt;nom&gt;] dans config.toml donnent leurs outils à la conversation. Un outil qui n'est pas en lecture seule est confirmé à voix haute avant de s'exécuter. Nécessite l'extra `mcp`. Avec Live et le backend d'OpenAI, les outils du backend sont figés à l'ouverture de la session : tous les outils sont déclarés, le tri `always` ne s'y applique pas.",
     "⚡ = acts: confirmed out loud before it runs":
         "⚡ = agit : confirmé à voix haute avant de s'exécuter",
-    "<small>✓ Servers updated — reopen Settings to see their state.</small>":
-        "<small>✓ Serveurs mis à jour — rouvrez les Réglages pour voir leur état.</small>",
     "up":
         "actif",
     "starting":
@@ -128,8 +126,6 @@ CATALOG = {
         "Les modèles de conversation sont rapides et peu érudits. Quand l'un d'eux a besoin d'un fait, il confie la question à ce modèle, qui peut chercher sur le web, et continue de parler ; la réponse est donnée dès qu'elle revient. API Responses d'OpenAI avec recherche web, ou un modèle Groq compound.",
     "Research":
         "Recherche",
-    "Model":
-        "Modèle",
     "🔎 Result received — the assistant will tell you":
         "🔎 Résultat reçu — l'assistant vous le donne",
     "Let the conversation look things up":
@@ -288,14 +284,6 @@ CATALOG = {
         "<small>✓ Enregistré — le mot de réveil et le clic s'appliquent maintenant, le choix de démarrage au prochain lancement.</small>",
     "Dictation":
         "Dictée",
-    "AI Chat":
-        "Chat IA",
-    "Talk":
-        "Conversation",
-    "Pin Chat":
-        "Épingler le chat",
-    "TTS Toggle":
-        "Lecture vocale",
     "Cancel":
         "Annuler",
     "Pause / Resume":
@@ -304,8 +292,6 @@ CATALOG = {
         "Arrêter + choisir le niveau",
     "Companion silence":
         "Silence du compagnon",
-    "Companion wake":
-        "Réveil du compagnon",
     "Groq Orpheus — English only (needs GROQ_API_KEY)":
         "Groq Orpheus — anglais uniquement (nécessite GROQ_API_KEY)",
     "OpenAI — multilingual, speaks French (needs OPENAI_API_KEY)":
@@ -364,8 +350,6 @@ CATALOG = {
         "Une petite bulle qui guette son mot de réveil sur cette machine et n'ouvre la conversation cloud que lorsqu'on lui parle.",
     "Wake word":
         "Mot de réveil",
-    "Single click":
-        "Clic simple",
     "0 = never · takes effect at next launch":
         "0 = jamais · effectif au prochain lancement",
     "Idle (min)":
@@ -422,8 +406,6 @@ CATALOG = {
         "Quelle recherche web utilise le backend OpenAI. Choisir la leur met le plugin de recherche en retrait pour que les deux ne se concurrencent jamais — et seulement lui : tous les autres plugins restent disponibles dans les deux cas. Leur recherche ignore votre fournisseur et votre modèle de recherche.",
     "Web search":
         "Recherche web",
-    "Voice":
-        "Voix",
     "Speak a line with the selected engine and voice":
         "Prononcer une phrase avec le moteur et la voix sélectionnés",
     "Piper needs no key and no network: its voice downloads once (~60 MB) and is flatter than the cloud's.":
@@ -442,16 +424,12 @@ CATALOG = {
         "Palette de couleurs",
     "Applies immediately, to the overlay above and to the chat bubble.":
         "S'applique immédiatement, à la bulle ci-dessus et à la bulle de chat.",
-    "Desktop":
-        "Bureau",
     "Chrome that lives outside a recording. Applies immediately.":
         "Les éléments qui vivent en dehors d'un enregistrement. S'applique immédiatement.",
     "Language":
         "Langue",
     "The language of the whole interface. Auto follows the system locale. Applies immediately; reopen Settings to see this window in the new language.":
         "La langue de toute l'interface. Auto suit la langue du système. S'applique immédiatement ; rouvrez les Réglages pour voir cette fenêtre dans la nouvelle langue.",
-    "Interface":
-        "Interface",
     "Transcription":
         "Transcription",
     "Backend":
@@ -932,4 +910,108 @@ CATALOG = {
         '✓ Appliqué — chat {chat} · vision {vision} · agent {agent}.',
     '✓ {v0} models available on {provider}. Pick or type one, then Apply. An empty model follows the chat model.':
         '✓ {v0} modèles disponibles chez {provider}. Choisissez ou tapez-en un, puis Appliquer. Un modèle vide suit le modèle de chat.',
+    '<small>✓ Advanced settings saved — used from the next session.</small>':
+        '<small>✓ Réglages avancés enregistrés — pris en compte à la prochaine session.</small>',
+    '<small>✓ Servers updated — their state follows below.</small>':
+        '<small>✓ Serveurs mis à jour — leur état suit ci-dessous.</small>',
+    'A pause this long ends your turn':
+        'Une pause de cette durée met fin à votre tour',
+    'Advanced':
+        'Avancé',
+    'Agent rounds (max)':
+        "Tours de l'agent (max)",
+    'Agent time limit (s)':
+        "Durée limite de l'agent (s)",
+    'Click on the bubble':
+        'Clic sur la bulle',
+    'Companion backend model':
+        'Modèle backend du compagnon',
+    'Companion delegates thinking to':
+        'Le compagnon délègue la réflexion à',
+    'Companion instructions':
+        'Instructions du compagnon',
+    'Companion web search':
+        'Recherche web du compagnon',
+    'Companion — silence':
+        'Compagnon — silence',
+    'Companion — wake':
+        'Compagnon — réveil',
+    "Companion's Live voice":
+        'Voix Live du compagnon',
+    'Conversation ends after (s)':
+        'La conversation se termine après (s)',
+    'Conversation — chat':
+        'Conversation — discussion',
+    'Conversation — write':
+        'Conversation — rédaction',
+    'How a conversation is held':
+        'Comment la conversation est tenue',
+    'How long the sound stays lowered after the speech stops':
+        'Durée pendant laquelle le son reste baissé après la fin de la parole',
+    'How the companion talks and thinks':
+        'Comment le compagnon parle et réfléchit',
+    'Input device':
+        "Périphérique d'entrée",
+    'Interface language':
+        "Langue de l'interface",
+    'Let the model look at the window again when asked':
+        'Laisser le modèle regarder de nouveau la fenêtre quand on le demande',
+    'Live model':
+        'Modèle Live',
+    'Look at the screen':
+        "Regarder l'écran",
+    'Lowered sound returns after (s)':
+        'Le son baissé revient après (s)',
+    "Minimum voice level that counts as speech; the room's noise raises it":
+        'Niveau de voix minimal qui compte comme de la parole ; le bruit de la pièce le relève',
+    'Open config.toml':
+        'Ouvrir config.toml',
+    'Outside a recording':
+        "Hors d'un enregistrement",
+    'Pause that ends a turn (ms)':
+        'Pause qui termine un tour (ms)',
+    'Pin the chat':
+        'Épingler le chat',
+    'Realtime transcription':
+        'Transcription Realtime',
+    'Rounds of tool calls the agent may chain in one answer':
+        "Tours d'appels d'outils que l'agent peut enchaîner dans une réponse",
+    'Said on their own, these close the conversation without a reply':
+        'Dites seules, ces phrases ferment la conversation sans réponse',
+    'Seconds of silence, both ways, that end a conversation':
+        'Secondes de silence, dans les deux sens, qui terminent une conversation',
+    'Separated by commas; accents and punctuation are ignored.':
+        'Séparées par des virgules ; les accents et la ponctuation sont ignorés.',
+    'Shorter sounds are ignored':
+        'Les sons plus courts sont ignorés',
+    'Shortest speech (ms)':
+        'Parole la plus courte (ms)',
+    'Shown in':
+        'Affichée en',
+    'Sound — read aloud':
+        'Son — lecture à voix haute',
+    'Speech engine':
+        'Moteur de la voix',
+    'Speech voice':
+        'Voix lue',
+    'Stop phrases':
+        "Phrases d'arrêt",
+    "The Live engine's voice model":
+        'Le modèle vocal du moteur Live',
+    'Time limit for one answer, tools included':
+        "Durée limite d'une réponse, outils compris",
+    'Transcribes your side of a Realtime conversation':
+        'Transcrit votre côté d’une conversation Realtime',
+    'Transcription model':
+        'Modèle de transcription',
+    'Voice level':
+        'Niveau de voix',
+    'Wake word and bubble':
+        "Mot d'éveil et bulle",
+    'Web lookup':
+        'Modèle de recherche',
+    'While the companion talks':
+        'Pendant que le compagnon parle',
+    'Write on request':
+        'Rédiger sur demande',
 }

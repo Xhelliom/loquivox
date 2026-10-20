@@ -717,10 +717,11 @@ plugin declares a server with `Plugin.loads` and `Desks.take()` loads its group 
 (`board` → server `board`; the active-window variant is not done). Per engine: the cascade and
 Live client read the list each call; Realtime re-declares through `RealtimeTalk.push_tools`
 (polled beside `push_context`, `Desks.tools_version`); Live `responses` fixes its tools at open,
-so `_config` does `load_all()` — nothing is deferred there. This is a known limit, not an oversight: the Live API gives no documented way to amend `delegation.responses.tools` after `session.started` (`delegation.type` and instructions are frozen), so the sorting cannot apply; Settings → Plugins → MCP says so. `always` given as a single string counts as a one-item list; names are compared exactly. `tests/test_mcp_deferred.py` pins it
+so `_config` does `load_all()` — nothing is deferred there. This is a known limit, not an oversight: the Live API gives no documented way to amend `delegation.responses.tools` after `session.started` (`delegation.type` and instructions are frozen), so the sorting cannot apply; Settings → Tools → MCP servers says so. `always` given as a single string counts as a one-item list; names are compared exactly. `tests/test_mcp_deferred.py` pins it
 and prints the tool-context size before/after. What a tool returns goes through `RESULT_FRAME`
 (data, never an instruction), like a source's text. Settings → Tools has its
-card (`_settings`: state, tools, ⚡ for acting ones, on/off per server;
+card (`_settings`: state, tools, ⚡ for acting ones, on/off per server; the state
+is re-read every 2 s while the window is open — servers come up after it opens;
 `config_io.update_section` takes dotted sections for the nested table). Not
 done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
 mid-session. `sync()` relaunches only a server whose config or `enabled` changed (a
@@ -983,7 +984,7 @@ plus the last event; `MIN_GAP` 0.2 s between two runs). Actions call
 `mcp_tools.call_tool` directly: no model, **no spoken yes** (the user wrote them
 in config, unlike a tool the model picks). An absent server or an error is one
 warning per distinct message and a ❌ in Settings → Tools → Rules (which lists
-each rule and its last result; editing stays in config.toml). "Back to how it
+each rule and its last result, plus an « Open config.toml » button — editing stays in config.toml). "Back to how it
 was" is two rules (snapshot, restore), never code. `tests/test_rules.py` pins
 it with a test server and test rules, and that the two modules name no
 integration.
@@ -1134,6 +1135,25 @@ through the same `redact()`.
   French line to `locale_fr.py`; `tests/test_i18n.py` fails on a missing one,
   on a dead one, on a placeholder that drifted, and on a bare literal handed to
   a GTK label. Never bind `_` as a throwaway variable in these modules.
+- **Advanced** is a closed `Gtk.Expander` at the foot of a page (`_fold`, built
+  by `_build_advanced` *after* the plugin cards, `pack_end` so it stays last),
+  for what used to exist in config.toml only: `[talk]` `live_model` and
+  `realtime_transcribe` (Conversation › Engine), the VAD thresholds
+  `vad_threshold` / `silence_ms` / `min_speech_ms` (Conversation › Flow),
+  `[companion]` `idle_timeout` and `stop_phrases` (Companion › Presence),
+  `duck_hold` (Sound › Microphone & music), `look_tool` (Tools › Writing &
+  screen) and `agent_max_turns` / `agent_max_sec` (Tools › MCP servers). They
+  share **one** writer, `_on_apply_advanced`, whose status line sits on the
+  Engine page *outside* the fold, so an error is visible while it is closed.
+  A new advanced setting goes in `_build_advanced`; `tests/test_settings_layout.py`
+  (`ADVANCED`) pins where each one lives and that Apply writes it.
+- **No label appears twice in the window** (field labels and card titles;
+  `test_no_label_appears_twice_in_the_window`). A shared word is made specific
+  (« Conversation engine » vs « Speech engine », « Companion's Live voice » vs
+  « Live voice »), and a hotkey takes its tab's name (« Conversation — chat »
+  / « — write », « Companion — silence », « Sound — read aloud »). A card
+  title is *text*: `_group` escapes it (an unescaped « Voice & thinking »
+  parsed to nothing).
 - **A field is greyed only when it really has no effect** (audit
   `docs/audits/2026-10-20-reglages-v2.md`): the companion's Live fields are its own
   and never greyed by F4/F6's engine (backend model and web search only follow

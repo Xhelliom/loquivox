@@ -117,6 +117,10 @@ def _settle(win: Gtk.Window) -> None:
             Gtk.main_iteration()
 
 
+def _folds(page):
+    return [w for w in _widgets(page) if isinstance(w, Gtk.Expander)]
+
+
 def test_label_columns_align():
     """Every page puts its label column at one x, across separate cards."""
     win = SettingsDialog._instance
@@ -126,8 +130,15 @@ def test_label_columns_align():
         inner = nb.get_nth_page(i)
         for j in range(inner.get_n_pages() if SUBTABS[tab] else 0):
             inner.set_current_page(j)
-            _settle(win)
-            widths = _field_label_widths(inner.get_nth_page(j))
+            for fold in _folds(inner.get_nth_page(j)):   # its fields align too
+                fold.set_expanded(True)
+            for _try in range(30):   # a just-opened fold is allocated on a later frame
+                _settle(win)
+                widths = _field_label_widths(inner.get_nth_page(j))
+                if min(widths, default=2) > 1:
+                    break
+            for fold in _folds(inner.get_nth_page(j)):
+                fold.set_expanded(False)
             assert len(set(widths)) <= 1, (
                 f"{tab} › {SUBTABS[tab][j]} has ragged label columns: "
                 f"{sorted(set(widths))}")
@@ -916,7 +927,7 @@ def test_a_preset_fills_the_widgets_and_apply_saves_them():
 
 def test_models_are_set_in_the_role_table_and_nowhere_else():
     cls, where = SettingsDialog, _where()
-    roles = ("Answers", "Final text", "Vision", "Search", "Memory judge")
+    roles = ("Answers", "Final text", "Vision", "Web lookup", "Memory judge")
     for role in roles:
         row = _control("Models & keys", role)
         assert isinstance(row, Gtk.Box), role
@@ -989,6 +1000,131 @@ def test_read_aloud_keeps_both_cases_on_the_sound_tab():
         cls._talk_speak_check.set_active(True)
     print("✓ both read-aloud switches live on Sound and are written by its writer")
 
+#: (tab, sub-page) -> the widgets of its « Advanced » fold: what used to exist
+#: in config.toml only
+ADVANCED = {
+    ("Conversation", "Engine"): ("_adv_live_model", "_adv_realtime_transcribe"),
+    ("Conversation", "Flow"): ("_adv_vad_threshold", "_adv_vad_silence",
+                               "_adv_vad_min_speech"),
+    ("Companion", "Presence"): ("_adv_comp_idle", "_adv_comp_stop"),
+    ("Sound", "Microphone & music"): ("_adv_duck_hold",),
+    ("Tools", "Writing & screen"): ("_adv_look_tool",),
+    ("Tools", "MCP servers"): ("_adv_agent_turns", "_adv_agent_sec"),
+}
+
+
+def _sub(tab: str, sub: str) -> Gtk.Widget:
+    return _tab(tab).get_nth_page(SUBTABS[tab].index(sub))
+
+
+def test_the_advanced_fold_exposes_what_only_config_had():
+    """Each listed setting sits under a collapsed « Advanced » on its own page."""
+    cls = SettingsDialog
+    for (tab, sub), attrs in ADVANCED.items():
+        page = _sub(tab, sub)
+        folds = [w for w in _widgets(page) if isinstance(w, Gtk.Expander)
+                 and w.get_label() == "Advanced"]
+        assert len(folds) == 1, (tab, sub, folds)
+        assert not folds[0].get_expanded(), f"{tab}/{sub}: fold starts open"
+        for attr in attrs:
+            assert _under(getattr(cls, attr), folds[0]), f"{attr} is not under Advanced"
+    print("✓ the advanced settings sit under a closed « Advanced » on their page")
+
+
+def test_the_advanced_fold_applies():
+    from loquivox import config as config_module
+    cls = SettingsDialog
+    restore = _tmp_config()
+    try:
+        cls._adv_live_model.set_text("gpt-live-x")
+        cls._adv_realtime_transcribe.set_text("whisper-1")
+        cls._adv_vad_threshold.set_value(0.05)
+        cls._adv_vad_silence.set_value(700)
+        cls._adv_vad_min_speech.set_value(250)
+        cls._adv_agent_turns.set_value(5)
+        cls._adv_agent_sec.set_value(45)
+        cls._adv_look_tool.set_active(False)
+        cls._adv_comp_idle.set_value(20)
+        cls._adv_comp_stop.set_text("Tais-toi, STOP ,")
+        cls._adv_duck_hold.set_value(2)
+        cls._on_apply_advanced(None)
+        cfg = config_module.CFG
+        assert (cfg.TALK_LIVE_MODEL, cfg.TALK_REALTIME_TRANSCRIBE) == ("gpt-live-x", "whisper-1")
+        assert (cfg.TALK_VAD_THRESHOLD, cfg.TALK_VAD_SILENCE_MS,
+                cfg.TALK_VAD_MIN_SPEECH_MS) == (0.05, 700, 250)
+        assert (cfg.AGENT_MAX_TURNS, cfg.AGENT_MAX_SEC) == (5, 45.0)
+        assert cfg.TALK_LOOK_TOOL is False
+        assert cfg.COMPANION_IDLE_TIMEOUT == 20.0
+        assert cfg.COMPANION_STOP_PHRASES == ("tais-toi", "stop"), cfg.COMPANION_STOP_PHRASES
+        assert cfg.COMPANION_DUCK_HOLD_SEC == 2.0
+        assert any(h == cls._on_apply_advanced for h, _s in cls._appliers), \
+            "the one Apply does not reach the advanced writer"
+    finally:
+        restore()
+    print("✓ the advanced fold writes config.toml through the one Apply")
+
+
+def test_no_label_appears_twice_in_the_window():
+    """A field label or a card title is read once; a hotkey takes its tab's name."""
+    from collections import Counter
+    seen = Counter()
+    for w in _widgets(_notebook(SettingsDialog._instance)):
+        if not isinstance(w, Gtk.Label):
+            continue
+        if w.get_name() == "field-label" and w.get_text():
+            seen[w.get_text()] += 1
+        elif (w.get_label() or "").startswith('<span size="large"'):
+            seen[w.get_text()] += 1
+    dupes = sorted(t for t, n in seen.items() if n > 1)
+    assert not dupes, dupes
+    assert "" not in seen, "a card title failed to parse (unescaped &?)"
+    hot = [w.get_text() for w in _widgets(_tab("Hotkeys"))
+           if isinstance(w, Gtk.Label) and w.get_name() == "field-label"]
+    for old in ("AI Chat", "Talk", "Pin Chat", "TTS Toggle"):
+        assert old not in hot, hot
+    assert sum(h.startswith("Conversation") for h in hot) == 2, hot
+    print("✓ no duplicate label; hotkeys are named after the tabs")
+
+
+def test_mcp_state_follows_the_servers_without_reopening():
+    from loquivox.services import mcp_tools
+    real = mcp_tools.status
+    rows = [{"name": "demo", "enabled": True, "state": "starting", "error": "",
+             "tools": {}}]
+    mcp_tools.status = lambda: rows
+    try:
+        SettingsDialog._instance.destroy()
+        SettingsDialog.show()
+        check = _control("Tools", "demo")
+        assert "starting" in check.get_label(), check.get_label()
+        rows[0].update(state="up", tools={"ping": False, "act": True})
+        SettingsDialog._mcp_refresh()
+        assert "up" in check.get_label() and "starting" not in check.get_label()
+        side = [w for w in _widgets(_sub("Tools", "MCP servers"))
+                if isinstance(w, Gtk.Label) and "ping" in w.get_text()]
+        assert side, "the tool list did not appear"
+    finally:
+        mcp_tools.status = real
+    print("✓ the MCP card follows the servers' state live")
+
+
+def test_rules_can_open_config_toml():
+    from loquivox.services import rules
+    calls = []
+    real = rules.subprocess.Popen
+    rules.subprocess.Popen = lambda cmd, *a, **k: calls.append(cmd)
+    try:
+        SettingsDialog._instance.destroy()
+        SettingsDialog.show()
+        btns = [b for b in _buttons(_sub("Tools", "Rules"))
+                if b.get_label() == "Open config.toml"]
+        assert len(btns) == 1, btns
+        btns[0].clicked()
+    finally:
+        rules.subprocess.Popen = real
+    assert calls and calls[0][0] == "xdg-open" and calls[0][1].endswith("config.toml"), calls
+    print("✓ Rules has a button that opens config.toml")
+
 
 if __name__ == "__main__":
     test_every_tab_builds()
@@ -1024,5 +1160,10 @@ if __name__ == "__main__":
     test_f10_survives_an_apply_of_the_voice_page()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
+    test_the_advanced_fold_exposes_what_only_config_had()
+    test_the_advanced_fold_applies()
+    test_no_label_appears_twice_in_the_window()
+    test_mcp_state_follows_the_servers_without_reopening()
+    test_rules_can_open_config_toml()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")

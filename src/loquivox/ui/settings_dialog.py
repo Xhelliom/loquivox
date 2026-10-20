@@ -332,7 +332,8 @@ class SettingsDialog:
 
         heading = Gtk.Label()
         heading.set_halign(Gtk.Align.START)
-        heading.set_markup(f'<span size="large" weight="bold">{title}</span>')
+        heading.set_markup(
+            f'<span size="large" weight="bold">{GLib.markup_escape_text(title)}</span>')
         section.pack_start(heading, False, False, 0)
 
         if subtitle:
@@ -513,6 +514,8 @@ class SettingsDialog:
                 if not box.get_children():
                     cls._note(box, _("Nothing to set here yet."))
 
+        cls._build_advanced(at)
+
         for label, key, subs in cls._TABS:
             if subs is None:
                 notebook.append_page(cls._scroll(at(key)[0]),
@@ -525,6 +528,126 @@ class SettingsDialog:
                 inner.append_page(cls._scroll(at(f"{key}/{sub}")[0]),
                                   Gtk.Label(label=_(sub_label)))
             notebook.append_page(inner, Gtk.Label(label=_(label)))
+
+    @classmethod
+    def _fold(cls, page: Gtk.Box) -> Gtk.Box:
+        """A closed « Advanced » at the foot of a page; returns the box inside."""
+        fold = Gtk.Expander(label=_("Advanced"))
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        inner.set_margin_top(8)
+        fold.add(inner)
+        page.pack_end(fold, False, False, 0)
+        return inner
+
+    @staticmethod
+    def _spin(value, low, high, step, digits=0) -> Gtk.SpinButton:
+        spin = Gtk.SpinButton.new_with_range(low, high, step)
+        spin.set_digits(digits)
+        spin.set_value(value)
+        return spin
+
+    @classmethod
+    def _build_advanced(cls, at) -> None:
+        """
+        What used to be config.toml only, folded away at the foot of the page of
+        the thing it changes. One writer (``_on_apply_advanced``) for all of them:
+        none is worth a card of its own, and the one Apply reaches it.
+        """
+        cfg = config_module.CFG
+
+        def entry(text, hint):
+            e = Gtk.Entry()
+            e.set_text(text)
+            e.set_tooltip_text(hint)
+            return e
+
+        page, labels = at("conversation/engine")
+        body = cls._fold(page)
+        cls._adv_live_model = entry(cfg.TALK_LIVE_MODEL, _("The Live engine's voice model"))
+        cls._field(body, _("Live model"), cls._adv_live_model, labels)
+        cls._adv_realtime_transcribe = entry(
+            cfg.TALK_REALTIME_TRANSCRIBE,
+            _("Transcribes your side of a Realtime conversation"))
+        cls._field(body, _("Realtime transcription"), cls._adv_realtime_transcribe, labels)
+        cls._advanced_status = Gtk.Label()
+        cls._actions(page, cls._on_apply_advanced, cls._advanced_status)
+
+        page, labels = at("conversation/flow")
+        body = cls._fold(page)
+        cls._adv_vad_threshold = cls._spin(cfg.TALK_VAD_THRESHOLD, 0.005, 0.2, 0.005, 3)
+        cls._adv_vad_threshold.set_tooltip_text(
+            _("Minimum voice level that counts as speech; the room's noise raises it"))
+        cls._field(body, _("Voice level"), cls._adv_vad_threshold, labels)
+        cls._adv_vad_silence = cls._spin(cfg.TALK_VAD_SILENCE_MS, 200, 3000, 50)
+        cls._adv_vad_silence.set_tooltip_text(_("A pause this long ends your turn"))
+        cls._field(body, _("Pause that ends a turn (ms)"), cls._adv_vad_silence, labels)
+        cls._adv_vad_min_speech = cls._spin(cfg.TALK_VAD_MIN_SPEECH_MS, 100, 2000, 50)
+        cls._adv_vad_min_speech.set_tooltip_text(_("Shorter sounds are ignored"))
+        cls._field(body, _("Shortest speech (ms)"), cls._adv_vad_min_speech, labels)
+
+        page, labels = at("companion/presence")
+        body = cls._fold(page)
+        cls._adv_comp_idle = cls._spin(cfg.COMPANION_IDLE_TIMEOUT, 3, 300, 1, 1)
+        cls._adv_comp_idle.set_tooltip_text(
+            _("Seconds of silence, both ways, that end a conversation"))
+        cls._field(body, _("Conversation ends after (s)"), cls._adv_comp_idle, labels)
+        cls._adv_comp_stop = entry(
+            ", ".join(cfg.COMPANION_STOP_PHRASES),
+            _("Said on their own, these close the conversation without a reply"))
+        cls._field(body, _("Stop phrases"), cls._adv_comp_stop, labels)
+        cls._note(body, _("Separated by commas; accents and punctuation are ignored."))
+
+        page, labels = at("sound/mic")
+        body = cls._fold(page)
+        cls._adv_duck_hold = cls._spin(cfg.COMPANION_DUCK_HOLD_SEC, 0, 10, 0.5, 1)
+        cls._adv_duck_hold.set_tooltip_text(
+            _("How long the sound stays lowered after the speech stops"))
+        cls._field(body, _("Lowered sound returns after (s)"), cls._adv_duck_hold, labels)
+
+        page, labels = at("tools/writing")
+        body = cls._fold(page)
+        cls._adv_look_tool = Gtk.CheckButton(
+            label=_("Let the model look at the window again when asked"))
+        cls._adv_look_tool.set_active(bool(cfg.TALK_LOOK_TOOL))
+        cls._field(body, _("Look at the screen"), cls._adv_look_tool, labels)
+
+        page, labels = at("tools/mcp")
+        body = cls._fold(page)
+        cls._adv_agent_turns = cls._spin(cfg.AGENT_MAX_TURNS, 1, 30, 1)
+        cls._adv_agent_turns.set_tooltip_text(
+            _("Rounds of tool calls the agent may chain in one answer"))
+        cls._field(body, _("Agent rounds (max)"), cls._adv_agent_turns, labels)
+        cls._adv_agent_sec = cls._spin(cfg.AGENT_MAX_SEC, 10, 600, 10)
+        cls._adv_agent_sec.set_tooltip_text(_("Time limit for one answer, tools included"))
+        cls._field(body, _("Agent time limit (s)"), cls._adv_agent_sec, labels)
+
+    @classmethod
+    def _on_apply_advanced(cls, _btn) -> None:
+        from loquivox.config_io import ConfigWriteError, update_section
+
+        stop = [p.strip() for p in cls._adv_comp_stop.get_text().split(",") if p.strip()]
+        try:
+            update_section("talk", {
+                "live_model": cls._adv_live_model.get_text().strip(),
+                "realtime_transcribe": cls._adv_realtime_transcribe.get_text().strip(),
+                "vad_threshold": round(cls._adv_vad_threshold.get_value(), 3),
+                "silence_ms": int(cls._adv_vad_silence.get_value()),
+                "min_speech_ms": int(cls._adv_vad_min_speech.get_value()),
+                "agent_max_turns": int(cls._adv_agent_turns.get_value()),
+                "agent_max_sec": float(cls._adv_agent_sec.get_value()),
+                "look_tool": cls._adv_look_tool.get_active(),
+            })
+            update_section("companion", {
+                "idle_timeout": cls._adv_comp_idle.get_value(),
+                "stop_phrases": stop,
+                "duck_hold": cls._adv_duck_hold.get_value(),
+            })
+        except ConfigWriteError as e:
+            cls._advanced_status.set_markup(f"<small>❌ {e}</small>")
+            return
+        config_module.reload_config()
+        cls._advanced_status.set_markup(
+            _("<small>✓ Advanced settings saved — used from the next session.</small>"))
 
     # -----------------------------------------------------------------
     # Companion tab: the always-present bubble
@@ -540,7 +663,7 @@ class SettingsDialog:
         cfg = config_module.CFG
         vbox, labels = general
         body = cls._group(
-            vbox, _("Companion"),
+            vbox, _("Wake word and bubble"),
             _("A small bubble that listens for its wake word on this machine and "
             "opens the cloud conversation only when spoken to."))
 
@@ -561,7 +684,7 @@ class SettingsDialog:
         for cid, label in cls._CLICK_MODES:
             cls._comp_click.append(cid, _(label))
         cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
-        cls._field(body, _("Single click"), cls._comp_click, labels)
+        cls._field(body, _("Click on the bubble"), cls._comp_click, labels)
 
         cls._comp_style = Gtk.ComboBoxText()
         for name in ("goutte", "plasma", "radar", "reacteur"):
@@ -596,7 +719,7 @@ class SettingsDialog:
         """
         cfg = config_module.CFG
         body = cls._group(
-            vbox, _("Voice & thinking"),
+            vbox, _("How the companion talks and thinks"),
             _("The companion always talks through the Live engine. Each setting "
             "below follows the Conversation tab until you give it a value of "
             "its own."))
@@ -611,24 +734,24 @@ class SettingsDialog:
 
         cls._comp_voice = combo(cfg.TALK_LIVE_VOICES, cfg.COMPANION_LIVE_VOICE,
                                 lambda v: v.title())
-        cls._field(body, _("Live voice"), cls._comp_voice, labels)
+        cls._field(body, _("Companion's Live voice"), cls._comp_voice, labels)
 
         cls._comp_delegation = combo(
             cfg.TALK_LIVE_DELEGATIONS, cfg.COMPANION_LIVE_DELEGATION,
             lambda d: _(cls._DELEGATION_LABELS.get(d, d.title())))
-        cls._field(body, _("Delegate thinking to"), cls._comp_delegation, labels)
+        cls._field(body, _("Companion delegates thinking to"), cls._comp_delegation, labels)
 
         cls._comp_backend = Gtk.Entry()     # ids change often — free text
         cls._comp_backend.set_text(cfg.COMPANION_LIVE_BACKEND_MODEL)
         cls._comp_backend.set_placeholder_text(_(cls._LIKE_TALK))
         cls._comp_backend.set_tooltip_text(
             _("Only used when the thinking is delegated to OpenAI's backend"))
-        cls._field(body, _("OpenAI backend model"), cls._comp_backend, labels)
+        cls._field(body, _("Companion backend model"), cls._comp_backend, labels)
 
         cls._comp_web = combo(
             cfg.TALK_LIVE_WEB_SEARCHES, cfg.COMPANION_LIVE_WEB_SEARCH,
             lambda w: _(cls._WEB_SEARCH_LABELS.get(w, w.title())))
-        cls._field(body, _("Web search"), cls._comp_web, labels)
+        cls._field(body, _("Companion web search"), cls._comp_web, labels)
 
         # The backend fields mean something only when the thinking goes to OpenAI.
         cls._comp_delegation.connect("changed", lambda _w: cls._update_companion_live())
@@ -646,7 +769,7 @@ class SettingsDialog:
         cls._comp_instructions.set_right_margin(6)
         cls._comp_instructions.get_buffer().set_text(cfg.COMPANION_INSTRUCTIONS)
         scroll.add(cls._comp_instructions)
-        cls._field(body, _("Instructions"), scroll, labels)
+        cls._field(body, _("Companion instructions"), scroll, labels)
         cls._note(body, _("Empty = the instructions of the Conversation tab. "
                         "Given here, they replace those for the companion."))
         cls._note(body, _("On waking, the companion captures the focused window "
@@ -727,7 +850,7 @@ class SettingsDialog:
 
         cls._comp_duck_ai = Gtk.CheckButton(label=_("Lower other sounds while the companion speaks"))
         cls._comp_duck_ai.set_active(bool(cfg.COMPANION_DUCK_ON_ASSISTANT))
-        cls._field(body, _("Companion"), cls._comp_duck_ai, labels)
+        cls._field(body, _("While the companion talks"), cls._comp_duck_ai, labels)
         cls._comp_duck_user = Gtk.CheckButton(label=_("Lower other sounds while I speak"))
         cls._comp_duck_user.set_active(bool(cfg.COMPANION_DUCK_ON_USER))
         cls._field(body, "", cls._comp_duck_user, labels)
@@ -743,7 +866,7 @@ class SettingsDialog:
     def _build_mic_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         """The capture device, for dictation, conversations and the companion alike."""
         body = cls._group(
-            vbox, _("Microphone"),
+            vbox, _("Input device"),
             _("The input every mode listens to: dictation, conversations and the "
               "companion's wake word. Takes effect at the next recording."))
 
@@ -1004,7 +1127,7 @@ class SettingsDialog:
         cls._research_model = model_combo(cfg.MODEL_RESEARCH)
         for mid in cfg.RESEARCH_DEFAULT_MODELS.values():
             cls._research_model.append_text(mid)
-        row(_("Search"), cls._research_provider, cls._research_model)
+        row(_("Web lookup"), cls._research_provider, cls._research_model)
 
         cls._judge_provider = provider_combo(providers, STATE.ai_judge_provider, True)
         cls._judge_model = model_combo(STATE.ai_judge_model, _("Same as chat"))
@@ -1105,7 +1228,7 @@ class SettingsDialog:
     @classmethod
     def _build_engine_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
         body = cls._group(
-            vbox, _("Conversation engine"),
+            vbox, _("How a conversation is held"),
             _("How a conversation is held. The cascade chains the transcription, "
             "the chat model and the voice — each swappable, local or cloud, "
             "on their own tabs. Realtime hands the whole conversation to one model that "
@@ -1124,7 +1247,7 @@ class SettingsDialog:
             }.get(eid, eid.title())))
         cls._engine_combo.set_active_id(
             config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
-        cls._field(body, _("Engine"), cls._engine_combo, labels)
+        cls._field(body, _("Conversation engine"), cls._engine_combo, labels)
 
         cls._realtime_model = Gtk.Entry()   # ids change often — free text
         cls._realtime_model.set_text(config_module.CFG.TALK_REALTIME_MODEL)
@@ -1359,14 +1482,14 @@ class SettingsDialog:
         cls._tts_engine_combo.set_active_id(
             STATE.tts_model if STATE.tts_model in config_module.CFG.TTS_ENGINES
             else next(iter(config_module.CFG.TTS_ENGINES)))
-        cls._field(body, _("Engine"), cls._tts_engine_combo, labels)
+        cls._field(body, _("Speech engine"), cls._tts_engine_combo, labels)
 
         cls._voice_combo = Gtk.ComboBoxText()
         cls._fill_voices()
         test = Gtk.Button(label=_("▶ Test"))
         test.set_tooltip_text(_("Speak a line with the selected engine and voice"))
         test.connect("clicked", cls._on_test_voice)
-        cls._field(body, _("Voice"), cls._voice_combo, labels, extra=test)
+        cls._field(body, _("Speech voice"), cls._voice_combo, labels, extra=test)
 
         cls._note(body,
                   _("Piper needs no key and no network: its voice downloads once "
@@ -1568,7 +1691,7 @@ class SettingsDialog:
         # window entirely, so it gets its own group rather than trailing the
         # overlay's toggles.
         body = cls._group(
-            vbox, _("Desktop"),
+            vbox, _("Outside a recording"),
             _("Chrome that lives outside a recording. Applies immediately."))
         cls._chat_enabled_check = Gtk.CheckButton(
             label=_("Show the chat overlay (answers and conversation bubble)"))
@@ -1583,7 +1706,7 @@ class SettingsDialog:
         body.pack_start(bar_check, False, False, 0)
 
         body = cls._group(
-            vbox, _("Language"),
+            vbox, _("Interface language"),
             _("The language of the whole interface. Auto follows the system "
               "locale. Applies immediately; reopen Settings to see this window "
               "in the new language."))
@@ -1592,7 +1715,7 @@ class SettingsDialog:
             language.append(code, _("Auto") if code == "auto" else name)
         language.set_active_id(i18n.saved_choice())
         language.connect("changed", cls._on_language_changed)
-        cls._field(body, _("Interface"), language, labels)
+        cls._field(body, _("Shown in"), language, labels)
 
     @staticmethod
     def _on_language_changed(combo: Gtk.ComboBoxText) -> None:
@@ -1679,7 +1802,7 @@ class SettingsDialog:
         # Model: editable combo — pick a known id or type a custom one.
         cls._model_entry = Gtk.ComboBoxText.new_with_entry()
         cls._model_entry.get_child().set_hexpand(True)
-        cls._field(body, _("Model"), cls._model_entry, labels)
+        cls._field(body, _("Transcription model"), cls._model_entry, labels)
 
         # Language: editable combo — common languages + "Autodetect".
         cls._lang_entry = Gtk.ComboBoxText.new_with_entry()
@@ -2786,11 +2909,12 @@ class SettingsDialog:
     # Hotkeys section (editable)
     # -----------------------------------------------------------------
     _HOTKEY_LABELS = {
-        "dictation": N_("Dictation"), "ai": N_("AI Chat"),
-        "talk": N_("Talk"), "pin": N_("Pin Chat"), "tts": N_("TTS Toggle"),
+        "dictation": N_("Dictation"), "ai": N_("Conversation — chat"),
+        "talk": N_("Conversation — write"), "pin": N_("Pin the chat"),
+        "tts": N_("Sound — read aloud"),
         "cancel": N_("Cancel"), "pause": N_("Pause / Resume"),
         "refine": N_("Stop + choose level"),
-        "companion": N_("Companion silence"), "companion_wake": N_("Companion wake"),
+        "companion": N_("Companion — silence"), "companion_wake": N_("Companion — wake"),
     }
 
     @classmethod

@@ -994,7 +994,7 @@ class ChatOverlay(Gtk.Window):
         again: which actions exist, and their wording, are that table's to
         decide — the hint strip is the same list with the keys instead of the
         buttons. Rebuilt on every render, which is how the switch stays in step
-        with whatever flipped it (this bar, or Settings → Talk).
+        with whatever flipped it (this bar, or Settings → Conversation).
 
         Empty outside talk mode, and empty once the generated text is up for
         review: that panel has its own verdicts and its own grabbed keys, and

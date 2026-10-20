@@ -507,7 +507,7 @@ class Config:
     # conversation looks again, for when it has changed. The capture runs in
     # parallel with your first turn, so it costs no startup delay.
     # OFF by default: it sends that window to the cloud, which is not a trade
-    # to make on someone's behalf. Settings → Talk turns it on.
+    # to make on someone's behalf. Settings → Conversation turns it on.
     TALK_SCREENSHOT: bool = False
     # What to capture. Cropping is the ONE thing that makes the text legible:
     # the provider gives an image a fixed token budget whatever its size, so a
