@@ -79,10 +79,10 @@ FAILED_FRAME = (
 
 ASK = (
     "NOTHING WAS DONE. {tool} ({server}) acts on the outside world and needs "
-    "the user's spoken yes first. Say out loud, in ONE short sentence, what "
-    "you are about to do ({what}) and ask whether to go ahead. Only after the "
-    "user clearly says yes, call {tool} again with the SAME arguments and "
-    "confirmed=true.")
+    "the user's spoken yes first. Ask out loud, in ONE short sentence and in "
+    "the user's language, this very question: «{question}». Never say it is "
+    "done, launched or sent. Only after the user clearly says yes, call {tool} "
+    "again with the SAME arguments and confirmed=true.")
 
 
 FOUND = (
@@ -286,11 +286,11 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
             if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
                 asked[key] = spoken
                 print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes")
-                held = Held(ASK.format(tool=tool.name, server=s.name,
-                                       what=json.dumps(args, ensure_ascii=False)))
-                held.question = _("Run {tool} ({server}) with {args}? Say yes to go ahead.").format(
+                question = _("Run {tool} ({server}) with {args}? Say yes to go ahead.").format(
                     tool=tool.name, server=s.name,
                     args=", ".join(f"{k}={v}" for k, v in args.items()) or _("no arguments"))
+                held = Held(ASK.format(tool=tool.name, server=s.name, question=question))
+                held.question = question
                 return held
             del asked[key]
         return _call(s, tool.name, args)
@@ -312,7 +312,8 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
             if acting else "")),
         parameters=params,
         started="Working on it: say in a few words that you are on it, and "
-                "never claim it is done — the result follows.",
+                "never claim it is done, launched or sent — the real outcome, or "
+                "a question for the user, follows.",
         run=run, message=message,
         enabled=lambda: s.state == "up" and _wanted(s.name),
         note=lambda args: f"🔧 {s.name} · {tool.name}",
