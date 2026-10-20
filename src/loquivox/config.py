@@ -567,6 +567,9 @@ class Config:
     #: how old a board notification may be and still be said when a session
     #: opens; older ones are marked seen without a word.
     TALK_BOARD_CATCHUP_SEC: float = 300.0
+    #: say only the entries the bridge pushed to the phone (`pushed: true`);
+    #: off = everything the bell keeps. A log without the field says all.
+    TALK_BOARD_PUSHED_ONLY: bool = True
 
     #: MCP servers whose tools join the conversation (services/mcp_tools.py),
     #: ``[mcp.servers.<name>]`` in config.toml: name → its table
@@ -1093,6 +1096,8 @@ def _build_config() -> Config:
         overrides["TALK_LOOK_TOOL"] = bool(talk["look_tool"])
     if "board" in talk:
         overrides["TALK_BOARD"] = bool(talk["board"])
+    if "board_pushed_only" in talk:
+        overrides["TALK_BOARD_PUSHED_ONLY"] = bool(talk["board_pushed_only"])
     if "board_catchup_sec" in talk:
         overrides["TALK_BOARD_CATCHUP_SEC"] = float(talk["board_catchup_sec"])
     if "tts" in models:

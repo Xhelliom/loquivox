@@ -64,8 +64,12 @@ CATALOG = {
         "Notifications",
     "📋 Board notification":
         "📋 Notification du board",
-    "Let the board interrupt a conversation":
-        "Laisser le board interrompre une conversation",
+    "Let the board speak, in conversation and on standby":
+        "Laisser le board parler, en conversation et en veille",
+    "Only say what goes to the phone":
+        "Dire seulement ce qui part sur le téléphone",
+    "Filter":
+        "Filtre",
     "Collie Board notifies when one of its cards stops and needs you. With this on, a conversation in progress is told too: the assistant interrupts itself, says which card wants what, and asks what to do. It only reads the local board ({url}) — nothing is sent, and an alert you have already handled is not repeated out loud.":
         "Collie Board prévient quand l'une de ses cartes s'arrête et a besoin de vous. Avec cette option, une conversation en cours est prévenue aussi : l'assistant s'interrompt, dit quelle carte demande quoi, et demande quoi faire. Il lit seulement le board local ({url}) — rien n'est envoyé, et une alerte que vous avez déjà traitée n'est pas répétée à voix haute.",
     "<small>✓ Board notifications on — takes effect on the next talk session.</small>":

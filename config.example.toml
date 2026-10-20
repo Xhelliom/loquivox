@@ -210,6 +210,10 @@ duck_hold = 1.0
 # carries the same switch, so it can be flipped mid-conversation — and what it
 # is flipped to is written back here.
 free_keyboard = false
+# Say only the board entries that were pushed to the phone (`pushed: true` in
+# its log), the orchestrator's summary included. false = everything the bell
+# keeps. A bridge that does not publish `pushed` says everything either way.
+board_pushed_only = true
 # How old (seconds) a notification may be and still be said when a session
 # opens. Older ones are marked seen without a word. The cursor is a timestamp
 # kept in settings.json, so it survives sessions and bridge restarts.
