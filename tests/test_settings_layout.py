@@ -553,20 +553,80 @@ def test_dependent_fields_grey_out():
     print("✓ ducking, box width, custom prompt, cutting in and search follow their switch")
 
 
-def test_live_fields_follow_the_companion():
-    """The companion runs on Live, so its voice and delegation are never dead —
-    and they follow the dialog's own box, without reopening it."""
+def test_live_fields_are_the_engines_and_the_companion_has_its_own():
+    """F4/F6's Live fields follow the engine alone; the companion's sit on its tab."""
     cls = SettingsDialog
+    for engine, on in (("cascade", False), ("live", True)):
+        cls._engine_combo.set_active_id(engine)
+        assert cls._live_voice.get_sensitive() is on, engine
     cls._engine_combo.set_active_id("cascade")
-    original = cls._comp_enabled.get_active()
-    try:
-        for companion in (True, False):
-            cls._comp_enabled.set_active(companion)
-            assert cls._live_voice.get_sensitive() is companion, companion
-            assert cls._live_delegation.get_sensitive() is companion, companion
-    finally:
-        cls._comp_enabled.set_active(original)
-    print("✓ Live voice and delegation follow the companion box")
+    # the companion's: "like the conversation" first, and its own value wins
+    assert cls._comp_voice.get_active_id() == ""
+    assert cls._comp_voice.get_model()[0][0] == "Like the conversation"
+    cls._comp_delegation.set_active_id("client")
+    assert not cls._comp_backend.get_sensitive() and not cls._comp_web.get_sensitive()
+    cls._comp_delegation.set_active_id("responses")
+    assert cls._comp_backend.get_sensitive() and cls._comp_web.get_sensitive()
+    cls._comp_delegation.set_active_id("")
+    print("✓ Live fields: the conversation's follow its engine, the companion's are its own")
+
+
+def test_every_companion_setting_is_on_the_companion_tab():
+    """Companion pages hold the companion's fields; none is left on another tab."""
+    cls = SettingsDialog
+    win = cls._instance
+    where = {}
+    for tab, sub, sw in _leaves(win):
+        for w in _widgets(sw):
+            where[id(w)] = (tab, sub)
+    for name, sub in (("_comp_wake", "General"), ("_comp_click", "General"),
+                      ("_comp_style", "General"), ("_comp_voice", "Voice & thinking"),
+                      ("_comp_delegation", "Voice & thinking"),
+                      ("_comp_backend", "Voice & thinking"),
+                      ("_comp_web", "Voice & thinking"),
+                      ("_comp_instructions", "Voice & thinking"),
+                      ("_comp_enabled", "Presence"), ("_comp_lock", "Presence"),
+                      ("_comp_idle", "Presence"), ("_comp_source_silence", "Presence")):
+        assert where.get(id(getattr(cls, name))) == ("Companion", sub), name
+    notifs = [w for t, s, sw in _leaves(win) if (t, s) == ("Companion", "Notifications")
+              for w in _widgets(sw) if isinstance(w, Gtk.Label)]
+    assert any("Wakes the companion" in w.get_label() for w in notifs)
+    print("✓ the companion is set on the Companion tab")
+
+
+def test_companion_live_settings_apply_and_are_documented():
+    import tempfile
+    from loquivox import config as config_module, config_io
+
+    cls = SettingsDialog
+    real = config_module.CONFIG_FILE
+    with tempfile.TemporaryDirectory() as d:
+        config_module.CONFIG_FILE = config_io.CONFIG_FILE = Path(d) / "config.toml"
+        try:
+            cls._comp_voice.set_active_id("cedar")
+            cls._comp_delegation.set_active_id("responses")
+            cls._comp_backend.set_text("m-x")
+            cls._comp_web.set_active_id("native")
+            cls._comp_instructions.get_buffer().set_text("Sois bref.")
+            cls._comp_source_silence.set_value(4.5)
+            cls._on_apply_companion(None)
+            cfg = config_module.CFG
+            assert (cfg.COMPANION_LIVE_VOICE, cfg.COMPANION_LIVE_DELEGATION,
+                    cfg.COMPANION_LIVE_BACKEND_MODEL, cfg.COMPANION_LIVE_WEB_SEARCH,
+                    cfg.COMPANION_INSTRUCTIONS, cfg.COMPANION_SOURCE_SILENCE_SEC) == (
+                "cedar", "responses", "m-x", "native", "Sois bref.", 4.5), cfg
+            cls._comp_voice.set_active_id("")      # back to "like the conversation"
+            cls._on_apply_companion(None)
+            assert config_module.CFG.COMPANION_LIVE_VOICE == ""
+        finally:
+            config_module.CONFIG_FILE = config_io.CONFIG_FILE = real
+            config_module.reload_config()
+    example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text()
+    block = example.split("\n[companion]", 1)[1].split("\n[", 1)[0]
+    for key in ("live_voice", "live_delegation", "live_backend_model",
+                "live_web_search", "instructions"):
+        assert f"\n# {key} = " in block or f"\n{key} = " in block, key
+    print("✓ companion Live settings apply and are documented")
 
 
 def test_read_aloud_is_cascade_only():
@@ -709,7 +769,9 @@ if __name__ == "__main__":
     test_settings_live_where_they_are_used()
     test_tray_only_settings_are_set_from_the_dialog()
     test_dependent_fields_grey_out()
-    test_live_fields_follow_the_companion()
+    test_live_fields_are_the_engines_and_the_companion_has_its_own()
+    test_every_companion_setting_is_on_the_companion_tab()
+    test_companion_live_settings_apply_and_are_documented()
     test_read_aloud_is_cascade_only()
     test_agent_model_is_a_combo()
     test_agent_models_are_listed_from_the_agent_provider()

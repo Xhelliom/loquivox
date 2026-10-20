@@ -283,7 +283,7 @@ def _settings(dialog, vbox, labels) -> None:
 
     check = Gtk.CheckButton(label=_("Let the board speak, in conversation and on standby"))
     check.set_active(bool(config_module.CFG.TALK_BOARD))
-    dialog._field(body, _("Notifications"), check, labels)
+    dialog._field(body, _("Wakes the companion"), check, labels)
 
     pushed = Gtk.CheckButton(label=_("Only say what goes to the phone"))
     pushed.set_active(bool(config_module.CFG.TALK_BOARD_PUSHED_ONLY))

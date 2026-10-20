@@ -484,7 +484,8 @@ class SettingsDialog:
         cls._build_engine_section(*at("conversation/engine"))
         cls._build_talk_section(flow, flow_lab, screen, screen_lab)
 
-        cls._build_companion_section(*at("companion/general"))
+        cls._build_companion_section(at("companion/general"), at("companion/voice"),
+                                     at("companion/presence"))
         cls._build_music_section(*at("sound/mic"))
         cls._build_voice_section(*at("sound/voice"))
         # Presets first: they reach into the other tabs' slots, the shortcut lives here.
@@ -524,19 +525,14 @@ class SettingsDialog:
                     ("active", N_("Wake the companion")))
 
     @classmethod
-    def _build_companion_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+    def _build_companion_section(cls, general, voice, presence) -> None:
+        """The companion's own settings: three sub-pages, one writer (``_on_apply_companion``)."""
         cfg = config_module.CFG
+        vbox, labels = general
         body = cls._group(
             vbox, _("Companion"),
             _("A small bubble that listens for its wake word on this machine and "
             "opens the cloud conversation only when spoken to."))
-
-        cls._comp_enabled = Gtk.CheckButton(label=_("Start listening when Loquivox launches"))
-        cls._comp_enabled.set_active(bool(cfg.COMPANION_ENABLED))
-        # Live fields (Conversation tab) follow this box; its widgets may not exist yet.
-        cls._comp_enabled.connect(
-            "toggled", lambda *_a: cls._on_talk_engine_changed(cls._engine_combo))
-        cls._field(body, _("Startup"), cls._comp_enabled, labels)
 
         cls._comp_wake = Gtk.ComboBoxText()
         words = list(cls._WAKE_WORDS)
@@ -557,24 +553,137 @@ class SettingsDialog:
         cls._comp_click.set_active_id(cfg.COMPANION_CLICK_MODE)
         cls._field(body, _("Single click"), cls._comp_click, labels)
 
-        cls._comp_lock = Gtk.CheckButton(label=_("Silence when the screen is locked"))
-        cls._comp_lock.set_active(bool(cfg.COMPANION_SILENCE_ON_LOCK))
-        cls._field(body, _("Absence"), cls._comp_lock, labels)
-        cls._comp_idle = Gtk.SpinButton.new_with_range(0, 240, 5)
-        cls._comp_idle.set_value(cfg.COMPANION_SILENCE_IDLE_MIN)
-        cls._comp_idle.set_tooltip_text(_("0 = never · takes effect at next launch"))
-        cls._field(body, _("Idle (min)"), cls._comp_idle, labels)
-
         cls._comp_style = Gtk.ComboBoxText()
         for name in ("goutte", "plasma", "radar", "reacteur"):
             cls._comp_style.append(name, name)
         cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
         cls._field(body, _("Bubble style"), cls._comp_style, labels)
 
-        cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "
-                        "(<i>Companion</i>); it applies right away."))
         cls._comp_status = Gtk.Label()
         cls._actions(body, cls._on_apply_companion, cls._comp_status)
+
+        cls._build_companion_voice(*voice)
+        cls._build_companion_presence(*presence)
+
+    #: first entry of the companion's combos: its own value is unset
+    _LIKE_TALK = N_("Like the conversation")
+    _DELEGATION_LABELS = {
+        "auto": N_("Auto — follow the chat provider"),
+        "client": N_("Your backend — the chat model, with plugins"),
+        "responses": N_("OpenAI's backend — named tool calls"),
+    }
+    _WEB_SEARCH_LABELS = {
+        "plugin": N_("Yours — the search plugin, your provider"),
+        "native": N_("OpenAI's — their search, run on their side"),
+    }
+
+    @classmethod
+    def _build_companion_voice(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        """
+        Voice, thinking and instructions of the companion, which always runs on
+        Live. Each field starts at "like the conversation" (empty in the
+        config); a value of its own wins for the companion only.
+        """
+        cfg = config_module.CFG
+        body = cls._group(
+            vbox, _("Voice & thinking"),
+            _("The companion always talks through the Live engine. Each setting "
+            "below follows the Conversation tab until you give it a value of "
+            "its own."))
+
+        def combo(options, current, labelled):
+            box = Gtk.ComboBoxText()
+            box.append("", _(cls._LIKE_TALK))
+            for oid in options:
+                box.append(oid, labelled(oid))
+            box.set_active_id(current if current in options else "")
+            return box
+
+        cls._comp_voice = combo(cfg.TALK_LIVE_VOICES, cfg.COMPANION_LIVE_VOICE,
+                                lambda v: v.title())
+        cls._field(body, _("Live voice"), cls._comp_voice, labels)
+
+        cls._comp_delegation = combo(
+            cfg.TALK_LIVE_DELEGATIONS, cfg.COMPANION_LIVE_DELEGATION,
+            lambda d: _(cls._DELEGATION_LABELS.get(d, d.title())))
+        cls._field(body, _("Delegate thinking to"), cls._comp_delegation, labels)
+
+        cls._comp_backend = Gtk.Entry()     # ids change often — free text
+        cls._comp_backend.set_text(cfg.COMPANION_LIVE_BACKEND_MODEL)
+        cls._comp_backend.set_placeholder_text(_(cls._LIKE_TALK))
+        cls._comp_backend.set_tooltip_text(
+            _("Only used when the thinking is delegated to OpenAI's backend"))
+        cls._field(body, _("OpenAI backend model"), cls._comp_backend, labels)
+
+        cls._comp_web = combo(
+            cfg.TALK_LIVE_WEB_SEARCHES, cfg.COMPANION_LIVE_WEB_SEARCH,
+            lambda w: _(cls._WEB_SEARCH_LABELS.get(w, w.title())))
+        cls._field(body, _("Web search"), cls._comp_web, labels)
+
+        # The backend fields mean something only when the thinking goes to OpenAI.
+        cls._comp_delegation.connect("changed", lambda _w: cls._update_companion_live())
+        if cls._live_delegation is not None:
+            cls._live_delegation.connect("changed", lambda _w: cls._update_companion_live())
+        cls._update_companion_live()
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_size_request(-1, 100)
+        scroll.set_shadow_type(Gtk.ShadowType.IN)
+        cls._comp_instructions = Gtk.TextView()
+        cls._comp_instructions.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        cls._comp_instructions.set_left_margin(6)
+        cls._comp_instructions.set_right_margin(6)
+        cls._comp_instructions.get_buffer().set_text(cfg.COMPANION_INSTRUCTIONS)
+        scroll.add(cls._comp_instructions)
+        cls._field(body, _("Instructions"), scroll, labels)
+        cls._note(body, _("Empty = the instructions of the Conversation tab. "
+                        "Given here, they replace those for the companion."))
+        cls._note(body, _("On waking, the companion captures the focused window "
+                        "and has it described — as the screen framing set in "
+                        "<b>Conversation › Screen</b> says."))
+
+    @classmethod
+    def _update_companion_live(cls) -> None:
+        """Backend model and web search matter only once the thinking is OpenAI's."""
+        from loquivox.services.live_talk import resolve_delegation
+
+        own = cls._comp_delegation.get_active_id()
+        shared = (cls._live_delegation.get_active_id() if cls._live_delegation is not None
+                  else config_module.CFG.TALK_LIVE_DELEGATION)
+        on = resolve_delegation(own or shared) == "responses"
+        for w in (cls._comp_backend, cls._comp_web):
+            w.set_sensitive(on)
+
+    @classmethod
+    def _build_companion_presence(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
+        cfg = config_module.CFG
+        body = cls._group(
+            vbox, _("Presence"),
+            _("When the companion listens, and when it keeps quiet."))
+
+        cls._comp_enabled = Gtk.CheckButton(label=_("Listen when Loquivox launches"))
+        cls._comp_enabled.set_active(bool(cfg.COMPANION_ENABLED))
+        cls._field(body, _("Enabled"), cls._comp_enabled, labels)
+
+        cls._comp_lock = Gtk.CheckButton(label=_("Silence when the screen is locked"))
+        cls._comp_lock.set_active(bool(cfg.COMPANION_SILENCE_ON_LOCK))
+        cls._field(body, _("Lock"), cls._comp_lock, labels)
+        cls._comp_idle = Gtk.SpinButton.new_with_range(0, 240, 5)
+        cls._comp_idle.set_value(cfg.COMPANION_SILENCE_IDLE_MIN)
+        cls._comp_idle.set_tooltip_text(_("0 = never · takes effect at next launch"))
+        cls._field(body, _("Idle (min)"), cls._comp_idle, labels)
+
+        cls._comp_source_silence = Gtk.SpinButton.new_with_range(0, 60, 0.5)
+        cls._comp_source_silence.set_digits(1)
+        cls._comp_source_silence.set_value(cfg.COMPANION_SOURCE_SILENCE_SEC)
+        cls._comp_source_silence.set_tooltip_text(
+            _("Seconds without a word heard before a notification may open a "
+              "conversation by itself"))
+        cls._field(body, _("Delay before announcing (s)"), cls._comp_source_silence, labels)
+
+        cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "
+                        "(<i>Companion</i>, F7 by default); it applies right away."))
 
     @classmethod
     def _build_music_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
@@ -679,6 +788,9 @@ class SettingsDialog:
 
         wake = cls._comp_wake.get_active_id()
         changed = wake != config_module.CFG.COMPANION_WAKE_WORD
+        buffer = cls._comp_instructions.get_buffer()
+        instructions = buffer.get_text(buffer.get_start_iter(),
+                                       buffer.get_end_iter(), False).strip()
         try:
             update_section("companion", {
                 "enabled": cls._comp_enabled.get_active(),
@@ -687,6 +799,12 @@ class SettingsDialog:
                 "silence_on_lock": cls._comp_lock.get_active(),
                 "silence_idle_min": int(cls._comp_idle.get_value()),
                 "bubble_style": cls._comp_style.get_active_id(),
+                "source_silence": cls._comp_source_silence.get_value(),
+                "live_voice": cls._comp_voice.get_active_id() or "",
+                "live_delegation": cls._comp_delegation.get_active_id() or "",
+                "live_backend_model": cls._comp_backend.get_text().strip(),
+                "live_web_search": cls._comp_web.get_active_id() or "",
+                "instructions": instructions,
                 "duck_on_assistant": cls._comp_duck_ai.get_active(),
                 "duck_on_user": cls._comp_duck_user.get_active(),
             })
@@ -934,11 +1052,8 @@ class SettingsDialog:
         # compared on the same model.
         cls._live_delegation = Gtk.ComboBoxText()
         for did in config_module.CFG.TALK_LIVE_DELEGATIONS:
-            cls._live_delegation.append(did, _({
-                "auto": N_("Auto — follow the chat provider"),
-                "client": N_("Your backend — the chat model, with plugins"),
-                "responses": N_("OpenAI's backend — named tool calls"),
-            }.get(did, did.title())))
+            cls._live_delegation.append(
+                did, _(cls._DELEGATION_LABELS.get(did, did.title())))
         cls._live_delegation.set_active_id(
             config_module.CFG.TALK_LIVE_DELEGATION
             if config_module.CFG.TALK_LIVE_DELEGATION in config_module.CFG.TALK_LIVE_DELEGATIONS
@@ -956,10 +1071,8 @@ class SettingsDialog:
         # the two impossible to compare.
         cls._live_web_search = Gtk.ComboBoxText()
         for wid in config_module.CFG.TALK_LIVE_WEB_SEARCHES:
-            cls._live_web_search.append(wid, _({
-                "plugin": N_("Yours — the search plugin, your provider"),
-                "native": N_("OpenAI's — their search, run on their side"),
-            }.get(wid, wid.title())))
+            cls._live_web_search.append(
+                wid, _(cls._WEB_SEARCH_LABELS.get(wid, wid.title())))
         cls._live_web_search.set_active_id(
             config_module.CFG.TALK_LIVE_WEB_SEARCH
             if config_module.CFG.TALK_LIVE_WEB_SEARCH in config_module.CFG.TALK_LIVE_WEB_SEARCHES
@@ -1001,12 +1114,8 @@ class SettingsDialog:
 
         engine = (cls._engine_combo.get_active_id() or "cascade"
                   if cls._engine_combo is not None else "cascade")
-        # The companion always runs on Live (until it has settings of its own),
-        # so these fields mean something whatever F4/F6 use.
-        # The dialog's own box wins over CFG: it is what Apply will write.
-        box = getattr(cls, "_comp_enabled", None)
-        companion = box.get_active() if box is not None else bool(config_module.CFG.COMPANION_ENABLED)
-        live = engine == "live" or companion
+        # The companion has its own Live fields (Companion tab): these are F4/F6's.
+        live = engine == "live"
         to_openai = (cls._live_delegation is not None
                      and resolve_delegation(cls._live_delegation.get_active_id())
                      == "responses")

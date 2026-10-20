@@ -63,12 +63,28 @@ DUCK_CONFIRM = 3         # consecutive loud blocks that make it speech, not a cl
 SPEAK_HOLD = 0.8   # s; same order as live_talk.AUDIO_IDLE (1.0), shorter so listening comes back fast
 
 
+def live_options(cfg=None) -> dict:
+    """What the companion's Live session is opened with: its own value, else the conversation's."""
+    cfg = cfg or config_module.CFG
+    return {
+        "voice": cfg.COMPANION_LIVE_VOICE or cfg.TALK_LIVE_VOICE,
+        "delegation": cfg.COMPANION_LIVE_DELEGATION or cfg.TALK_LIVE_DELEGATION,
+        "backend_model": cfg.COMPANION_LIVE_BACKEND_MODEL or cfg.TALK_LIVE_BACKEND_MODEL,
+        "web_search": cfg.COMPANION_LIVE_WEB_SEARCH or cfg.TALK_LIVE_WEB_SEARCH,
+    }
+
+
+def instructions(cfg=None) -> str:
+    cfg = cfg or config_module.CFG
+    return cfg.COMPANION_INSTRUCTIONS.strip() or cfg.TALK_INSTRUCTIONS
+
+
 def _converse(session, prefix=()) -> None:
     from loquivox.handlers.mode import ModeHandler
     from loquivox.services.live_talk import LiveTalk
 
     def engine(s):
-        talk = LiveTalk(s)
+        talk = LiveTalk(s, **live_options())
         talk.prefix = list(prefix)
         if _companion is not None:
             talk.on_level = _companion.on_level
@@ -291,7 +307,7 @@ class Companion:
             return
         from loquivox.services.talk import TalkSession
         STATE.talk_active = STATE.companion_session = True
-        session = TalkSession(write=False)
+        session = TalkSession(write=False, instructions=instructions())
         STATE.talk_session = session
         previous_mode = STATE.current_mode
         STATE.current_mode, STATE.talk_engine = "ai", "live"

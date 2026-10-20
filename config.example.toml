@@ -177,10 +177,23 @@ silence_idle_min = 10
 # Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
 # Applied live from Settings → Companion.
 bubble_style = "goutte"
+# The companion always talks through the Live engine, and has its own settings
+# for it. Each key below is commented out = "like the conversation": the
+# [talk] value of the same name (live_voice, live_delegation, live_backend_model,
+# live_web_search, instructions) applies. Uncomment one to give the companion a
+# value of its own. Settings → Companion → Voice & thinking.
+# live_voice = "marin"
+# live_delegation = "auto"            # auto | client | responses
+# live_backend_model = "gpt-5.6-luna" # only with delegation "responses"
+# live_web_search = "plugin"          # plugin | native, same condition
+# Standing instructions for the companion alone (persona, language, tone).
+# Empty or absent = the [talk] instructions.
+# instructions = "Réponds en une phrase."
 # Seconds of silence that end a conversation and send it back to standby.
 idle_timeout = 12.0
 # Seconds without a word heard before a plugin source (e.g. a notification)
 # may open a session by itself. Never in silence mode.
+# (Settings → Companion → Presence.)
 source_silence = 2.0
 # Back from silence (or after a burst), the messages that were held are
 # summarised in ONE session, the most urgent first. Above this many, it says

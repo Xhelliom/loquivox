@@ -366,22 +366,16 @@ CATALOG = {
         "Compagnon",
     "A small bubble that listens for its wake word on this machine and opens the cloud conversation only when spoken to.":
         "Une petite bulle qui guette son mot de réveil sur cette machine et n'ouvre la conversation cloud que lorsqu'on lui parle.",
-    "Startup":
-        "Démarrage",
     "Wake word":
         "Mot de réveil",
     "Single click":
         "Clic simple",
-    "Absence":
-        "Absence",
     "0 = never · takes effect at next launch":
         "0 = jamais · effectif au prochain lancement",
     "Idle (min)":
         "Inactivité (min)",
     "Bubble style":
         "Style de la bulle",
-    "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>); it applies right away.":
-        "La touche de silence se règle dans l'onglet <b>Raccourcis</b> (<i>Compagnon</i>) ; elle s'applique tout de suite.",
     "Music and other sounds":
         "Musique et autres sons",
     "A classic Bluetooth headset pauses every player when its microphone opens, and nothing resumes them. Lowering the volume instead only shows on speakers, a wired headset or a Bluetooth LE Audio headset — on a classic one it behaves like resume.":
@@ -634,8 +628,6 @@ CATALOG = {
         "Appliquer",
     "<small>✓ All settings applied.</small>":
         "<small>✓ Tous les réglages sont appliqués.</small>",
-    "Start listening when Loquivox launches":
-        "Écouter au lancement de Loquivox",
     "Install openwakeword":
         "Installer openwakeword",
     "Silence when the screen is locked":
@@ -902,4 +894,22 @@ CATALOG = {
     "Run {tool} ({server}) with {args}? Say yes to go ahead.":
         "Lancer {tool} ({server}) avec {args} ? Dis oui pour que j'y aille.",
     "no arguments": "aucun argument",
+    "Like the conversation": "Comme la conversation",
+    "The companion always talks through the Live engine. Each setting below follows the Conversation tab until you give it a value of its own.":
+        "Le compagnon parle toujours par le moteur Live. Chaque réglage ci-dessous suit l'onglet Conversation tant que vous ne lui donnez pas de valeur propre.",
+    "Empty = the instructions of the Conversation tab. Given here, they replace those for the companion.":
+        "Vide = les instructions de l'onglet Conversation. Renseignées ici, elles les remplacent pour le compagnon.",
+    "On waking, the companion captures the focused window and has it described — as the screen framing set in <b>Conversation › Screen</b> says.":
+        "Au réveil, le compagnon capture la fenêtre active et la fait décrire, avec le cadrage réglé dans <b>Conversation › Écran</b>.",
+    "When the companion listens, and when it keeps quiet.":
+        "Quand le compagnon écoute, et quand il se tait.",
+    "Enabled": "Activé",
+    "Lock": "Verrouillage",
+    "Listen when Loquivox launches": "Écouter au lancement de Loquivox",
+    "Seconds without a word heard before a notification may open a conversation by itself":
+        "Secondes sans parole entendue avant qu'une notification puisse ouvrir seule une conversation",
+    "Delay before announcing (s)": "Délai avant d'annoncer (s)",
+    "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>, F7 by default); it applies right away.":
+        "La touche de silence se règle dans l'onglet <b>Raccourcis</b> (<i>Compagnon</i>, F7 par défaut) ; elle s'applique tout de suite.",
+    "Wakes the companion": "Réveille le compagnon",
 }
