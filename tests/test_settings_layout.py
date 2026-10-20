@@ -510,6 +510,49 @@ def test_agent_model_is_a_combo():
     print("✓ agent model is a combo")
 
 
+def test_agent_models_are_listed_from_the_agent_provider():
+    """Anthropic agent + another chat provider: each combo gets its own provider's models."""
+    import types
+    from gi.repository import GLib
+    import loquivox.api as api
+    from loquivox.state import STATE
+
+    lists = {"groq": ["chat-a", "chat-b"], "anthropic": ["claude-x", "claude-y"]}
+
+    def fake_client(pid):
+        data = [types.SimpleNamespace(id=m) for m in lists[pid]]
+        return types.SimpleNamespace(models=types.SimpleNamespace(
+            list=lambda: types.SimpleNamespace(data=data)))
+
+    def entries(combo):
+        model = combo.get_model()
+        return [row[0] for row in model]
+
+    real, saved = api.get_ai_client, (STATE.ai_provider, STATE.ai_agent_model)
+    api.get_ai_client = fake_client
+    try:
+        STATE.ai_provider = "groq"
+        SettingsDialog._agent_provider.set_active_id("anthropic")
+        SettingsDialog._agent_model.get_child().set_text("my-typed")
+        SettingsDialog._load_models_async()
+        ctx = GLib.MainContext.default()
+        for _ in range(500):
+            while ctx.iteration(False):
+                pass
+            if entries(SettingsDialog._agent_model):
+                break
+            import time; time.sleep(0.01)
+        assert entries(SettingsDialog._agent_model) == ["claude-x", "claude-y"]
+        assert entries(SettingsDialog._chat_model) == ["chat-a", "chat-b"]
+        assert SettingsDialog._agent_model.get_child().get_text() == "my-typed"
+    finally:
+        api.get_ai_client = real
+        STATE.ai_provider, STATE.ai_agent_model = saved
+        SettingsDialog._agent_provider.set_active_id("")
+        SettingsDialog._agent_model.get_child().set_text("")
+    print("✓ agent models come from the agent's provider")
+
+
 def test_capture_group_says_f4_and_companion_always_capture():
     texts = _dialog_texts()
     assert "always capture" in texts, "Screen context prose must say F4 and the companion always capture"
@@ -589,6 +632,7 @@ if __name__ == "__main__":
     test_live_fields_follow_the_companion()
     test_read_aloud_is_cascade_only()
     test_agent_model_is_a_combo()
+    test_agent_models_are_listed_from_the_agent_provider()
     test_capture_group_says_f4_and_companion_always_capture()
     test_chat_and_vision_prose_names_the_agent_and_the_chat_jobs()
     test_no_stale_wording()
