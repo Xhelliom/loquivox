@@ -21,7 +21,7 @@ the slow call it follows). Each rule has a one-place slot: while an action
 runs, newer events replace the waiting one (a burst is at most one call in
 flight plus the last event), and two runs of a rule are ``MIN_GAP`` apart. A server that is absent
 or an action that fails is one warning per distinct error, then silence; the
-last outcome is kept for Settings → Plugins → Rules.
+last outcome is kept for Settings → Tools → Rules.
 
 Written to be written by an agent: ``loquivox --rules-catalog`` lists the
 events and every declared server's tools with their schemas, and
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -288,6 +289,18 @@ def _settings(dialog, vbox, labels) -> None:
                           max_width_chars=40, wrap_mode=Pango.WrapMode.WORD_CHAR)
         label.set_tooltip_text(" → ".join(f"{a.get('server')}.{a.get('tool')}" for a in rule["do"]))
         dialog._field(body, f"{rule['when']}" + (f" {rule['if']}" if rule["if"] else ""), label, labels)
+
+    def _open(_btn) -> None:
+        """Hand config.toml to the desktop's editor, creating it empty if need be."""
+        path = config_module.CONFIG_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        subprocess.Popen(["xdg-open", str(path)])
+
+    button = Gtk.Button(label=_("Open config.toml"))
+    button.set_halign(Gtk.Align.START)
+    button.connect("clicked", _open)
+    body.pack_start(button, False, False, 0)
 
 
 register(Plugin(name="rules", enabled=lambda: False, settings=_settings,

@@ -84,7 +84,7 @@ def get_ai_client(provider: str):
                 api_key = os.environ.get("ANTHROPIC_API_KEY")
                 if not api_key:
                     raise AnthropicKeyMissing(
-                        "ANTHROPIC_API_KEY is not set — add it in Settings → API Keys."
+                        "ANTHROPIC_API_KEY is not set — add it in Settings → Models & keys → Keys."
                     )
                 from openai import OpenAI
                 _anthropic_client = OpenAI(
@@ -99,7 +99,7 @@ def get_ai_client(provider: str):
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
                 raise OpenAIKeyMissing(
-                    "OPENAI_API_KEY is not set — add it in Settings → API Keys."
+                    "OPENAI_API_KEY is not set — add it in Settings → Models & keys → Keys."
                 )
             from openai import OpenAI
             _openai_client = OpenAI(api_key=api_key)

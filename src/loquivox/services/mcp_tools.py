@@ -469,7 +469,7 @@ def status() -> List[Dict[str, Any]]:
 
 def _settings(dialog, vbox, labels) -> None:
     """The « MCP servers » card: each server, its state and tools, on/off."""
-    from gi.repository import Gtk, Pango
+    from gi.repository import GLib, Gtk, Pango
 
     body = dialog._group(
         vbox, _("MCP servers"),
@@ -479,28 +479,51 @@ def _settings(dialog, vbox, labels) -> None:
         "OpenAI's backend, the backend's tools are fixed when the session opens: "
         "every tool is declared, `always` sorting does not apply there."))
     checks = {}
+    shown = {}   # server name -> (its check, the line of tools/error beneath it)
     rows = status()
     if not rows:
         body.pack_start(Gtk.Label(label=_("No server declared."), xalign=0), False, False, 0)
     for row in rows:
-        mark = {"up": "✓", "starting": "…", "failed": "❌", "off": "○"}[row["state"]]
-        state = {"up": _("up"), "starting": _("starting"), "failed": _("failed"), "off": _("off")}[row["state"]]
-        tools = ", ".join(f"{n}{' ⚡' if a else ''}" for n, a in row["tools"].items())
-        check = Gtk.CheckButton(label=f"{mark} {state}")
+        check = Gtk.CheckButton()
         check.set_active(row["enabled"])
         check.set_tooltip_text(_("⚡ = acts: confirmed out loud before it runs"))
         # The tools and the error wrap beneath: a window is never narrower than its widest child.
-        detail = " — ".join(x for x in (row["error"], tools) if x)
-        side = None
-        if detail:
-            side = Gtk.Label(label=detail, xalign=0, wrap=True, selectable=True,
-                             max_width_chars=60, wrap_mode=Pango.WrapMode.WORD_CHAR)
-            side.get_style_context().add_class("dim-label")
-            side.set_tooltip_text(detail)
+        side = Gtk.Label(xalign=0, wrap=True, selectable=True, max_width_chars=60,
+                         wrap_mode=Pango.WrapMode.WORD_CHAR, no_show_all=True)
+        side.get_style_context().add_class("dim-label")
         dialog._field(body, row["name"], check, labels)
-        if side is not None:
-            body.pack_start(side, False, False, 0)
+        body.pack_start(side, False, False, 0)
         checks[row["name"]] = check
+        shown[row["name"]] = (check, side)
+
+    def refresh() -> bool:
+        """Re-read each server's state (the sockets come up after the window opens)."""
+        for row in status():
+            if row["name"] not in shown:
+                continue
+            check, side = shown[row["name"]]
+            mark = {"up": "✓", "starting": "…", "failed": "❌", "off": "○"}[row["state"]]
+            state = {"up": _("up"), "starting": _("starting"), "failed": _("failed"),
+                     "off": _("off")}[row["state"]]
+            check.set_label(f"{mark} {state}")
+            tools = ", ".join(f"{n}{' ⚡' if a else ''}" for n, a in row["tools"].items())
+            detail = " — ".join(x for x in (row["error"], tools) if x)
+            side.set_text(detail)
+            side.set_tooltip_text(detail)
+            side.set_visible(bool(detail))
+        return not closed
+
+    closed = False
+
+    def _closed(_w) -> None:
+        nonlocal closed
+        closed = True
+
+    body.connect("destroy", _closed)
+    refresh()
+    dialog._mcp_refresh = refresh
+    if shown:
+        GLib.timeout_add_seconds(2, refresh)
     status_label = Gtk.Label()
 
     def _apply(_btn=None) -> None:
@@ -514,7 +537,7 @@ def _settings(dialog, vbox, labels) -> None:
             return
         config_module.reload_config()
         threading.Thread(target=sync, daemon=True, name="mcp-sync").start()  # off the GTK thread
-        status_label.set_markup(_("<small>✓ Servers updated — reopen Settings to see their state.</small>"))
+        status_label.set_markup(_("<small>✓ Servers updated — their state follows below.</small>"))
 
     dialog._actions(body, _apply, status_label)
 
