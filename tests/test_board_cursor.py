@@ -24,7 +24,7 @@ SettingsManager.update = staticmethod(lambda k, v: store.__setitem__(k, v))  # t
 board._get = lambda path: log if "notifications" in path else {"card": {"status": "review"}}
 board.POLL_SEC = 0.01
 board.time.time = lambda: now / 1000  # type: ignore
-board.config_module.CFG = type("C", (), {"TALK_BOARD_CATCHUP_SEC": 300})()
+board.config_module.CFG = type("C", (), {"TALK_BOARD_CATCHUP_SEC": 300, "TALK_BOARD_PUSHED_ONLY": True})()
 
 
 def e(id_, ts, **kw):
@@ -86,4 +86,15 @@ board._get = lambda path: log if "notifications" in path else {"card": {"status"
 assert not session(), "a read or no-longer-true entry was said"
 board._get = lambda path: log if "notifications" in path else {"card": {"status": "review"}}
 assert not session(), "a skipped entry came back once its card looked standing again"
+
+# `pushed`: only what rang on the phone is said; unticked, the whole bell.
+now += 1000
+log["entries"][:0] = [e(10, now - 200, pushed=False), e(9, now - 300, pushed=True), e(11, now - 100)]
+assert [m["content"] for m in session()].__len__() == 2, "pushed=false was said, or pushed=true / no field was not"
+board.config_module.CFG.TALK_BOARD_PUSHED_ONLY = False
+now += 1000
+log["entries"][:0] = [e(13, now - 200, pushed=False), e(12, now - 300, pushed=True)]
+assert len(session()) == 2, "unticked, the whole bell must be said"
+board.config_module.CFG.TALK_BOARD_PUSHED_ONLY = True
+assert not session(), "a filtered entry came back"
 print("✓ board cursor OK")

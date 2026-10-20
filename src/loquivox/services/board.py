@@ -258,6 +258,9 @@ def _watch(put: Callable[[Dict[str, str]], None], stop: threading.Event) -> None
                                 config_module.CFG.TALK_BOARD_CATCHUP_SEC * 1000)
             if new != cursor:
                 _save_cursor(new)
+            if config_module.CFG.TALK_BOARD_PUSHED_ONLY:
+                # What rang on the phone; a bridge without the field says all.
+                said = [e for e in said if e.get("pushed", True)]
             for entry in said:
                 # Read at the keyboard, or no longer true: not said aloud.
                 if not entry.get("read") and still_standing(entry):
@@ -278,9 +281,13 @@ def _settings(dialog, vbox, labels) -> None:
           "It only reads the local board ({url}) — nothing is sent, and "
           "an alert you have already handled is not repeated out loud.").format(url=base_url()))
 
-    check = Gtk.CheckButton(label=_("Let the board interrupt a conversation"))
+    check = Gtk.CheckButton(label=_("Let the board speak, in conversation and on standby"))
     check.set_active(bool(config_module.CFG.TALK_BOARD))
     dialog._field(body, _("Notifications"), check, labels)
+
+    pushed = Gtk.CheckButton(label=_("Only say what goes to the phone"))
+    pushed.set_active(bool(config_module.CFG.TALK_BOARD_PUSHED_ONLY))
+    dialog._field(body, _("Filter"), pushed, labels)
 
     status = Gtk.Label()
 
@@ -289,7 +296,8 @@ def _settings(dialog, vbox, labels) -> None:
 
         enabled = check.get_active()
         try:
-            update_section("talk", {"board": enabled})
+            update_section("talk", {"board": enabled,
+                                    "board_pushed_only": pushed.get_active()})
         except ConfigWriteError as e:
             status.set_markup(f"<small>❌ {e}</small>")
             return
