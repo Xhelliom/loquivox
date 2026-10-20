@@ -777,8 +777,14 @@ class ModeHandler:
                 plugin, message = found
                 if plugin.result_note:
                     ChatManager.add_message("note", _(plugin.result_note))
-                reply = session.reply_with_result(
-                    message, on_delta=lambda t: ChatManager.stream("assistant", t))
+                taken, first = time.monotonic(), []
+
+                def _on_delta(t):
+                    if not first:      # the delay that matters: handed over → first words
+                        first.append(1)
+                        print(f"⏱️  first words {time.monotonic() - taken:.1f}s after the notification was handed over")
+                    ChatManager.stream("assistant", t)
+                reply = session.reply_with_result(message, on_delta=_on_delta)
                 if reply is not None and reply.text:
                     ChatManager.add_message("assistant", reply.text)
                     OverlayManager.set_status(_("Speaking…"))
