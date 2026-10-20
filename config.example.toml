@@ -182,6 +182,10 @@ idle_timeout = 12.0
 # Seconds without a word heard before a plugin source (e.g. a notification)
 # may open a session by itself. Never in silence mode.
 source_silence = 2.0
+# Back from silence (or after a burst), the messages that were held are
+# summarised in ONE session, the most urgent first. Above this many, it says
+# how many there are and the three most important. Minimum 3.
+digest_max = 5
 # With media = "duck": lower the music while the companion speaks, and/or while
 # you speak (real speech only, never the music coming back into the microphone).
 # The music comes back duck_hold seconds after the last word, so it does not

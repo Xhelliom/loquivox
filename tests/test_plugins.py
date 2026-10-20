@@ -457,6 +457,7 @@ def test_a_source_linked_to_a_server_is_explained_with_its_read_tools():
                                                      stop.wait(30))))
     try:
         session = TalkSession()
+        session.desks.summarize = False   # one frame per message, not the summary of both
         said = {}
 
         def both():
