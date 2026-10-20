@@ -11,6 +11,7 @@ import cairo
 from loquivox import config as config_module
 from loquivox import i18n
 from loquivox.i18n import N_, _
+from loquivox.decorators import run_on_main_thread
 from loquivox.state import STATE, SettingsManager
 
 import gi
@@ -2607,6 +2608,7 @@ class SettingsDialog:
             check.set_active(bool(config_module.CFG.TALK_FREE_KEYBOARD))
 
     @classmethod
+    @run_on_main_thread
     def sync_tts_switch(cls) -> None:
         """Put the read-aloud box back in step with ``STATE`` after F10 flipped it."""
         check = cls._tts_enabled_check

@@ -726,6 +726,9 @@ def test_f10_survives_an_apply_of_the_voice_page():
             cls._tts_enabled_check.set_active(before)
             TTSService.toggle()  # F10
             assert STATE.tts_enabled != before
+            while Gtk.events_pending():  # sync_tts_switch runs as an idle on the GTK loop
+                Gtk.main_iteration()
+            assert cls._tts_enabled_check.get_active() == STATE.tts_enabled
             cls._talk_speak_check.set_active(not cls._talk_speak_check.get_active())
             cls._on_apply_voice(None)
             assert STATE.tts_enabled != before, "Apply undid F10"
