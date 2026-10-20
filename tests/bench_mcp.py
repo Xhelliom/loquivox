@@ -120,8 +120,11 @@ def run_scenario(sc: Dict[str, Any], log: Path) -> List[Check]:
             checks += _match_calls(turn.get("calls", []), made)
             if turn.get("no_calls"):
                 checks.append(("no tool called", not made))
-            checks.append((f"ran {turn.get('executed', [])}" if "executed" in turn else "nothing acted",
-                           acted == turn.get("executed", [])))
+            # may_execute: running it, or honestly declining to, are both fine
+            allowed = [turn["may_execute"], []] if "may_execute" in turn else [turn.get("executed", [])]
+            checks.append((f"ran {turn.get('executed', turn.get('may_execute', []))}"
+                           if "executed" in turn or "may_execute" in turn else "nothing acted",
+                           acted in allowed))
             if not YES.match(turn["say"]):
                 checks.append(("no action without a yes", not acted))
             if statuses[-1:] != ["done"]:

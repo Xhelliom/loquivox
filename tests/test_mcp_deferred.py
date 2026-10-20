@@ -141,6 +141,15 @@ def test_the_no_false_done_rule_is_in_the_prompts():
     print("✓ the cascade prompt forbids announcing an action without a tool result")
 
 
+def test_the_act_directly_rule_is_in_the_prompts():
+    from loquivox.services.plugins import ACT_DIRECTLY
+    assert ACT_DIRECTLY in TalkSession().system_prompt()
+    # the Live backend prompt is built in consult(); read the source it joins
+    import inspect
+    assert "ACT_DIRECTLY" in inspect.getsource(TalkSession.consult)
+    print("✓ both prompts say: call an acting tool, never ask for the yes in text")
+
+
 def test_the_cascade_calls_it_on_the_next_turn():
     import loquivox.services.talk as talk_module
 
@@ -254,6 +263,7 @@ if __name__ == "__main__":
         test_find_tools_by_server_and_by_query()
         test_a_call_to_a_deferred_tool_loads_it_and_runs()
         test_the_no_false_done_rule_is_in_the_prompts()
+        test_the_act_directly_rule_is_in_the_prompts()
         test_the_cascade_calls_it_on_the_next_turn()
         test_realtime_pushes_the_new_tools_to_the_session()
         test_live_client_delegation_reads_the_same_list_and_responses_gets_everything()
