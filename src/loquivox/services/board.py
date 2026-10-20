@@ -177,6 +177,11 @@ def _entries() -> Optional[List[Dict[str, Any]]]:
             and isinstance(e.get("id"), int)]  # ts is checked by advance()
 
 
+def urgency(message: Dict[str, str]) -> int:
+    """A question waiting for an answer, then a stall, before a « done »."""
+    return {"Needs you": 3, "Stalled": 2, "Ready": 1}.get(marker(getattr(message, "entry", {})), 0)
+
+
 def still_true(message: Dict[str, str]) -> bool:
     """
     Re-read the card the moment the message is about to be spoken.
@@ -306,6 +311,7 @@ PLUGIN = Plugin(
     watch=_watch,
     loads="board",      # the MCP server of the same name: its tools are what a notification calls for
     still_true=still_true,
+    urgency=urgency,
     result_note=N_("📋 Board notification"),
     settings=_settings,
 )
@@ -324,6 +330,8 @@ if __name__ == "__main__":
     assert marker({"status": "done", "cardStatus": "working"}) == "Done"
     assert marker({"status": "stalled"}) == "Stalled"
     assert marker({"status": "ready"}) == "Ready"
+_q, _d = alert_message({"status": "blocked"}), alert_message({"status": "done"})
+assert urgency(_q) > urgency(_d), "a question outranks a « done »"
 
     card = {"status": "done", "cardStatus": "review", "cardTitle": "Fix the gate",
             "cwd": "/h/.herdr/worktrees/loquivox/board-x", "subtitle": "3 files"}
