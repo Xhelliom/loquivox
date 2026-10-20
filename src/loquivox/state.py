@@ -4,7 +4,10 @@ Mutable application state and settings persistence.
 from __future__ import annotations
 
 import json
+import os
 import queue
+import tempfile
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,36 +33,55 @@ except (ValueError, ImportError):
 # ---------------------------------------------------------------------------
 # Settings persistence
 # ---------------------------------------------------------------------------
+_SETTINGS_LOCK = threading.Lock()
+
+
 class SettingsManager:
     """Handles persistence of user settings."""
 
     @staticmethod
-    def load() -> Dict[str, Any]:
-        """Load settings from JSON file."""
+    def _read() -> Dict[str, Any]:
+        """The file's content; {} if absent, raises if present but unreadable."""
         if not CFG.SETTINGS_FILE.exists():
             return {}
+        with open(CFG.SETTINGS_FILE, "r") as f:
+            return json.load(f)
+
+    @staticmethod
+    def load() -> Dict[str, Any]:
+        """Load settings from JSON file."""
         try:
-            with open(CFG.SETTINGS_FILE, "r") as f:
-                return json.load(f)
+            return SettingsManager._read()
         except Exception as e:
             print(f"⚠️ Failed to load settings: {e}")
             return {}
 
     @staticmethod
+    def _merge(changes: Dict[str, Any]) -> None:
+        """Read-merge-write under one lock; an unreadable file is never rewritten."""
+        path = CFG.SETTINGS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _SETTINGS_LOCK:
+            data = {**SettingsManager._read(), **changes}   # raises: keep the old file
+            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=4)
+                os.replace(tmp, path)
+            except BaseException:
+                os.unlink(tmp)
+                raise
+
+    @staticmethod
     def update(key: str, value: Any) -> None:
         """Merge one key into the settings file, leaving the others alone."""
-        CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        data = {**SettingsManager.load(), key: value}   # read before "w" truncates
-        with open(CFG.SETTINGS_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+        SettingsManager._merge({key: value})
 
     @staticmethod
     def save(state: "AppState") -> None:
         """Save current relevant state to JSON file."""
         try:
-            CFG.SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            data = {
-                **SettingsManager.load(),   # keys owned by other modules (e.g. the companion's position)
+            SettingsManager._merge({
                 "color_scheme": state.color_scheme,
                 "overlay_style": state.overlay_style,
                 "show_hints": state.show_hints,
@@ -76,9 +98,7 @@ class SettingsManager:
                 "chat_pinned": state.chat_pinned,
                 "chat_enabled": state.chat_enabled,
                 "toggle_mode": state.toggle_mode,
-            }
-            with open(CFG.SETTINGS_FILE, "w") as f:
-                json.dump(data, f, indent=4)
+            })
         except Exception as e:
             print(f"⚠️ Failed to save settings: {e}")
 
