@@ -1068,19 +1068,28 @@ through the same `redact()`.
   `~/.config/loquivox/settings.json` via `SettingsManager` in `state.py`.
 - Transcription settings apply live (dispatcher reconfigured); some startup-only
   settings (e.g. overlay size) need a restart — see `reload_config()` docstring.
-- Settings has **eight tabs, one per use** (`_create_dialog`, pinned by
-  `tests/test_settings_layout.py`; the audit behind them is
-  `docs/audits/2026-10-15-reglages.md`): **Dictation** (transcription,
-  hold/press-to-record `toggle_mode`, refinement), **Conversation** (F4/F6:
-  engine and its voices, turns, anti-echo, ending, instructions, screen),
-  **Companion** (itself, music/ducking, the memory card), **Tools** (one card
-  per plugin), **Models & keys** (presets, chat/vision, the TTS voice and its
-  on/off, API keys), **Appearance**, **Hotkeys**, **Support**. A setting lives
-  on the tab of the thing it changes — never on the one of what it depends on:
-  a field that needs another is greyed by it *on the same tab* (the engine
-  moved to Conversation so `semantic_turns` no longer hangs on a combo
-  elsewhere). A plugin's card goes to the tab named by `Plugin.tab` (default
-  `"tools"`; `memory` says `"companion"`), so the dialog still names no plugin.
+- Settings has **nine tabs, most with sub-pages along the top** (`SettingsDialog._TABS`,
+  built by `_build_tabs`, pinned by `tests/test_settings_layout.py`; the audit
+  behind them is `docs/audits/2026-10-20-reglages-v2.md`): **Dictation**
+  (Transcription · Refinement), **Conversation** (Engine · Flow · Screen),
+  **Companion** (General · Voice & thinking · Presence · Notifications · Memory),
+  **Sound** (Microphone & music · Echo guard · Spoken voice), **Tools** (Search ·
+  Writing & screen · MCP servers · Rules), **Models & keys** (Models by role ·
+  Keys · Presets), then **Appearance**, **Hotkeys** and **Support**, which have
+  no sub-pages. A tab with sub-pages is a nested, scrollable `Gtk.Notebook`
+  with its tabs on top: a sidebar would cost 120-160 px of the 640 the window
+  has. Every sub-page is built when the dialog opens (the one Apply must reach
+  them all), then wrapped in its own `ScrolledWindow` + `_tame_scroll` and given
+  its own label `SizeGroup` — nothing scrolls or aligns with a neighbour, and
+  none may ask for more than about a screen and a half. Cards were *moved*, not
+  rewritten: a few sub-pages (Voice & thinking, Presence, Echo guard) are still
+  empty (a note says so) and fill in with the next steps of the audit. A
+  setting lives
+  on the page of the thing it changes — never on the one of what it depends on:
+  a field that needs another is greyed by it *on the same tab*. A plugin's card
+  goes where `Plugin.tab` says: `"tab/sub"` (`"companion/memory"`,
+  `"tools/search"`), or a bare tab for its first sub-page; the dialog still
+  names no plugin.
   A preset writes several slots at once (config.toml *and* settings.json), so
   `_refresh_engine_widgets` puts every combo back in step — and it must read
   `config_module.CFG`, since `reload_config()` rebinds the singleton the

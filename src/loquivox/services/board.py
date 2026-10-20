@@ -322,6 +322,7 @@ PLUGIN = Plugin(
     urgency=urgency,
     result_note=N_("📋 Board notification"),
     settings=_settings,
+    tab="companion/notifications",
 )
 register(PLUGIN)
 
