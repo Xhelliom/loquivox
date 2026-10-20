@@ -476,20 +476,19 @@ def test_dependent_fields_grey_out():
 
 
 def test_live_fields_follow_the_companion():
-    """The companion runs on Live, so its voice and delegation are never dead."""
-    from loquivox import config as config_module
+    """The companion runs on Live, so its voice and delegation are never dead —
+    and they follow the dialog's own box, without reopening it."""
     cls = SettingsDialog
     cls._engine_combo.set_active_id("cascade")
-    cfg = config_module.CFG
+    original = cls._comp_enabled.get_active()
     try:
-        for companion, want in ((True, True), (False, False)):
-            config_module.CFG = cfg.__class__(**{**cfg.__dict__, "COMPANION_ENABLED": companion})
-            cls._on_talk_engine_changed(cls._engine_combo)
-            assert cls._live_voice.get_sensitive() is want, companion
-            assert cls._live_delegation.get_sensitive() is want, companion
+        for companion in (True, False):
+            cls._comp_enabled.set_active(companion)
+            assert cls._live_voice.get_sensitive() is companion, companion
+            assert cls._live_delegation.get_sensitive() is companion, companion
     finally:
-        config_module.CFG = cfg
-    print("✓ Live voice and delegation stay live while the companion runs")
+        cls._comp_enabled.set_active(original)
+    print("✓ Live voice and delegation follow the companion box")
 
 
 def test_read_aloud_is_cascade_only():
@@ -501,13 +500,28 @@ def test_read_aloud_is_cascade_only():
     print("✓ read-replies-aloud follows the cascade")
 
 
-def test_agent_model_is_a_list_and_prose_is_true():
-    cls = SettingsDialog
-    assert isinstance(cls._agent_model, Gtk.ComboBoxText)
-    texts = " ".join(w.get_label() or "" for w in _widgets(cls._instance.get_child())
-                     if isinstance(w, Gtk.Label))
-    assert "responds to" not in texts and "répond à F4" not in texts
+def _dialog_texts():
+    return " ".join(w.get_label() or "" for w in _widgets(SettingsDialog._instance.get_child())
+                    if isinstance(w, Gtk.Label))
+
+
+def test_agent_model_is_a_combo():
+    assert isinstance(SettingsDialog._agent_model, Gtk.ComboBoxText)
     print("✓ agent model is a combo")
+
+
+def test_capture_group_says_f4_and_companion_always_capture():
+    texts = _dialog_texts()
+    assert "always capture" in texts, "Screen context prose must say F4 and the companion always capture"
+    print("✓ screen-context prose is true")
+
+
+def test_chat_and_vision_prose_names_the_agent_and_the_chat_jobs():
+    texts = _dialog_texts()
+    for phrase in ("The agent answers", "the chat model writes the final text",
+                   "refines your dictation", "judges what the memory drops"):
+        assert phrase in texts.replace("\n", " "), phrase
+    print("✓ Chat & vision prose is true")
 
 
 def test_no_stale_wording():
@@ -574,7 +588,9 @@ if __name__ == "__main__":
     test_dependent_fields_grey_out()
     test_live_fields_follow_the_companion()
     test_read_aloud_is_cascade_only()
-    test_agent_model_is_a_list_and_prose_is_true()
+    test_agent_model_is_a_combo()
+    test_capture_group_says_f4_and_companion_always_capture()
+    test_chat_and_vision_prose_names_the_agent_and_the_chat_jobs()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     SettingsDialog._instance.destroy()

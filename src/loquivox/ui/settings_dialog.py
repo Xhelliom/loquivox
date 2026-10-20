@@ -508,6 +508,9 @@ class SettingsDialog:
 
         cls._comp_enabled = Gtk.CheckButton(label=_("Start listening when Loquivox launches"))
         cls._comp_enabled.set_active(bool(cfg.COMPANION_ENABLED))
+        # Live fields (Conversation tab) follow this box; its widgets may not exist yet.
+        cls._comp_enabled.connect(
+            "toggled", lambda *_a: cls._on_talk_engine_changed(cls._engine_combo))
         cls._field(body, _("Startup"), cls._comp_enabled, labels)
 
         cls._comp_wake = Gtk.ComboBoxText()
@@ -972,7 +975,10 @@ class SettingsDialog:
                   if cls._engine_combo is not None else "cascade")
         # The companion always runs on Live (until it has settings of its own),
         # so these fields mean something whatever F4/F6 use.
-        live = engine == "live" or bool(config_module.CFG.COMPANION_ENABLED)
+        # The dialog's own box wins over CFG: it is what Apply will write.
+        box = getattr(cls, "_comp_enabled", None)
+        companion = box.get_active() if box is not None else bool(config_module.CFG.COMPANION_ENABLED)
+        live = engine == "live" or companion
         to_openai = (cls._live_delegation is not None
                      and resolve_delegation(cls._live_delegation.get_active_id())
                      == "responses")
