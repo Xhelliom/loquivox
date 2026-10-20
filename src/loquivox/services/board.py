@@ -330,8 +330,8 @@ if __name__ == "__main__":
     assert marker({"status": "done", "cardStatus": "working"}) == "Done"
     assert marker({"status": "stalled"}) == "Stalled"
     assert marker({"status": "ready"}) == "Ready"
-_q, _d = alert_message({"status": "blocked"}), alert_message({"status": "done"})
-assert urgency(_q) > urgency(_d), "a question outranks a « done »"
+    _q, _d = alert_message({"status": "blocked"}), alert_message({"status": "done"})
+    assert urgency(_q) > urgency(_d), "a question outranks a « done »"
 
     card = {"status": "done", "cardStatus": "review", "cardTitle": "Fix the gate",
             "cwd": "/h/.herdr/worktrees/loquivox/board-x", "subtitle": "3 files"}
