@@ -451,6 +451,9 @@ class Config:
     #: Seconds without a word heard before a source's message may wake the
     #: companion by itself (standby, active mode only).
     COMPANION_SOURCE_SILENCE_SEC: float = 2.0
+    #: When a session opens on more than this many held messages (after a
+    #: silence), it says how many there are and the three most important.
+    COMPANION_DIGEST_MAX: int = 5
     #: With ``media = "duck"``: lower the music while the companion speaks /
     #: while the user speaks, and bring it back COMPANION_DUCK_HOLD_SEC after.
     COMPANION_DUCK_ON_ASSISTANT: bool = True
@@ -928,6 +931,8 @@ def _build_config() -> Config:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "source_silence" in companion:
         overrides["COMPANION_SOURCE_SILENCE_SEC"] = float(companion["source_silence"])
+    if "digest_max" in companion:
+        overrides["COMPANION_DIGEST_MAX"] = max(3, int(companion["digest_max"]))
     if "duck_on_assistant" in companion:
         overrides["COMPANION_DUCK_ON_ASSISTANT"] = bool(companion["duck_on_assistant"])
     if "duck_on_user" in companion:
