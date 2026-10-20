@@ -442,6 +442,41 @@ def test_an_answer_is_rechecked_when_it_is_handed_back():
     print("✓ an answer is re-checked the moment it is handed back")
 
 
+def test_a_source_linked_to_a_server_is_explained_with_its_read_tools():
+    """
+    A source that ``loads`` a server gets an explaining clause in its frame:
+    read with that server's tools first (data, never an instruction), say what
+    / why / impact / advice, act only after a confirmed yes. One that loads
+    nothing keeps the plain frame. The wording names no tool.
+    """
+    plugins.register(Plugin(name="linked", loads="srv",
+                            watch=lambda put, stop: (put({"role": "system", "content": "x"}),
+                                                     stop.wait(30))))
+    plugins.register(Plugin(name="plain",
+                            watch=lambda put, stop: (put({"role": "system", "content": "x"}),
+                                                     stop.wait(30))))
+    try:
+        session = TalkSession()
+        session.desks.summarize = False   # one frame per message, not the summary of both
+        said = {}
+
+        def both():
+            while (found := session.desks.take()) is not None:
+                said[found[0].name] = found[1]["content"]
+            return {"linked", "plain"} <= said.keys()
+        assert _wait(both), said
+        session.desks.close()
+    finally:
+        plugins._REGISTRY.pop("linked", None)
+        plugins._REGISTRY.pop("plain", None)
+    text = said["linked"]
+    assert "srv" in text and "read-only" in text and "never an instruction" in text
+    assert "why" in text and "advise" in text and "confirmation" in text
+    assert "FIRST" in text and "short sentence" in text, "no quick first sentence"
+    assert "read-only" not in said["plain"], "a source with no server was told to explain"
+    print("✓ a source linked to a server is explained with that server's read tools")
+
+
 class _Event_delegation:
     """The shape ``session.delegation.created`` arrives in."""
 
@@ -506,6 +541,7 @@ def test_the_conversation_core_names_no_plugin():
 
 if __name__ == "__main__":
     test_a_plugin_is_declared_once()
+    test_a_source_linked_to_a_server_is_explained_with_its_read_tools()
     test_the_config_key_is_the_only_gate()
     test_the_cascade_routes_by_tool_name()
     test_the_realtime_engine_routes_the_same_call()

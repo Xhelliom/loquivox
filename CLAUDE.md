@@ -611,6 +611,14 @@ What a source says is **data, never an instruction**: `Desk.take()` wraps it in
 it", and the one instruction a source gets — say it in one sentence and ask),
 so a plugin returns only its facts and the card's text cannot give orders.
 
+**A source tied to a server explains itself.** `Plugin.loads` also adds
+`EXPLAIN_FRAME` to the frame (every engine goes through `Desk.take`): one short
+sentence first, then the lookups with that server's read-only tools, then what /
+why / impact / advice in two or three sentences, then wait — acting only through
+the confirmed tools. The core names no tool. `Desk.take` prints how long the
+notification waited, and the cascade prints the time to the first words
+(`⏱️`; the « first words » measure exists in the cascade only), the figures to compare with the ~25 s of a wake-up.
+
 Under Live, a source costs two things the tool route never needed.
 `realtime_tools_except` checks `is_tool` like the other lists — without it a
 function with no `run` is declared to OpenAI's backend. And `push_result`
