@@ -70,8 +70,17 @@ class AIService:
         its provider, so a provider of its own without a model falls back to the
         chat's pair whole rather than sending it ids it has never heard of.
         """
-        provider = STATE.ai_agent_provider or STATE.ai_provider
-        model = STATE.ai_agent_model
+        return AIService._role_target(STATE.ai_agent_provider, STATE.ai_agent_model)
+
+    @staticmethod
+    def judge_target() -> tuple:
+        """``(provider, model)`` for the memory judge; the same fallback as the agent's."""
+        return AIService._role_target(STATE.ai_judge_provider, STATE.ai_judge_model)
+
+    @staticmethod
+    def _role_target(own_provider: str, own_model: str) -> tuple:
+        provider = own_provider or STATE.ai_provider
+        model = own_model
         if not model:
             if provider != STATE.ai_provider:
                 return STATE.ai_provider, STATE.ai_chat_model

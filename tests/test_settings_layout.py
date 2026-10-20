@@ -107,6 +107,16 @@ def test_window_fits_its_default_width():
     print(f"✓ minimum width {minimum}px fits the {DEFAULT_WIDTH}px window")
 
 
+def _settle(win: Gtk.Window) -> None:
+    """Let a just-shown page get its allocation: one pass of events is not always enough."""
+    import time
+    win.show_all()
+    for _ in range(5):
+        time.sleep(0.02)
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+
+
 def test_label_columns_align():
     """Every page puts its label column at one x, across separate cards."""
     win = SettingsDialog._instance
@@ -116,17 +126,13 @@ def test_label_columns_align():
         inner = nb.get_nth_page(i)
         for j in range(inner.get_n_pages() if SUBTABS[tab] else 0):
             inner.set_current_page(j)
-            win.show_all()
-            while Gtk.events_pending():
-                Gtk.main_iteration()
+            _settle(win)
             widths = _field_label_widths(inner.get_nth_page(j))
             assert len(set(widths)) <= 1, (
                 f"{tab} › {SUBTABS[tab][j]} has ragged label columns: "
                 f"{sorted(set(widths))}")
         if SUBTABS[tab] is None:
-            win.show_all()
-            while Gtk.events_pending():
-                Gtk.main_iteration()
+            _settle(win)
             widths = _field_label_widths(inner)
             assert len(set(widths)) <= 1, (
                 f"tab {tab} has ragged label columns: {sorted(set(widths))}")
@@ -251,7 +257,7 @@ def test_handlers_find_their_widgets():
     shows up here rather than as an AttributeError under the user's mouse.
     """
     cls = SettingsDialog
-    cls._refresh_engine_widgets()          # presets put every combo back in step
+    cls._fill_preset(*cls.PRESETS[0][2:])   # a preset fills every combo it names
     cls._on_talk_engine_changed(cls._engine_combo)
     cls._on_talk_shot_toggled(cls._talk_shot_check)
     cls._update_pp_sensitivity()
@@ -480,7 +486,7 @@ def test_settings_live_where_they_are_used():
                       ("_pp_scale", "Dictation"),
                       ("_voice_combo", "Sound")):
         assert _on_tab(getattr(cls, attr), tab), f"{attr} is not on {tab}"
-    assert _on_tab(_control("Models & keys", "Provider"), "Models & keys")
+    assert _on_tab(_control("Models & keys", "Final text"), "Models & keys")
     assert not any(_on_tab(w, "Models & keys") for w in (cls._engine_combo,))
     titles = lambda tab: " ".join(w.get_label() for w in _widgets(_tab(tab))
                                   if isinstance(w, Gtk.Label))
@@ -504,6 +510,8 @@ def test_tray_only_settings_are_set_from_the_dialog():
         cls._on_apply_recording(None)
         cls._chat_enabled_check.set_active(not saved[1])
         cls._tts_enabled_check.set_active(not saved[2])
+        assert STATE.tts_enabled == saved[2], "read-aloud must wait for Apply"
+        cls._on_apply_voice(None)
         assert (STATE.toggle_mode, STATE.chat_enabled, STATE.tts_enabled) == tuple(
             not v for v in saved)
     finally:
@@ -545,12 +553,7 @@ def test_dependent_fields_grey_out():
         cls._talk_echo_guard.set_active_id(guard)
         assert cls._talk_barge_margin.get_sensitive() is want, guard
 
-    check = _control("Tools", "Research")
-    provider, model = _control("Tools", "Provider"), _control("Tools", "Model")
-    for active in (False, True):
-        check.set_active(active)
-        assert on(provider, model) == [active] * 2, active
-    print("✓ ducking, box width, custom prompt, cutting in and search follow their switch")
+    print("✓ ducking, box width, custom prompt and cutting in follow their switch")
 
 
 def test_live_fields_are_the_engines_and_the_companion_has_its_own():
@@ -669,7 +672,7 @@ def test_agent_models_are_listed_from_the_agent_provider():
     real, saved = api.get_ai_client, (STATE.ai_provider, STATE.ai_agent_model)
     api.get_ai_client = fake_client
     try:
-        STATE.ai_provider = "groq"
+        SettingsDialog._chat_provider.set_active_id("groq")
         SettingsDialog._agent_provider.set_active_id("anthropic")
         SettingsDialog._agent_model.get_child().set_text("my-typed")
         SettingsDialog._load_models_async()
@@ -697,12 +700,12 @@ def test_capture_group_says_f4_and_companion_always_capture():
     print("✓ screen-context prose is true")
 
 
-def test_chat_and_vision_prose_names_the_agent_and_the_chat_jobs():
+def test_roles_prose_names_the_agent_and_the_chat_jobs():
     texts = _dialog_texts()
     for phrase in ("The agent answers", "the chat model writes the final text",
-                   "refines your dictation", "judges what the memory drops"):
+                   "refines your dictation", "the memory judge decides", "Same as chat"):
         assert phrase in texts.replace("\n", " "), phrase
-    print("✓ Chat & vision prose is true")
+    print("✓ Models-by-role prose is true")
 
 
 def test_no_stale_wording():
@@ -753,6 +756,208 @@ def test_long_contents_keep_the_window_narrow():
     print(f"✓ long MCP/rule/memory contents: minimum width {minimum}px")
 
 
+def _where():
+    """id(widget) -> (tab, sub-page) for every page of the open dialog."""
+    where = {}
+    for tab, sub, sw in _leaves(SettingsDialog._instance):
+        for w in _widgets(sw):
+            where[id(w)] = (tab, sub)
+    return where
+
+
+def test_the_sound_tab_holds_mic_music_echo_and_voice():
+    cls, where = SettingsDialog, _where()
+    for name, sub in (("_mic_combo", "Microphone & music"),
+                      ("_media_combo", "Microphone & music"),
+                      ("_media_duck_scale", "Microphone & music"),
+                      ("_comp_duck_ai", "Microphone & music"),
+                      ("_comp_duck_user", "Microphone & music"),
+                      ("_talk_echo_guard", "Echo guard"),
+                      ("_talk_barge_margin", "Echo guard"),
+                      ("_tts_enabled_check", "Spoken voice"),
+                      ("_talk_speak_check", "Spoken voice"),
+                      ("_tts_engine_combo", "Spoken voice"),
+                      ("_voice_combo", "Spoken voice")):
+        assert where.get(id(getattr(cls, name))) == ("Sound", sub), (name, where.get(id(getattr(cls, name))))
+    print("✓ Sound: microphone & music, echo guard, spoken voice")
+
+
+def _tmp_config():
+    import tempfile
+    from loquivox import config as config_module, config_io
+    d = tempfile.TemporaryDirectory()
+    real = config_module.CONFIG_FILE
+    config_module.CONFIG_FILE = config_io.CONFIG_FILE = Path(d.name) / "config.toml"
+
+    def restore():
+        config_module.CONFIG_FILE = config_io.CONFIG_FILE = real
+        config_module.reload_config()
+        d.cleanup()
+    return restore
+
+
+def test_mic_music_and_echo_have_their_own_writers():
+    from loquivox import config as config_module
+    cls = SettingsDialog
+    restore = _tmp_config()
+    try:
+        cls._mic_combo.append("hw:test", "hw:test")
+        cls._mic_combo.set_active_id("hw:test")
+        cls._media_combo.set_active_id("duck")
+        cls._media_duck_scale.set_value(35)
+        duck_before = config_module.CFG.COMPANION_DUCK_ON_ASSISTANT
+        cls._comp_duck_ai.set_active(not duck_before)
+        cls._talk_echo_guard.set_active_id("headset")
+        cls._talk_barge_margin.set_value(2.5)
+        # the companion's, transcription's and conversation's writers leave them alone
+        for apply in (cls._on_apply_companion, cls._on_apply_transcription, cls._on_apply_talk):
+            apply(None)
+        cfg = config_module.CFG
+        assert (cfg.INPUT_DEVICE, cfg.MEDIA, cfg.TALK_ECHO_GUARD) != ("hw:test", "duck", "headset"), cfg
+        assert cfg.TALK_BARGE_IN_MARGIN != 2.5 and cfg.COMPANION_DUCK_ON_ASSISTANT == duck_before
+        for apply in (cls._on_apply_mic, cls._on_apply_music, cls._on_apply_echo):
+            apply(None)
+        cfg = config_module.CFG
+        assert (cfg.INPUT_DEVICE, cfg.MEDIA, cfg.MEDIA_DUCK_VOLUME) == ("hw:test", "duck", 0.35), cfg
+        assert cfg.COMPANION_DUCK_ON_ASSISTANT == (not duck_before)
+        assert (cfg.TALK_ECHO_GUARD, cfg.TALK_BARGE_IN_MARGIN) == ("headset", 2.5), cfg
+    finally:
+        restore()
+        cls._media_combo.set_active_id("resume")
+        cls._talk_echo_guard.set_active_id("speakers")
+    print("✓ microphone, music and echo guard are written by their own Apply writers")
+
+
+def test_nothing_outside_appearance_writes_before_apply():
+    """Flip every control that used to write at once: no file is touched until Apply."""
+    from loquivox import config_io
+    from loquivox.state import STATE, SettingsManager
+    cls = SettingsDialog
+    wrote = []
+    real = (SettingsManager.save, SettingsManager.update, config_io.update_section)
+    SettingsManager.save = staticmethod(lambda *a, **k: wrote.append("save"))
+    SettingsManager.update = staticmethod(lambda *a, **k: wrote.append("update"))
+    config_io.update_section = lambda *a, **k: wrote.append("section")
+    before = (STATE.ai_provider, STATE.tts_enabled, STATE.tts_model, STATE.tts_voice)
+    try:
+        other = next(p for p in cls._chat_provider.get_model() if p[1] != STATE.ai_provider)[1]
+        cls._chat_provider.set_active_id(other)
+        cls._tts_enabled_check.set_active(not STATE.tts_enabled)
+        engines = [r[1] for r in cls._tts_engine_combo.get_model()]
+        cls._tts_engine_combo.set_active_id(next(e for e in engines if e != STATE.tts_model))
+        cls._voice_combo.set_active(len(cls._voice_combo.get_model()) - 1)
+        for name, *_rest in cls.PRESETS:
+            button = next(b for b in _buttons(_tab("Models & keys")) if b.get_label() == name)
+            button.clicked()
+        assert not wrote, wrote
+        assert before == (STATE.ai_provider, STATE.tts_enabled, STATE.tts_model, STATE.tts_voice)
+    finally:
+        SettingsManager.save, SettingsManager.update = real[:2]
+        config_io.update_section = real[2]
+        cls._chat_provider.set_active_id(before[0])
+        cls._tts_enabled_check.set_active(before[1])
+        cls._tts_engine_combo.set_active_id(before[2])
+    print("✓ providers, voice and presets wait for Apply")
+
+
+def test_a_preset_fills_the_widgets_and_apply_saves_them():
+    from loquivox.state import STATE
+    cls = SettingsDialog
+    restore = _tmp_config()
+    saved = (STATE.tts_model, STATE.tts_voice)
+    try:
+        button = next(b for b in _buttons(_tab("Models & keys")) if b.get_label() == "Private")
+        button.clicked()
+        assert cls._engine_combo.get_active_id() == "cascade"
+        assert cls._backend_combo.get_active() == [b[0] for b in cls._BACKENDS].index("whispercpp")
+        assert cls._tts_engine_combo.get_active_id() == "piper"
+        assert cls._voice_combo.get_active_id() == "fr_FR-siwis-medium"
+        assert STATE.tts_model != "piper" or saved[0] == "piper"
+        cls._on_apply_voice(None)
+        assert (STATE.tts_model, STATE.tts_voice) == ("piper", "fr_FR-siwis-medium")
+    finally:
+        restore()
+        STATE.tts_model, STATE.tts_voice = saved
+        cls._tts_engine_combo.set_active_id(saved[0])
+    print("✓ a preset only fills the form; Apply saves it")
+
+
+def test_models_are_set_in_the_role_table_and_nowhere_else():
+    cls, where = SettingsDialog, _where()
+    roles = ("Answers", "Final text", "Vision", "Search", "Memory judge")
+    for role in roles:
+        row = _control("Models & keys", role)
+        assert isinstance(row, Gtk.Box), role
+        combos = [w for w in row.get_children() if isinstance(w, Gtk.ComboBox)]
+        # vision has no provider of its own: it reads on the chat's
+        assert len(combos) == (1 if role == "Vision" else 2), (role, "a provider and a model")
+    for name in ("_agent_provider", "_agent_model", "_chat_provider", "_chat_model",
+                 "_vision_model", "_research_provider", "_research_model",
+                 "_judge_provider", "_judge_model"):
+        assert where[id(getattr(cls, name))] == ("Models & keys", "Models by role"), name
+    for name in ("_agent_provider", "_judge_provider"):
+        assert getattr(cls, name).get_model()[0][0] == "Same as chat", name
+    tools = {w.get_text() for t, s, sw in _leaves(cls._instance) if t == "Tools"
+             for w in _widgets(sw) if isinstance(w, Gtk.Label) and w.get_name() == "field-label"}
+    assert not tools & {"Provider", "Model"}, tools
+    print("✓ every model role is a row of the table, and the Tools tab has no model field")
+
+
+def test_the_role_table_applies():
+    import time
+    from loquivox import config as config_module
+    from loquivox.services.ai import AIService
+    from loquivox.state import STATE
+    cls = SettingsDialog
+    restore = _tmp_config()
+    saved = (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model,
+             STATE.ai_agent_provider, STATE.ai_agent_model,
+             STATE.ai_judge_provider, STATE.ai_judge_model)
+    try:
+        cls._chat_provider.set_active_id("groq")
+        cls._chat_model.get_child().set_text("chat-m")
+        cls._vision_model.get_child().set_text("vision-m")
+        cls._agent_provider.set_active_id("openai")
+        cls._agent_model.get_child().set_text("agent-m")
+        cls._research_provider.set_active_id("openai")
+        cls._research_model.get_child().set_text("search-m")
+        cls._judge_provider.set_active_id("")
+        cls._judge_model.get_child().set_text("judge-m")
+        assert STATE.ai_chat_model != "chat-m", "must wait for Apply"
+        cls._on_apply_models(None)
+        assert (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model) == (
+            "groq", "chat-m", "vision-m")
+        assert AIService.agent_target() == ("openai", "agent-m")
+        assert AIService.judge_target() == ("groq", "judge-m")
+        cfg = config_module.CFG
+        assert (cfg.RESEARCH_PROVIDER, cfg.MODEL_RESEARCH) == ("openai", "search-m")
+    finally:
+        restore()
+        (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model,
+         STATE.ai_agent_provider, STATE.ai_agent_model,
+         STATE.ai_judge_provider, STATE.ai_judge_model) = saved
+    print("✓ the role table writes the five roles on Apply")
+
+
+def test_read_aloud_keeps_both_cases_on_the_sound_tab():
+    """Chat answers (F10) and conversation replies are two switches: the default speaks only the second."""
+    from loquivox import config as config_module
+    cls = SettingsDialog
+    labels = {cls._tts_enabled_check.get_label(), cls._talk_speak_check.get_label()}
+    assert len(labels) == 2 and all("aloud" in l for l in labels), labels
+    restore = _tmp_config()
+    try:
+        cls._talk_speak_check.set_active(False)
+        cls._on_apply_voice(None)
+        assert config_module.CFG.TALK_SPEAK_REPLIES is False
+        cls._on_apply_talk(None)
+        assert config_module.CFG.TALK_SPEAK_REPLIES is False, "the talk writer must not own it"
+    finally:
+        restore()
+        cls._talk_speak_check.set_active(True)
+    print("✓ both read-aloud switches live on Sound and are written by its writer")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -776,7 +981,14 @@ if __name__ == "__main__":
     test_agent_model_is_a_combo()
     test_agent_models_are_listed_from_the_agent_provider()
     test_capture_group_says_f4_and_companion_always_capture()
-    test_chat_and_vision_prose_names_the_agent_and_the_chat_jobs()
+    test_roles_prose_names_the_agent_and_the_chat_jobs()
+    test_the_sound_tab_holds_mic_music_echo_and_voice()
+    test_mic_music_and_echo_have_their_own_writers()
+    test_nothing_outside_appearance_writes_before_apply()
+    test_a_preset_fills_the_widgets_and_apply_saves_them()
+    test_models_are_set_in_the_role_table_and_nowhere_else()
+    test_the_role_table_applies()
+    test_read_aloud_keeps_both_cases_on_the_sound_tab()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     SettingsDialog._instance.destroy()
