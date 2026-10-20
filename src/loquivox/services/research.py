@@ -153,50 +153,23 @@ def _settings(dialog, vbox, labels) -> None:
     check.set_active(bool(cfg.TALK_RESEARCH))
     dialog._field(body, _("Research"), check, labels)
 
-    provider = Gtk.ComboBoxText()
-    for pid in cfg.RESEARCH_PROVIDERS:
-        provider.append(pid, {"groq": "Groq", "openai": "OpenAI"}.get(pid, pid))
-    provider.set_active_id(cfg.RESEARCH_PROVIDER)
-    dialog._field(body, _("Provider"), provider, labels)
-
-    model = Gtk.ComboBoxText.new_with_entry()
-    for mid in cfg.RESEARCH_DEFAULT_MODELS.values():
-        model.append(mid, mid)
-    model.get_child().set_text(cfg.MODEL_RESEARCH)
-    dialog._field(body, _("Model"), model, labels)
-
-    def _default_model(_combo) -> None:
-        pid = provider.get_active_id() or "openai"
-        model.get_child().set_text(cfg.RESEARCH_DEFAULT_MODELS.get(pid, ""))
-    provider.connect("changed", _default_model)
-
-    # Without the switch there is no search, so nothing to choose.
-    def _follow_switch(_check=None) -> None:
-        provider.set_sensitive(check.get_active())
-        model.set_sensitive(check.get_active())
-    check.connect("toggled", _follow_switch)
-    _follow_switch()
+    dialog._note(body, _("The provider and the model are set in "
+                         "<b>Models &amp; keys › Models by role</b>."))
 
     status = Gtk.Label()
 
     def _apply(_btn=None) -> None:
-        """Write [models] research_provider/research and [talk] research."""
+        """Write [talk] research; the provider and model are a row of Models & keys."""
         from loquivox.config_io import ConfigWriteError, update_section
 
-        pid = provider.get_active_id() or "openai"
-        mid = model.get_child().get_text().strip()
         enabled = check.get_active()
-        if enabled and not mid:
-            status.set_markup(_("<small>⚠️ A model id is needed.</small>"))
-            return
         try:
-            update_section("models", {"research_provider": pid, "research": mid})
             update_section("talk", {"research": enabled})
         except ConfigWriteError as e:
             status.set_markup(f"<small>❌ {e}</small>")
             return
         config_module.reload_config()
-        print(f"🔎 Research: {'on' if enabled else 'off'} — {pid} / {mid}")
+        print(f"🔎 Research: {'on' if enabled else 'off'}")
         status.set_markup(
             _("<small>✓ Research on — takes effect on the next talk session.</small>")
             if enabled else

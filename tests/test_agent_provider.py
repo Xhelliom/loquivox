@@ -40,6 +40,31 @@ def test_agent_has_its_own_slot_live():
     print("✓ the agent follows its slot at every call, no restart")
 
 
+def test_judge_has_its_own_slot_and_the_memory_asks_it():
+    from loquivox.services import memory
+
+    STATE.ai_provider, STATE.ai_chat_model = "groq", "chat-model"
+    STATE.ai_judge_provider = STATE.ai_judge_model = ""
+    assert AIService.judge_target() == ("groq", "chat-model")
+    STATE.ai_judge_provider, STATE.ai_judge_model = "openai", "judge-model"
+    assert AIService.judge_target() == ("openai", "judge-model")
+    STATE.ai_judge_provider = "anthropic"
+    STATE.ai_judge_model = ""
+    assert AIService.judge_target() == ("groq", "chat-model")   # ids don't cross providers
+    STATE.ai_judge_provider, STATE.ai_judge_model = "openai", "judge-model"
+    seen = []
+    real = AIService.complete
+    AIService.complete = staticmethod(lambda m, model=None, provider=None, **kw: seen.append(
+        (provider, model)) or "NONE")
+    try:
+        memory._ask([{"source": "", "text": "x"}], "s", "c")
+    finally:
+        AIService.complete = real
+        STATE.ai_judge_provider = STATE.ai_judge_model = ""
+    assert seen == [("openai", "judge-model")], seen
+    print("✓ the memory judge follows its slot, then the chat's")
+
+
 def test_the_agent_loop_uses_the_agent_target():
     """_with_tools must ask AIService.agent_target(), at every call."""
     from loquivox.services.talk import TalkSession

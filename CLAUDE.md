@@ -1081,9 +1081,25 @@ through the same `redact()`.
   has. Every sub-page is built when the dialog opens (the one Apply must reach
   them all), then wrapped in its own `ScrolledWindow` + `_tame_scroll` and given
   its own label `SizeGroup` — nothing scrolls or aligns with a neighbour, and
-  none may ask for more than about a screen and a half. Cards were *moved*, not
-  rewritten: a few sub-pages (Echo guard) are still
-  empty (a note says so) and fill in with the next steps of the audit.
+  none may ask for more than about a screen and a half.
+  **Sound is what every mode shares**, each group with a writer of its own:
+  *Microphone & music* (`_on_apply_mic` → `[transcription] input_device`;
+  `_on_apply_music` → `media`, `media_duck_volume` and the companion's two
+  ducking boxes — the companion's writer no longer touches them), *Echo guard*
+  (`_on_apply_echo` → `[talk] echo_guard` / `barge_in_margin`, read by the
+  cascade, Realtime, Live and the companion alike; the Conversation page only
+  points at it) and *Spoken voice* (`_on_apply_voice` → TTS engine and voice in
+  settings.json, `[talk] speak_replies`). The two read-aloud switches stay two,
+  on purpose: the default (`speak_replies` on, chat read-aloud off) speaks
+  conversations and keeps the chat silent, a case one switch cannot express.
+  **Models & keys › Models by role is one table**: a row per job (Answers =
+  agent, Final text = chat, Vision, Search, Memory judge), each a provider combo
+  and an editable model combo, "Same as chat" for the agent and the judge.
+  `_on_apply_models` writes the chat's slots to settings.json and the search
+  couple to `[models] research_provider` / `research`; the judge's slot
+  (`STATE.ai_judge_*`, `AIService.judge_target()`, read by `memory._ask`) follows
+  the agent's rules. Vision has no provider of its own (it reads on the chat's).
+  Tools › Search keeps only its switch.
   **Everything that sets the companion is on the Companion tab** (the silence key
   aside, which is cited): *General* (wake word, click, style), *Voice & thinking*
   (its own Live voice, delegation, backend model, web search and instructions,
@@ -1101,10 +1117,11 @@ through the same `redact()`.
   goes where `Plugin.tab` says: `"tab/sub"` (`"companion/memory"`,
   `"tools/search"`), or a bare tab for its first sub-page; the dialog still
   names no plugin.
-  A preset writes several slots at once (config.toml *and* settings.json), so
-  `_refresh_engine_widgets` puts every combo back in step — and it must read
-  `config_module.CFG`, since `reload_config()` rebinds the singleton the
-  module-level `CFG` import no longer points at.
+  A preset only *fills* the fields it names (`_fill_preset`: engine, backend,
+  TTS engine and voice); the writers of those fields save them on Apply. Code
+  that reads settings after a write must go through `config_module.CFG`, since
+  `reload_config()` rebinds the singleton the module-level `CFG` import no
+  longer points at.
 - **Everything the user reads goes through `_()`** (`loquivox.i18n`, stdlib
   `gettext` over a plain dict: `locale_fr.py`, no `.mo` to build). English is
   the source language and the default; the choice is `language` in
@@ -1147,7 +1164,8 @@ through the same `redact()`.
   `_apply_all` only counts the unhappy ones (a status opening `❌`/`⚠️`) into
   the one line beside the button, because those lines are a tab and a scroll
   away from the click. A writer that raises is caught so it cannot stop the
-  ones after it.
+  ones after it. **Only Appearance writes at once** (and says so): a provider,
+  a voice, a preset or a switch anywhere else changes nothing until Apply.
 
 ## Transcription backends
 

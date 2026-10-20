@@ -97,6 +97,8 @@ class SettingsManager:
                 "ai_agent_provider": state.ai_agent_provider,
                 "ai_agent_model": state.ai_agent_model,
                 "ai_vision_model": state.ai_vision_model,
+                "ai_judge_provider": state.ai_judge_provider,
+                "ai_judge_model": state.ai_judge_model,
                 "tts_enabled": state.tts_enabled,
                 "chat_pinned": state.chat_pinned,
                 "chat_enabled": state.chat_enabled,
@@ -204,6 +206,8 @@ class AppState:
     ai_agent_provider: str = CFG.AGENT_PROVIDER   # "" = the chat's
     ai_agent_model: str = CFG.MODEL_AGENT         # "" = the chat's
     ai_vision_model: str = CFG.MODEL_VISION
+    ai_judge_provider: str = ""   # the memory judge; "" = the chat's
+    ai_judge_model: str = ""      # "" = the chat's
 
     # --- Hotkey Mode ---
     toggle_mode: bool = False  # False = hold-to-record, True = press-to-toggle
@@ -247,8 +251,9 @@ class AppState:
         if "tts_model" in saved:
             self.tts_model = saved["tts_model"]
         for key in ("ai_provider", "ai_chat_model", "ai_vision_model",
-                    "ai_agent_provider", "ai_agent_model"):
-            if key in saved and (saved[key] or key.startswith("ai_agent")):
+                    "ai_agent_provider", "ai_agent_model",
+                    "ai_judge_provider", "ai_judge_model"):
+            if key in saved and (saved[key] or key.startswith(("ai_agent", "ai_judge"))):
                 setattr(self, key, saved[key])
         if "tts_enabled" in saved:
             self.tts_enabled = saved["tts_enabled"]

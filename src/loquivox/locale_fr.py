@@ -128,16 +128,12 @@ CATALOG = {
         "Les modèles de conversation sont rapides et peu érudits. Quand l'un d'eux a besoin d'un fait, il confie la question à ce modèle, qui peut chercher sur le web, et continue de parler ; la réponse est donnée dès qu'elle revient. API Responses d'OpenAI avec recherche web, ou un modèle Groq compound.",
     "Research":
         "Recherche",
-    "Provider":
-        "Fournisseur",
     "Model":
         "Modèle",
     "🔎 Result received — the assistant will tell you":
         "🔎 Résultat reçu — l'assistant vous le donne",
     "Let the conversation look things up":
         "Laisser la conversation faire des recherches",
-    "<small>⚠️ A model id is needed.</small>":
-        "<small>⚠️ Il faut un identifiant de modèle.</small>",
     "<small>✓ Research on — takes effect on the next talk session.</small>":
         "<small>✓ Recherche activée — effective à la prochaine session de conversation.</small>",
     "<small>✓ Research off — takes effect on the next talk session.</small>":
@@ -390,12 +386,8 @@ CATALOG = {
         "Installation…",
     "<small>Loading the wake word…</small>":
         "<small>Chargement du mot de réveil…</small>",
-    "Chat &amp; vision":
-        "Chat &amp; vision",
     "Fast":
         "Rapide",
-    "Cloud cascade — live transcription, cloud voice, and your chat provider answers (set in Chat & vision). The default, ~1.8s before you hear a reply.":
-        "Cascade cloud — transcription en direct, voix cloud, et votre fournisseur de chat répond (réglé dans Chat & vision). Le choix par défaut, ~1,8 s avant d'entendre une réponse.",
     "Natural":
         "Naturel",
     "Speech to speech — one OpenAI Realtime session holds the conversation, ~1.0s and it keeps the prosody. Costs more, and the chat model no longer answers in talk mode.":
@@ -406,8 +398,6 @@ CATALOG = {
         "Voix locale et transcription hors ligne — seule la réponse elle-même quitte la machine. Nécessite piper-tts et le binaire whisper.cpp ; ce qui manque bascule sur le cloud.",
     "Presets":
         "Préréglages",
-    "Fill the engine, the transcription and the voice in one click — each lives on its own tab. Hover a preset to see what it picks; everything stays editable afterwards.":
-        "Remplit le moteur, la transcription et la voix en un clic — chacun a son propre onglet. Survolez un préréglage pour voir ce qu'il choisit ; tout reste modifiable ensuite.",
     "Conversation engine":
         "Moteur de conversation",
     "How a conversation is held. The cascade chains the transcription, the chat model and the voice — each swappable, local or cloud, on their own tabs. Realtime hands the whole conversation to one model that hears and answers directly: faster and more natural, but the chat model no longer answers. Live splits the difference — an OpenAI voice holds the conversation and delegates the thinking, which can be your own model again. The final text is a plain completion either way.":
@@ -434,10 +424,6 @@ CATALOG = {
         "Recherche web",
     "Voice":
         "Voix",
-    "Reads AI answers aloud — the chat, and talk sessions on the Cascade engine. Not the Realtime or Live voice on the Conversation tab: those are the model speaking for itself, this one is a separate engine that speaks written text, so it works everywhere and can be local. Applies immediately.":
-        "Lit les réponses de l'IA à voix haute — le chat, et les sessions de conversation du moteur Cascade. Ce n'est pas la voix Realtime ou Live de l'onglet Conversation : celles-ci sont le modèle qui parle lui-même, celle-ci est un moteur distinct qui prononce du texte écrit, donc elle fonctionne partout et peut être locale. S'applique immédiatement.",
-    "Spoken answers":
-        "Réponses vocales",
     "Speak a line with the selected engine and voice":
         "Prononcer une phrase avec le moteur et la voix sélectionnés",
     "Piper needs no key and no network: its voice downloads once (~60 MB) and is flatter than the cloud's.":
@@ -468,8 +454,6 @@ CATALOG = {
         "Interface",
     "Transcription":
         "Transcription",
-    "The ears: what turns your voice into text, for every mode. Applied live.":
-        "Les oreilles : ce qui transforme votre voix en texte, pour tous les modes. Appliqué en direct.",
     "Backend":
         "Backend",
     "System default":
@@ -642,14 +626,6 @@ CATALOG = {
         "Baisser les autres sons pendant que le compagnon parle",
     "Lower other sounds while I speak":
         "Baisser les autres sons pendant que je parle",
-    "Chat model":
-        "Modèle de chat",
-    "Vision model":
-        "Modèle de vision",
-    "Agent provider":
-        "Fournisseur de l'agent",
-    "Agent model":
-        "Modèle de l'agent",
     "Same as chat":
         "Comme le chat",
     "▶ Test":
@@ -692,8 +668,6 @@ CATALOG = {
         "Prompt du niveau personnalisé",
     "Clear custom prompt":
         "Effacer le prompt personnalisé",
-    "Read the assistant's replies aloud, even with TTS off":
-        "Lire les réponses de l'assistant à voix haute, même avec la lecture vocale désactivée",
     "Keep typing in other apps while the conversation runs":
         "Continuer à taper dans d'autres applications pendant la conversation",
     "When I say so out loud (“vas-y”, “j'ai fini”, “that's it”)":
@@ -726,18 +700,10 @@ CATALOG = {
         "non assignée",
     "Press a key to bind it (no need to know its name)":
         "Appuyez sur une touche pour l'assigner (inutile d'en connaître le nom)",
-    "The agent answers {ai_key}, {talk_key} and the companion and runs their tools; the chat model writes the final text, refines your dictation and judges what the memory drops; the vision model reads the screen. The lists come from the provider itself, so a model your account no longer has stops being offered.":
-        "L'agent répond à {ai_key}, {talk_key} et au compagnon et lance leurs outils ; le modèle de chat écrit le texte final, raffine votre dictée et juge ce que la mémoire écarte ; le modèle de vision lit l'écran. Les listes viennent du fournisseur lui-même, donc un modèle que votre compte n'a plus cesse d'être proposé.",
-    "<small>✓ {v0} applied — takes effect on the next talk session.</small>":
-        "<small>✓ {v0} appliqué — effectif à la prochaine session de conversation.</small>",
     "<small>✓ {engine} — takes effect on the next talk session.</small>":
         "<small>✓ {engine} — effectif à la prochaine session de conversation.</small>",
-    "The same switch as {v0}. Talk sessions can still speak their replies with it off (Conversation tab).":
-        "Le même interrupteur que {v0}. Les sessions de conversation peuvent quand même lire leurs réponses à voix haute quand il est désactivé (onglet Conversation).",
     "⏳ Listing {provider} models…":
         "⏳ Liste des modèles de {provider}…",
-    "✓ Applied — chat {chat}, vision {vision}, agent {agent}.":
-        "✓ Appliqué — chat {chat}, vision {vision}, agent {agent}.",
     "Auto":
         "Auto",
     "How the dictation key ({key}) starts and stops a recording.":
@@ -756,8 +722,6 @@ CATALOG = {
         "niveau {level} ({name})",
     "<small>✓ Applied live — {desc}.</small>":
         "<small>✓ Appliqué en direct — {desc}.</small>",
-    "How {ai_key} and {talk_key} conversations behave. \"How far it digs\" only applies to {talk_key}; \"End my turns on meaning\" only to the cascade engine.":
-        "Comment se comportent les conversations {ai_key} et {talk_key}. « Jusqu'où creuser » ne s'applique qu'à {talk_key} ; « Terminer mes tours sur le sens » seulement au moteur cascade.",
     "{talk_key} only: the briefing ends in a written text, and this is how hard the assistant questions you before writing. {ai_key} is an open chat and never reads it. Applies on every engine.":
         "{talk_key} seulement : le briefing se termine par un texte écrit, et ceci règle à quel point l'assistant vous questionne avant d'écrire. {ai_key} est un chat ouvert et ne le lit jamais. S'applique à tous les moteurs.",
     "How far it digs ({talk_key})":
@@ -842,8 +806,6 @@ CATALOG = {
         "La leur — leur recherche, exécutée de leur côté",
     "⚠️ Could not list models — {v0}":
         "⚠️ Impossible de lister les modèles — {v0}",
-    "✓ {v0} models available on {provider}. Pick or type one, then Apply. An empty agent model follows the chat model.":
-        "✓ {v0} modèles disponibles chez {provider}. Choisissez-en un ou saisissez-le, puis Appliquer. Un modèle d'agent vide suit le modèle de chat.",
     "whisper.cpp: ❌ download failed: {e}":
         "whisper.cpp : ❌ échec du téléchargement : {e}",
     "❌ {human} install failed — {msg}":
@@ -912,4 +874,62 @@ CATALOG = {
     "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>, F7 by default); it applies right away.":
         "La touche de silence se règle dans l'onglet <b>Raccourcis</b> (<i>Compagnon</i>, F7 par défaut) ; elle s'applique tout de suite.",
     "Wakes the companion": "Réveille le compagnon",
+    '<small>{v0} filled in — click Apply to save it; it takes effect on the next talk session.</small>':
+        "<small>{v0} préparé — cliquez sur Appliquer pour l'enregistrer ; il prend effet à la prochaine conversation.</small>",
+    '<small>✓ Saved — applies from the next recording.</small>':
+        '<small>✓ Enregistré — appliqué dès le prochain enregistrement.</small>',
+    '<small>✓ Saved — applies from the next reply.</small>':
+        '<small>✓ Enregistré — appliqué dès la prochaine réponse.</small>',
+    '<small>✓ Saved — used from the next recording.</small>':
+        '<small>✓ Enregistré — utilisé dès le prochain enregistrement.</small>',
+    '<small>✓ Saved.</small>':
+        '<small>✓ Enregistré.</small>',
+    'A separate engine that speaks written text, so it works everywhere and can be local. It is not the Realtime or Live voice (Conversation tab): those are the model speaking for itself.':
+        "Un moteur à part qui lit du texte écrit : il marche partout et peut être local. Ce n'est pas la voix de Realtime ou de Live (onglet Conversation) : celles-là sont le modèle qui parle de lui-même.",
+    'Answers':
+        'Réponses',
+    'Anti-echo and cutting in are set in <b>Sound › Echo guard</b>.':
+        "L'anti-écho et la coupure de parole se règlent dans <b>Son › Anti-écho</b>.",
+    'Cascade engine only: Realtime and Live speak with their own voice. Unticked, a conversation speaks only while the switch above is on.':
+        "Moteur cascade seulement : Realtime et Live parlent avec leur propre voix. Décoché, une conversation ne parle que si l'interrupteur ci-dessus est activé.",
+    'Chat answers':
+        'Réponses du chat',
+    'Cloud cascade — live transcription, cloud voice, and your chat provider answers (set in Models by role). The default, ~1.8s before you hear a reply.':
+        "Cascade cloud — transcription en direct, voix cloud, et votre fournisseur de chat répond (réglé dans Modèles par rôle). Le choix par défaut, ~1,8 s avant d'entendre une réponse.",
+    'Conversations':
+        'Conversations',
+    'Fill the engine, the transcription and the voice in one click — each lives on its own tab. Hover a preset to see what it picks; nothing is saved until you click Apply, and everything stays editable.':
+        "Remplit le moteur, la transcription et la voix en un clic — chacun a son propre onglet. Survolez un préréglage pour voir ce qu'il choisit ; rien n'est enregistré avant de cliquer sur Appliquer, et tout reste modifiable.",
+    'Final text':
+        'Texte final',
+    'How {ai_key} and {talk_key} conversations behave. "How far it digs" only applies to {talk_key}; "End my turns on meaning" only to the cascade engine. Reading replies aloud is set in Sound.':
+        "Comment se comportent les conversations {ai_key} et {talk_key}. « Jusqu'où il creuse » ne vaut que pour {talk_key} ; « Finir mes tours au sens » que pour le moteur cascade. La lecture des réponses à voix haute se règle dans Son.",
+    'Memory judge':
+        'Juge de la mémoire',
+    'One row per job, a provider then a model. The agent answers {ai_key}, {talk_key} and the companion and runs their tools; the chat model writes the final text and refines your dictation; vision reads the screen; search looks facts up on the web; the memory judge decides what the companion no longer repeats. A row left on “Same as chat” follows the chat model.':
+        "Une ligne par tâche, un fournisseur puis un modèle. L'agent répond à {ai_key}, {talk_key} et au compagnon et lance leurs outils ; le modèle de chat écrit le texte final et raffine votre dictée ; la vision lit l'écran ; la recherche cherche les faits sur le web ; le juge de la mémoire décide de ce que le compagnon ne répète plus. Une ligne laissée sur « Comme le chat » suit le modèle de chat.",
+    'Read chat answers aloud':
+        'Lire les réponses du chat à voix haute',
+    'Read conversation replies aloud, even with the switch above off':
+        "Lire les réponses des conversations à voix haute, même avec l'interrupteur ci-dessus coupé",
+    'Search is switched on in <b>Tools › Search</b>.':
+        "La recherche s'active dans <b>Outils › Recherche</b>.",
+    'The ears: what turns your voice into text, for every mode. Applied live. The microphone is set in <b>Sound</b>.':
+        'Les oreilles : ce qui transforme votre voix en texte, pour tous les modes. Appliqué en direct. Le micro se règle dans <b>Son</b>.',
+    "The input every mode listens to: dictation, conversations and the companion's wake word. Takes effect at the next recording.":
+        "L'entrée que tous les modes écoutent : dictée, conversations et mot de réveil du compagnon. Prend effet au prochain enregistrement.",
+    'The provider and the model are set in <b>Models &amp; keys › Models by role</b>.':
+        'Le fournisseur et le modèle se règlent dans <b>Modèles et clés › Modèles par rôle</b>.',
+    'The same switch as {key}. It also makes conversations speak their replies when the box below is not ticked.':
+        "Le même interrupteur que {key}. Il fait aussi parler les conversations quand la case ci-dessous n'est pas cochée.",
+    'Vision':
+        'Vision',
+    'What keeps the assistant from hearing its own voice, and how you cut in on it. It applies to every conversation engine and to the companion.':
+        "Ce qui empêche l'assistant de s'entendre lui-même, et la façon dont vous lui coupez la parole. Vaut pour tous les moteurs de conversation et pour le compagnon.",
+    '⚠️ The search needs a model id.':
+        "⚠️ La recherche a besoin d'un identifiant de modèle.",
+    '✓ Applied — chat {chat} · vision {vision} · agent {agent}.':
+        '✓ Appliqué — chat {chat} · vision {vision} · agent {agent}.',
+    '✓ {v0} models available on {provider}. Pick or type one, then Apply. An empty model follows the chat model.':
+        '✓ {v0} modèles disponibles chez {provider}. Choisissez ou tapez-en un, puis Appliquer. Un modèle vide suit le modèle de chat.',
 }

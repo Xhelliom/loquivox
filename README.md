@@ -381,7 +381,7 @@ layer-rule {
 
 ## ⚙️ Configuration
 
-Most things are adjustable from the tray icon (**Settings**: Dictation, Conversation, Companion,
+Most things are adjustable from the tray icon (**Settings**: Dictation, Conversation, Companion, Sound,
 Tools, Models & keys, Appearance, Hotkeys, Support). The interface is in English by default and
 fully available in French: it follows your locale, or pick **Auto / English / Français** in
 **Appearance → Language**. Everything else lives in an optional TOML file:
