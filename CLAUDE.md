@@ -1082,8 +1082,19 @@ through the same `redact()`.
   them all), then wrapped in its own `ScrolledWindow` + `_tame_scroll` and given
   its own label `SizeGroup` — nothing scrolls or aligns with a neighbour, and
   none may ask for more than about a screen and a half. Cards were *moved*, not
-  rewritten: a few sub-pages (Voice & thinking, Presence, Echo guard) are still
-  empty (a note says so) and fill in with the next steps of the audit. A
+  rewritten: a few sub-pages (Echo guard) are still
+  empty (a note says so) and fill in with the next steps of the audit.
+  **Everything that sets the companion is on the Companion tab** (the silence key
+  aside, which is cited): *General* (wake word, click, style), *Voice & thinking*
+  (its own Live voice, delegation, backend model, web search and instructions,
+  `[companion] live_voice` / `live_delegation` / `live_backend_model` /
+  `live_web_search` / `instructions`, empty = "like the conversation", i.e. the
+  `[talk]` value; resolved when the session opens by `companion.live_options()` /
+  `companion.instructions()`, passed to `LiveTalk(...)` and
+  `TalkSession(instructions=)`), *Presence* (enabled, lock, idle, delay before
+  announcing = `source_silence`), *Notifications* (the sources: the Board card,
+  labelled as what wakes the companion). The Conversation tab's Live fields now
+  follow the engine alone. A
   setting lives
   on the page of the thing it changes — never on the one of what it depends on:
   a field that needs another is greyed by it *on the same tab*. A plugin's card
@@ -1107,8 +1118,9 @@ through the same `redact()`.
   on a dead one, on a placeholder that drifted, and on a bare literal handed to
   a GTK label. Never bind `_` as a throwaway variable in these modules.
 - **A field is greyed only when it really has no effect** (audit
-  `docs/audits/2026-10-20-reglages-v2.md`): the Live voice/delegation stay live
-  while `COMPANION_ENABLED` (the companion always runs on Live); the screen
+  `docs/audits/2026-10-20-reglages-v2.md`): the companion's Live fields are its own
+  and never greyed by F4/F6's engine (backend model and web search only follow
+  whether the effective delegation is OpenAI's); the screen
   framing stays live whatever the F6 box says (F4 and the companion always
   capture); "read replies aloud" is cascade-only and greyed elsewhere;
   `resolve_delegation("auto")` reads `STATE.ai_provider`, the provider Settings

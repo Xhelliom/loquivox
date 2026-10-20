@@ -114,7 +114,7 @@ def test_late_block_after_session_leaves_the_bubble_at_rest():
 def test_converse_wires_on_level():
     seen = {}
     class _Talk:
-        def __init__(self, s): seen["talk"] = self
+        def __init__(self, s, **_options): seen["talk"] = self
     import loquivox.services.live_talk as lt
     from loquivox.handlers.mode import ModeHandler
     c, _ = _make()

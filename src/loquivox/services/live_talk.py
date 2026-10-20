@@ -164,7 +164,8 @@ class LiveTalk:
     """One spoken conversation, voiced by gpt-live-1 and thought by us."""
 
     def __init__(self, session, *, model: str = "", voice: str = "",
-                 instructions: str = "") -> None:
+                 instructions: str = "", delegation: Optional[str] = None,
+                 backend_model: str = "", web_search: str = "") -> None:
         cfg = config_module.CFG
         self._session = session
         #: float32 blocks sent ahead of the microphone (companion: the wake-word tail)
@@ -173,7 +174,9 @@ class LiveTalk:
         self._voice = voice or cfg.TALK_LIVE_VOICE
         self._instructions = ((instructions or session.system_prompt())
                               + "\n\n" + QUIET_CONTEXT)
-        self._delegation = resolve_delegation()
+        self._delegation = resolve_delegation(delegation)
+        self._backend_model = backend_model or cfg.TALK_LIVE_BACKEND_MODEL
+        self._web_search = web_search or cfg.TALK_LIVE_WEB_SEARCH
         #: turn being transcribed right now, per role: text and when the last
         #: delta for it arrived. There is no end-of-turn event, so this pair is
         #: the whole turn machinery (see ``tick``).
@@ -277,7 +280,7 @@ class LiveTalk:
         self._out.start()
         print(f"🔊 Live talk — {self._model} / {self._voice} · "
               f"delegation: {self._delegation}"
-              + (f" ({config_module.CFG.TALK_LIVE_BACKEND_MODEL})"
+              + (f" ({self._backend_model})"
                  if self._delegation == "responses" else ""))
 
     def close(self) -> None:
@@ -893,14 +896,14 @@ class LiveTalk:
         }
         if self._delegation == "responses":
             responses: Dict[str, Any] = {
-                "model": cfg.TALK_LIVE_BACKEND_MODEL,
+                "model": self._backend_model,
                 "instructions": cfg.TALK_LIVE_BACKEND_PROMPT,
             }
             # Native tools this backend is being given, as capability names.
             # The only one today, but the shape is what keeps the rule general:
             # a plugin steps aside for a native tool by *declaring the same
             # capability*, never by being named here.
-            native = (("web_search",) if cfg.TALK_LIVE_WEB_SEARCH == "native"
+            native = (("web_search",) if self._web_search == "native"
                       else ())
             # The Responses wire shape for a function is the flat one the
             # Realtime sessions use, so the plugin's existing definition serves

@@ -459,6 +459,14 @@ class Config:
     COMPANION_DUCK_ON_ASSISTANT: bool = True
     COMPANION_DUCK_ON_USER: bool = False
     COMPANION_DUCK_HOLD_SEC: float = 1.0
+    #: The companion's own Live settings. Empty = like the conversation
+    #: (``TALK_LIVE_*`` / ``TALK_INSTRUCTIONS``); a value here wins for the
+    #: companion only. Read by ``handlers/companion.py`` when a session opens.
+    COMPANION_LIVE_VOICE: str = ""
+    COMPANION_LIVE_DELEGATION: str = ""
+    COMPANION_LIVE_BACKEND_MODEL: str = ""
+    COMPANION_LIVE_WEB_SEARCH: str = ""
+    COMPANION_INSTRUCTIONS: str = ""
     #: Look of the bubble: "goutte" (the drop), "plasma", "radar" or "reacteur".
     COMPANION_BUBBLE_STYLE: str = "goutte"
     #: Leave the keyboard to the user during a conversation: no exclusive grab,
@@ -926,6 +934,16 @@ def _build_config() -> Config:
         overrides["COMPANION_WAKE_WORD"] = str(companion["wake_word"]).strip()
     if companion.get("bubble_style") in ("goutte", "plasma", "radar", "reacteur"):
         overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
+    if str(companion.get("live_voice", "")).strip():
+        overrides["COMPANION_LIVE_VOICE"] = str(companion["live_voice"]).strip().lower()
+    if str(companion.get("live_delegation", "")).strip().lower() in base.TALK_LIVE_DELEGATIONS:
+        overrides["COMPANION_LIVE_DELEGATION"] = str(companion["live_delegation"]).strip().lower()
+    if str(companion.get("live_backend_model", "")).strip():
+        overrides["COMPANION_LIVE_BACKEND_MODEL"] = str(companion["live_backend_model"]).strip()
+    if str(companion.get("live_web_search", "")).strip().lower() in base.TALK_LIVE_WEB_SEARCHES:
+        overrides["COMPANION_LIVE_WEB_SEARCH"] = str(companion["live_web_search"]).strip().lower()
+    if "instructions" in companion:
+        overrides["COMPANION_INSTRUCTIONS"] = str(companion["instructions"]).strip()
     if "silence_on_lock" in companion:
         overrides["COMPANION_SILENCE_ON_LOCK"] = bool(companion["silence_on_lock"])
     if "silence_idle_min" in companion:

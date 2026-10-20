@@ -228,7 +228,11 @@ def _spoken_name(name: str) -> str:
 class TalkSession:
     """One spoken conversation, and the text it produces."""
 
-    def __init__(self, write: bool = True) -> None:
+    def __init__(self, write: bool = True,
+                 instructions: Optional[str] = None) -> None:
+        #: standing instructions of their own (the companion's); None = the
+        #: conversation's ``TALK_INSTRUCTIONS``
+        self.instructions = instructions
         #: True for F6 — the conversation is a briefing that ends in one written
         #: text. False for F4 — an open conversation about what is on screen,
         #: with no writing phase: no marker protocol, no depth clause, no
@@ -333,11 +337,13 @@ class TalkSession:
         """
         cfg = config_module.CFG
         parts = [cfg.TALK_SYSTEM_PROMPT if self.write else cfg.TALK_CHAT_PROMPT]
-        if cfg.TALK_INSTRUCTIONS.strip():
+        standing = (cfg.TALK_INSTRUCTIONS if self.instructions is None
+                    else self.instructions).strip()
+        if standing:
             # Before the protocol clauses, not after: the user sets the persona,
             # the language and the tone — not whether the marker exists.
             parts.append("Standing instructions from the user. They override the "
-                         "style guidance above:\n" + cfg.TALK_INSTRUCTIONS.strip())
+                         "style guidance above:\n" + standing)
         if self.desks.chat_tools:
             parts.extend([NO_FALSE_DONE, ACT_DIRECTLY])
         parts.append(memory.clause())
