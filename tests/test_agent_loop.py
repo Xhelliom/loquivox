@@ -157,13 +157,6 @@ try:
     assert reply.text == "Le lot 13 est prêt." and not reply.done, reply
     print("✓ a lead-in before tool calls is said first, not again, without the marker")
 
-    # 4d. a reply the user cut in on is not kept as heard
-    reply = session.add_assistant("Explication jamais dite.")
-    assert session.turns[-1]["content"] == "Explication jamais dite."
-    session.forget(reply)
-    assert all(t["content"] != "Explication jamais dite." for t in session.turns)
-    print("✓ a reply that was never said is forgotten")
-
     # 4e. a lead-in the user cut in on stops the loop: no more reads, nothing kept
     session = TalkSession()
     session.add_user("où en est le lot ?")

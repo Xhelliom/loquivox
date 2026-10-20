@@ -529,11 +529,6 @@ class TalkSession:
             self.turns.append({"role": "assistant", "content": clean})
         return TalkReply(clean, done)
 
-    def forget(self, reply: TalkReply) -> None:
-        """Drop a reply that was recorded but never said (the user had cut in)."""
-        if reply.text and self.turns and self.turns[-1] == {"role": "assistant", "content": reply.text}:
-            self.turns.pop()
-
     def mark_interrupted(self) -> None:
         """
         Note that the user talked over the last reply, so the model does not
