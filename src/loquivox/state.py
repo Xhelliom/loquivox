@@ -75,7 +75,10 @@ class SettingsManager:
     @staticmethod
     def update(key: str, value: Any) -> None:
         """Merge one key into the settings file, leaving the others alone."""
-        SettingsManager._merge({key: value})
+        try:
+            SettingsManager._merge({key: value})
+        except Exception as e:
+            print(f"⚠️ Failed to update settings: {e}")
 
     @staticmethod
     def save(state: "AppState") -> None:

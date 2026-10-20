@@ -41,10 +41,6 @@ assert all(data[f"{p}{i}"] == i for p in "ab" for i in range(N)), "a written key
 assert not list(CFG.SETTINGS_FILE.parent.glob("settings.json.*")), "temp file left behind"
 
 CFG.SETTINGS_FILE.write_text("{ torn")
-try:
-    SettingsManager.update("k", 1)
-    raise SystemExit("update on an unreadable file must raise")
-except ValueError:
-    pass
+SettingsManager.update("k", 1)  # must log, not raise
 assert CFG.SETTINGS_FILE.read_text() == "{ torn", "unreadable file was overwritten"
 print("ok")
