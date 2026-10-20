@@ -1468,7 +1468,7 @@ class SettingsDialog:
             cls._set_models_status(_("⚠️ Both models need an id."))
             return
         search = text(cls._research_model)
-        if not search:
+        if not search and config_module.CFG.TALK_RESEARCH:
             cls._set_models_status(_("⚠️ The search needs a model id."))
             return
         try:
@@ -2605,6 +2605,13 @@ class SettingsDialog:
         check = getattr(cls, "_talk_free_kbd_check", None)
         if check is not None and cls._instance is not None:
             check.set_active(bool(config_module.CFG.TALK_FREE_KEYBOARD))
+
+    @classmethod
+    def sync_tts_switch(cls) -> None:
+        """Put the read-aloud box back in step with ``STATE`` after F10 flipped it."""
+        check = cls._tts_enabled_check
+        if check is not None and cls._instance is not None:
+            check.set_active(bool(STATE.tts_enabled))
 
     @classmethod
     def _on_apply_talk(cls, _btn: Gtk.Button) -> None:

@@ -254,3 +254,6 @@ class TTSService:
         # Late import to avoid circular dependency
         from loquivox.managers.chat import ChatManager
         ChatManager.refresh_overlay()
+        # An open Settings dialog would write its stale box back on Apply.
+        from loquivox.ui.settings_dialog import SettingsDialog
+        SettingsDialog.sync_tts_switch()

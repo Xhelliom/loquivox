@@ -708,6 +708,35 @@ def test_roles_prose_names_the_agent_and_the_chat_jobs():
     print("✓ Models-by-role prose is true")
 
 
+def test_f10_survives_an_apply_of_the_voice_page():
+    """F10 pressed while the dialog is open is not undone by the next Apply."""
+    import tempfile
+    from loquivox import config as config_module, config_io
+    from loquivox.services.tts import TTSService
+    from loquivox.state import STATE
+    from loquivox.managers.chat import ChatManager
+
+    cls = SettingsDialog
+    real_file, real_refresh = config_module.CONFIG_FILE, ChatManager.refresh_overlay
+    before = STATE.tts_enabled
+    ChatManager.refresh_overlay = classmethod(lambda c: None)
+    with tempfile.TemporaryDirectory() as d:
+        config_module.CONFIG_FILE = config_io.CONFIG_FILE = Path(d) / "config.toml"
+        try:
+            cls._tts_enabled_check.set_active(before)
+            TTSService.toggle()  # F10
+            assert STATE.tts_enabled != before
+            cls._talk_speak_check.set_active(not cls._talk_speak_check.get_active())
+            cls._on_apply_voice(None)
+            assert STATE.tts_enabled != before, "Apply undid F10"
+        finally:
+            STATE.tts_enabled = before
+            ChatManager.refresh_overlay = real_refresh
+            config_module.CONFIG_FILE = config_io.CONFIG_FILE = real_file
+            config_module.reload_config()
+    print("✓ F10 survives an Apply of the voice page")
+
+
 def test_no_stale_wording():
     """Rewrite and vision modes are gone, and "hold" alone no longer describes recording."""
     import re
@@ -989,6 +1018,7 @@ if __name__ == "__main__":
     test_models_are_set_in_the_role_table_and_nowhere_else()
     test_the_role_table_applies()
     test_read_aloud_keeps_both_cases_on_the_sound_tab()
+    test_f10_survives_an_apply_of_the_voice_page()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     SettingsDialog._instance.destroy()
