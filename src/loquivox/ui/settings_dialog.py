@@ -100,7 +100,7 @@ class SettingsDialog:
     _chat_model: Optional[Gtk.ComboBoxText] = None
     _vision_model: Optional[Gtk.ComboBoxText] = None
     _agent_provider: Optional[Gtk.ComboBoxText] = None
-    _agent_model: Optional[Gtk.Entry] = None
+    _agent_model: Optional[Gtk.ComboBoxText] = None
     _models_status: Optional[Gtk.Label] = None
     _preset_status: Optional[Gtk.Label] = None
     _engine_combo: Optional[Gtk.ComboBoxText] = None
@@ -508,6 +508,9 @@ class SettingsDialog:
 
         cls._comp_enabled = Gtk.CheckButton(label=_("Start listening when Loquivox launches"))
         cls._comp_enabled.set_active(bool(cfg.COMPANION_ENABLED))
+        # Live fields (Conversation tab) follow this box; its widgets may not exist yet.
+        cls._comp_enabled.connect(
+            "toggled", lambda *_a: cls._on_talk_engine_changed(cls._engine_combo))
         cls._field(body, _("Startup"), cls._comp_enabled, labels)
 
         cls._comp_wake = Gtk.ComboBoxText()
@@ -726,11 +729,12 @@ class SettingsDialog:
         talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
         body = cls._group(
             vbox, _("Chat &amp; vision"),
-            _("Who answers {ai_key} and {talk_key} (the chat model), who reads "
-                       "the screen for them (the vision model) — and who writes the "
-                       "final text, whichever conversation engine is in use. The lists "
-                       "come from the provider itself, so a model your account no "
-                       "longer has stops being offered.").format(ai_key=ai_key, talk_key=talk_key))
+            _("The agent answers {ai_key}, {talk_key} and the companion and runs "
+                       "their tools; the chat model writes the final text, refines "
+                       "your dictation and judges what the memory drops; the vision "
+                       "model reads the screen. The lists come from the provider "
+                       "itself, so a model your account no longer has stops being "
+                       "offered.").format(ai_key=ai_key, talk_key=talk_key))
 
         provider = Gtk.ComboBoxText()
         for pid in config_module.CFG.AI_PROVIDERS:
@@ -753,9 +757,9 @@ class SettingsDialog:
                                      if STATE.ai_agent_provider in config_module.CFG.AI_PROVIDERS else "")
         cls._agent_provider = agent_provider
         cls._field(body, _("Agent provider"), agent_provider, labels)
-        cls._agent_model = Gtk.Entry()
-        cls._agent_model.set_placeholder_text(_("Same as chat"))
-        cls._agent_model.set_text(STATE.ai_agent_model)
+        cls._agent_model = Gtk.ComboBoxText.new_with_entry()   # empty = the chat's model
+        cls._agent_model.get_child().set_placeholder_text(_("Same as chat"))
+        cls._agent_model.get_child().set_text(STATE.ai_agent_model)
         cls._field(body, _("Agent model"), cls._agent_model, labels)
 
         cls._models_status = Gtk.Label()
@@ -763,6 +767,7 @@ class SettingsDialog:
 
         cls._load_models_async()
         provider.connect("changed", cls._on_provider_changed)
+        agent_provider.connect("changed", lambda _c: cls._load_models_async())
 
     # -----------------------------------------------------------------
     # Presets: the four slots, filled in one click
@@ -968,12 +973,18 @@ class SettingsDialog:
 
         engine = (cls._engine_combo.get_active_id() or "cascade"
                   if cls._engine_combo is not None else "cascade")
-        live = engine == "live"
+        # The companion always runs on Live (until it has settings of its own),
+        # so these fields mean something whatever F4/F6 use.
+        # The dialog's own box wins over CFG: it is what Apply will write.
+        box = getattr(cls, "_comp_enabled", None)
+        companion = box.get_active() if box is not None else bool(config_module.CFG.COMPANION_ENABLED)
+        live = engine == "live" or companion
         to_openai = (cls._live_delegation is not None
                      and resolve_delegation(cls._live_delegation.get_active_id())
                      == "responses")
         for widget, on in (
                 (cls._talk_semantic_check, engine == "cascade"),
+                (cls._talk_speak_check, engine == "cascade"),
                 (cls._realtime_model, engine == "realtime"),
                 (cls._realtime_voice, engine == "realtime"),
                 (cls._realtime_test, engine == "realtime"),
@@ -1159,32 +1170,42 @@ class SettingsDialog:
         """Fill both combos from ``models.list()`` — off-thread, it is a network call."""
         import threading
         provider = STATE.ai_provider
+        agent_pid = (cls._agent_provider.get_active_id() if cls._agent_provider else "") or provider
         cls._set_models_status(_("⏳ Listing {provider} models…").format(provider=provider))
 
         def work():
             from gi.repository import GLib
             from loquivox.api import get_ai_client
-            try:
-                ids = sorted(m.id for m in get_ai_client(provider).models.list().data)
-                error = None
-            except Exception as e:
-                ids, error = [], str(e)
+
+            def listing(pid):
+                try:
+                    return sorted(m.id for m in get_ai_client(pid).models.list().data), None
+                except Exception as e:
+                    return [], str(e)
+
+            ids, error = listing(provider)
+            agent_ids, agent_error = (ids, error) if agent_pid == provider else listing(agent_pid)
 
             def done():
-                for combo, current in ((cls._chat_model, STATE.ai_chat_model),
-                                       (cls._vision_model, STATE.ai_vision_model)):
+                for combo, current, found in (
+                        (cls._chat_model, STATE.ai_chat_model, ids),
+                        (cls._vision_model, STATE.ai_vision_model, ids),
+                        (cls._agent_model, STATE.ai_agent_model, agent_ids)):
                     if combo is None:
                         continue
+                    typed = combo.get_child().get_text() or current
                     combo.remove_all()
-                    for mid in ids:
+                    for mid in found:
                         combo.append_text(mid)
-                    combo.get_child().set_text(current)
-                if error:
-                    cls._set_models_status(_("⚠️ Could not list models — {v0}").format(v0=error[:120]))
+                    combo.get_child().set_text(typed)
+                failure = error or agent_error
+                if failure:
+                    cls._set_models_status(_("⚠️ Could not list models — {v0}").format(v0=failure[:120]))
                 else:
                     cls._set_models_status(
                         _("✓ {v0} models available on {provider}. Pick or type one, then "
-                                   "Apply.").format(v0=len(ids), provider=provider))
+                                   "Apply. An empty agent model follows the chat model.").format(
+                            v0=len(ids), provider=provider))
                 return False
 
             GLib.idle_add(done)
@@ -1206,10 +1227,12 @@ class SettingsDialog:
             return
         STATE.ai_chat_model, STATE.ai_vision_model = chat, vision
         STATE.ai_agent_provider = cls._agent_provider.get_active_id() or ""
-        STATE.ai_agent_model = cls._agent_model.get_text().strip()
+        STATE.ai_agent_model = cls._agent_model.get_child().get_text().strip()
         SettingsManager.save(STATE)
         print(f"🧠 Models applied: chat={chat} vision={vision} ({STATE.ai_provider})")
-        cls._set_models_status(_("✓ Applied — chat {chat}, vision {vision}.").format(chat=chat, vision=vision))
+        cls._set_models_status(_("✓ Applied — chat {chat}, vision {vision}, agent {agent}.").format(
+            chat=chat, vision=vision,
+            agent=STATE.ai_agent_model or _("Same as chat").lower()))
 
     # -----------------------------------------------------------------
     # Appearance tab: TTS voice + colour scheme gallery + overlay preview
@@ -2178,8 +2201,10 @@ class SettingsDialog:
             _("Most of what you are about to dictate is already on your screen. "
             "The focused window is captured when the session starts, in "
             "parallel with your first sentence, and described by the vision "
-            "model; <b>S</b> looks again once something has changed. Off by "
-            "default — that window leaves the machine each time."))
+            "model; <b>S</b> looks again once something has changed. {ai_key} and "
+            "the companion always capture; the box below only decides it for "
+            "{talk_key}, and is off by default. Each time, that window leaves "
+            "the machine.").format(ai_key=ai_key, talk_key=talk_key))
 
         cls._talk_shot_check = Gtk.CheckButton(
             label=_("Let the assistant see what you are working in"))
@@ -2287,17 +2312,14 @@ class SettingsDialog:
     @classmethod
     def _update_talk_sensitivity(cls) -> None:
         """
-        Grey out what the choices above make meaningless: the framing controls
-        while the capture is off, the box width unless the capture is a box
+        Grey out what the choices above make meaningless: the box width unless the capture is a box
         around the cursor, and the cutting-in margin unless the anti-echo
         measures an echo (``speakers``) — every other mode never reads it.
         """
-        shot = bool(cls._talk_shot_check.get_active())
         cursor = cls._talk_shot_region.get_active_id() == "cursor"
-        for widget, on in ((cls._talk_shot_region, shot),
-                           (cls._talk_shot_cursor, shot and cursor),
-                           (cls._talk_shot_max, shot),
-                           (cls._talk_shot_clip, shot),
+        # The box only decides whether F6 captures: F4 and the companion always
+        # do, so the framing controls stay live.
+        for widget, on in ((cls._talk_shot_cursor, cursor),
                            (cls._talk_barge_margin,
                             cls._talk_echo_guard.get_active_id() == "speakers")):
             if widget is not None:

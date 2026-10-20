@@ -1097,6 +1097,15 @@ through the same `redact()`.
   French line to `locale_fr.py`; `tests/test_i18n.py` fails on a missing one,
   on a dead one, on a placeholder that drifted, and on a bare literal handed to
   a GTK label. Never bind `_` as a throwaway variable in these modules.
+- **A field is greyed only when it really has no effect** (audit
+  `docs/audits/2026-10-20-reglages-v2.md`): the Live voice/delegation stay live
+  while `COMPANION_ENABLED` (the companion always runs on Live); the screen
+  framing stays live whatever the F6 box says (F4 and the companion always
+  capture); "read replies aloud" is cascade-only and greyed elsewhere;
+  `resolve_delegation("auto")` reads `STATE.ai_provider`, the provider Settings
+  writes, not `[models] provider`. The agent model is a combo listed from its
+  provider (empty = the chat's), and the Anthropic client sends
+  `anthropic-version` or `models.list()` is refused.
 - Every page in `settings_dialog.py` is built from three helpers, never by
   hand: `_group()` (a title, one dim line of prose, a framed body), `_field()`
   (one label → control row, joined to the page's `Gtk.SizeGroup` so the label
