@@ -164,6 +164,24 @@ try:
     assert all(t["content"] != "Explication jamais dite." for t in session.turns)
     print("✓ a reply that was never said is forgotten")
 
+    # 4e. a lead-in the user cut in on stops the loop: no more reads, nothing kept
+    session = TalkSession()
+    session.add_user("où en est le lot ?")
+    rounds = []
+
+    def chatty(messages, on_delta=None, tools=None, tool_calls_out=None, **kw):
+        rounds.append(1)
+        tool_calls_out.extend([call("find_lot", project="x")])
+        return f"Je regarde {len(rounds)}."
+    ai_module.AIService.complete = staticmethod(chatty)
+    try:
+        reply = session._answer(None, lambda t: False)
+    finally:
+        ai_module.AIService.complete = fake_real
+    assert reply is None and len(rounds) == 1, (reply, rounds)
+    assert all("Je regarde" not in (t["content"] or "") for t in session.turns), session.turns
+    print("✓ a cut lead-in stops the loop and is not kept in the turns")
+
     # 5. the loop names no provider or model
     src = (ROOT / "src/loquivox/services/talk.py").read_text()
     body = src[src.index("def _with_tools"):src.index("def consult")]

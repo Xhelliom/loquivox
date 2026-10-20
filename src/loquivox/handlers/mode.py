@@ -784,20 +784,19 @@ class ModeHandler:
                     """Speak a sentence now (a lead-in before tool calls, or the reply)."""
                     nonlocal prefix
                     if cut:            # the user cut in: nothing more is said over them
-                        return
+                        return False
                     ChatManager.add_message("assistant", text)
                     OverlayManager.set_status(_("Speaking…"))
                     prefix = ModeHandler._talk_speak(text, taken)
                     if prefix is not None:
                         cut.append(1)
                         session.mark_interrupted()
+                        return False
+                    return True
                 reply = session.reply_with_result(
                     message, on_delta=lambda t: ChatManager.stream("assistant", t), say=_say)
                 if reply is not None and reply.text:
-                    if cut:   # `_say` would stay silent: the model must not think it was heard
-                        session.forget(reply)
-                    else:
-                        _say(reply.text)
+                    _say(reply.text)   # a cut lead-in returned None above: `cut` is empty here
                 continue
 
             text = ModeHandler._talk_transcribe(audio)
@@ -987,14 +986,14 @@ class ModeHandler:
             t0 = taken.pop()
 
             def _measure():
-                if started.wait(30):
+                # TTS off also sets `started` (to free waiters): that is silence, not a first word
+                if started.wait(30) and (cfg.TALK_SPEAK_REPLIES or STATE.tts_enabled):
                     print(f"⏱️  first words {time.monotonic() - t0:.1f}s after the notification was handed over")
             threading.Thread(target=_measure, daemon=True).start()
         if reply_blocks_mic(cfg.TALK_BARGE_IN, cfg.TALK_ECHO_GUARD):
             # Blocking on purpose: the next turn starts recording the moment
             # this returns, and must not capture the assistant's own voice.
             TTSService.speak(text, wait=True, force=cfg.TALK_SPEAK_REPLIES, started=started)
-            started.set()   # never leave the measure waiting (TTS off)
             return None
 
         stop = threading.Event()

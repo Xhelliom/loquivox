@@ -604,7 +604,7 @@ sentence first, then the lookups with that server's read-only tools, then what /
 why / impact / advice in two or three sentences, then wait — acting only through
 the confirmed tools. The core names no tool. `Desk.take` prints how long the
 notification waited, and the cascade prints the time to the first words
-(`⏱️`), the figures to compare with the ~25 s of a wake-up.
+(`⏱️`; the « first words » measure exists in the cascade only), the figures to compare with the ~25 s of a wake-up.
 
 Under Live, a source costs two things the tool route never needed.
 `realtime_tools_except` checks `is_tool` like the other lists — without it a

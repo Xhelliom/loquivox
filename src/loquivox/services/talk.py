@@ -430,7 +430,9 @@ class TalkSession:
         ``say``: what a round writes *before* its tool calls ("Il demande
         … je regarde") is handed to it at once, so a short first
         sentence is spoken before the reads start (``say`` is synchronous: they
-        wait for it), and it is kept in the turns.
+        wait for it), and it is kept in the turns once heard. ``say`` returning
+        False means the user cut in: the loop stops at once (None) and the
+        lead-in is not kept, so no further read runs while the microphone is shut.
         The returned answer is only the last round's, so nothing is said twice.
         """
         cfg = config_module.CFG
@@ -454,8 +456,9 @@ class TalkSession:
                 return answer if (answer or "").strip() else NOT_DONE
             lead = _strip_marker(answer or "")
             if lead and say is not None:
+                if say(lead) is False:   # cut in on: stop, nothing of this turn is kept
+                    return None
                 self.turns.append({"role": "assistant", "content": lead})
-                say(lead)
             exchange.append({"role": "assistant", "content": answer or None,
                              "tool_calls": [{"id": c["id"], "type": "function",
                                              "function": {"name": c["name"],
