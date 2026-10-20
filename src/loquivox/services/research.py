@@ -26,7 +26,7 @@ from typing import Any, Dict
 
 import loquivox.config as config_module
 from loquivox.i18n import N_, _
-from loquivox.services.plugins import Plugin, register
+from loquivox.services.plugins import FAILED, Plugin, register
 
 _PROMPT = (
     "You answer a question asked out loud in the middle of a conversation, so "
@@ -42,13 +42,14 @@ _PROMPT = (
 _CITATION_RE = re.compile(r"\s*\(\s*\[[^\]]*\]\([^)]*\)\s*\)")   # ([site](url))
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")                     # [text](url) → text
 _URL_RE = re.compile(r"https?://\S+")
-
+_MARK_RE = re.compile(r"【[^】]*】")                                  # gpt-oss browse marks 【1†L4-L8】
 
 def spoken(text: str) -> str:
     """
     Strip what a voice cannot say: markdown links and bare URLs. The prompt
     asks for none, and the web_search tool appends citations anyway.
     """
+    text = _MARK_RE.sub("", text)
     text = _CITATION_RE.sub("", text)
     text = _LINK_RE.sub(r"\1", text)
     text = re.sub(r"(\d) \.(\d)", r"\1.\2", text)  # compound writes "3 .14 .7"
@@ -73,18 +74,21 @@ def run_research(question: str) -> str:
             text = (response.output_text or "").strip()
         else:
             # Groq's compound models search on their own; no tool to declare.
+            # gpt-oss browses through Groq's browser_search tool; compound ones need none.
+            extra = ({"tools": [{"type": "browser_search"}]}
+                     if cfg.MODEL_RESEARCH.startswith("openai/gpt-oss") else {})
             response = get_ai_client("groq").chat.completions.create(
-                model=cfg.MODEL_RESEARCH,
+                model=cfg.MODEL_RESEARCH, **extra,
                 messages=[{"role": "system", "content": _PROMPT},
                           {"role": "user", "content": question}])
             text = (response.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"⚠️  Research failed ({time.time() - started:.1f}s): {e}")
-        return f"The research could not be done ({e.__class__.__name__}). Say so."
+        return f"{FAILED}{e.__class__.__name__}: {str(e)[:120]}"
     text = spoken(text)
     print(f"🔎 Research ({time.time() - started:.1f}s): {text[:100]}"
           f"{'…' if len(text) > 100 else ''}")
-    return text or "The research came back empty. Say so."
+    return text or f"{FAILED}empty answer"
 
 
 # --- the plugin -----------------------------------------------------------
@@ -110,6 +114,15 @@ def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
     Kept in the session's turns too, so the writing pass and the rest of the
     conversation have the facts, not just the reply that mentioned them.
     """
+    if result.startswith(FAILED):   # plugins.FAILED: Desk.execute reads the status from it
+        # the first line is what the agent loop speaks (talk.py reads ÉCHEC : (.*)):
+        # the reason alone; the instruction to the model goes after the newline
+        why = result[len(FAILED):].strip().splitlines()[0][:120] if result[len(FAILED):].strip() else "?"
+        return {"role": "system", "content": (
+            f"{FAILED}{why}\n"
+            f"The web search for « {question_of(arguments)} » failed. "
+            "Tell the user in one sentence that you could not search, and do NOT "
+            "answer the question from memory or guess: you have no verified fact.")}
     return {"role": "system", "content": (
         f"RESEARCH RESULT for « {question_of(arguments)} »:\n{result}\n\n"
         "Tell the user you have the answer and give it in a few spoken "
@@ -236,16 +249,55 @@ register(PLUGIN)
 
 
 if __name__ == "__main__":
+    from loquivox.services import plugins
     assert question_of({"question": " Who won? "}) == "Who won?"
     assert question_of({}) == ""
     assert PLUGIN.chat_tool["function"]["name"] == "research"
     assert PLUGIN.realtime_tool["name"] == "research"
     assert result_message({"question": "q"}, "r")["role"] == "system"
     assert "q" in result_message({"question": "q"}, "r")["content"]
+    assert "could not search" in result_message({"question": "q"}, FAILED + "X")["content"]
     assert _run({"question": ""}) == "", "an empty question reached the provider"
     assert PLUGIN.note({"question": "x"}) and not PLUGIN.note({})
     assert spoken("Python 3.14.7 est sortie. ([python.org](https://x.y/z)) Voir https://a.b aussi.") \
         == "Python 3.14.7 est sortie. Voir aussi."
     assert spoken("selon [le site](https://x) officiel") == "selon le site officiel"
+    assert spoken("Python 3.15.0【1†L4-L8】.") == "Python 3.15.0."
     assert spoken("la 3 .14 .7") == "la 3.14.7"
+    # the default model gets Groq's browser_search tool, and a failure is "failed" to the agent loop
+    from types import SimpleNamespace as NS
+    import sys
+    seen = {}
+
+    def fake_client(_provider):
+        def create(**kw):
+            seen.update(kw)
+            if seen.get("boom"):
+                raise RuntimeError("model_not_found")
+            return NS(choices=[NS(message=NS(content="Elle est fusionnée."))])
+        return NS(chat=NS(completions=NS(create=create)))
+    real = sys.modules.get("loquivox.api")
+    sys.modules["loquivox.api"] = NS(get_ai_client=fake_client)   # no groq SDK needed
+    try:
+        import dataclasses, re
+        # the dataclass default, whatever the operator's config.toml says
+        real_cfg = config_module.CFG
+        default = config_module.Config()
+        config_module.CFG = dataclasses.replace(
+            real_cfg, RESEARCH_PROVIDER=default.RESEARCH_PROVIDER, MODEL_RESEARCH=default.MODEL_RESEARCH)
+        try:
+            assert run_research("q") == "Elle est fusionnée."
+            assert seen["tools"] == [{"type": "browser_search"}], seen
+        finally:
+            config_module.CFG = real_cfg
+        # what talk.py speaks from a failure is the reason alone
+        said = re.search(re.escape(FAILED) + r"(.*)", result_message({"question": "q"}, FAILED + "model_not_found")["content"])
+        assert said.group(1).strip() == "model_not_found", said.group(1)
+        desk = plugins.Desk(dataclasses.replace(PLUGIN, note=None))   # no bubble in a self-check
+        seen["boom"] = True
+        status, content, _q = desk.execute('{"question": "q"}')
+        assert status == "failed" and "model_not_found" in content, (status, content)
+    finally:
+        if real: sys.modules["loquivox.api"] = real
+        else: del sys.modules["loquivox.api"]
     print("✓ research plugin OK")

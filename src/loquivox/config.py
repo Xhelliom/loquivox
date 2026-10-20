@@ -171,9 +171,9 @@ class Config:
     #: the web: OpenAI's Responses API + web_search, or a Groq compound model.
     RESEARCH_PROVIDER: str = "groq"
     RESEARCH_PROVIDERS: Tuple[str, ...] = ("openai", "groq")
-    MODEL_RESEARCH: str = "groq/compound-mini"
+    MODEL_RESEARCH: str = "openai/gpt-oss-120b"
     RESEARCH_DEFAULT_MODELS: Dict[str, str] = field(default_factory=lambda: {
-        "openai": "gpt-5-mini", "groq": "groq/compound-mini"})
+        "openai": "gpt-5-mini", "groq": "openai/gpt-oss-120b"})
     MODEL_WHISPER: str = "whisper-large-v3"
     MODEL_TTS: str = "canopylabs/orpheus-v1-english"
 
