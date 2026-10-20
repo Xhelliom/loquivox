@@ -54,8 +54,8 @@ if kind == "board":
 
     @tool(False)
     def find_lot(project: str) -> str:
-        """Read the project's current lot number."""
-        return f"The current lot of {project} is 13."
+        """Read the next lot to launch of a project."""
+        return f"The next lot to launch of {project} is 13."
 
     @tool(False)
     def project_status(project: str) -> str:

@@ -118,8 +118,11 @@ say = "lance le lot 3 du projet fantome"
 calls = [{ tool = "board.launch_lot", args = { project = "fantome" } }]
 [[scenario.turns]]
 say = "oui"
-executed = ["launch_lot"]
-reply_matches = "fail|échou|erreur|impossible|unknown|inconnu"
+# the tool runs and fails, or the model honestly refuses an unknown project:
+# either way nothing may be reported as launched (reply_avoids)
+may_execute = ["launch_lot"]
+reply_matches = "fail|échou|erreur|impossible|unknown|inconnu|n'existe|pas (de|trouv)|introuvable|ne peux pas"
+reply_avoids = "(?i)c'est (fait|lancé)|launched|started"
 
 [[scenario]]
 name = "un outil absent"

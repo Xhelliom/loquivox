@@ -43,7 +43,7 @@ import loquivox.config as config_module
 from loquivox.services.ai import TEXT_ONLY, AIService
 from loquivox.services import memory
 from loquivox.i18n import _
-from loquivox.services.plugins import FAILED, NO_FALSE_DONE, Desks
+from loquivox.services.plugins import ACT_DIRECTLY, FAILED, NO_FALSE_DONE, Desks
 
 #: what the model appends to its reply to hand the floor to the writing phase
 FINISH_MARKER: str = "[[WRITE]]"
@@ -339,7 +339,7 @@ class TalkSession:
             parts.append("Standing instructions from the user. They override the "
                          "style guidance above:\n" + cfg.TALK_INSTRUCTIONS.strip())
         if self.desks.chat_tools:
-            parts.append(NO_FALSE_DONE)
+            parts.extend([NO_FALSE_DONE, ACT_DIRECTLY])
         parts.append(memory.clause())
         if self.write:
             parts.append(_DEPTH_PROMPTS.get(cfg.TALK_DEPTH, _DEPTH_PROMPTS["normal"]))
@@ -510,7 +510,8 @@ class TalkSession:
         cfg = config_module.CFG
         base = ([{"role": "system",
                   "content": "\n\n".join(
-                      [cfg.TALK_LIVE_BACKEND_PROMPT, NO_FALSE_DONE, memory.clause()]).strip()}]
+                      [cfg.TALK_LIVE_BACKEND_PROMPT, NO_FALSE_DONE, ACT_DIRECTLY,
+                       memory.clause()]).strip()}]
                 + self._context_messages() + self._spoken_to())
         return self._with_tools(base, None)
 

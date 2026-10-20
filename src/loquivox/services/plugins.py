@@ -104,6 +104,16 @@ NO_FALSE_DONE = (
     "\"sent\".")
 
 
+#: appended next to NO_FALSE_DONE: the yes belongs to the system, not the model
+ACT_DIRECTLY = (
+    "A tool that acts is called directly, as soon as the user asks. The "
+    "system itself asks the user for the spoken yes, with the exact action "
+    "frozen. Never ask for a confirmation yourself in text (\"do you "
+    "confirm?\"): that skips the tool, so nothing is frozen and the yes "
+    "later launches nothing. Call it again with confirmed=true only after the "
+    "user has answered that question with a yes.")
+
+
 #: how a failed call's result opens; ``Desk.execute`` reads the status from it
 FAILED = "ÉCHEC : "
 
