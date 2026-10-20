@@ -520,6 +520,7 @@ def _settings(dialog, vbox, labels) -> None:
 
 
 # A card, no tool: not enabled, so no session ever offers it.
-register(Plugin(name="mcp", enabled=lambda: False, settings=_settings))
+register(Plugin(name="mcp", enabled=lambda: False, settings=_settings,
+                tab="tools/mcp"))
 # Begin them if nobody has, without waiting: this import may run on the GTK thread.
 sync(0.0)

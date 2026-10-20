@@ -249,6 +249,6 @@ PLUGIN = Plugin(
     chat_only=True,
     note=lambda args: _("🔇 Rule saved…"),
     settings=_settings,
-    tab="companion",
+    tab="companion/memory",
 )
 register(PLUGIN)

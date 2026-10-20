@@ -185,6 +185,7 @@ PLUGIN = Plugin(
     note=lambda args: _("✍️ Writing…"),
     result_note=N_("📝 Text written"),
     settings=_settings,
+    tab="tools/writing",
 )
 register(PLUGIN)
 

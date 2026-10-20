@@ -594,6 +594,34 @@ CATALOG = {
         "Réglages de Loquivox",
     "Tools":
         "Outils",
+    "Flow":
+        "Déroulé",
+    "Screen":
+        "Écran",
+    "General":
+        "Général",
+    "Voice & thinking":
+        "Voix et réflexion",
+    "Presence":
+        "Présence",
+    "Memory":
+        "Mémoire",
+    "Sound":
+        "Son",
+    "Microphone & music":
+        "Micro et musique",
+    "Echo guard":
+        "Anti-écho",
+    "Spoken voice":
+        "Voix lue",
+    "Writing & screen":
+        "Écriture et écran",
+    "Models by role":
+        "Modèles par rôle",
+    "Keys":
+        "Clés",
+    "Nothing to set here yet.":
+        "Rien à régler ici pour l'instant.",
     "Models & keys":
         "Modèles et clés",
     "Appearance":

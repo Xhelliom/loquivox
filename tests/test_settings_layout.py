@@ -31,8 +31,35 @@ from loquivox.ui.settings_dialog import SettingsDialog  # noqa: E402
 #: what _create_dialog asks for; nothing may make the window wider than this
 DEFAULT_WIDTH = 640
 
-TABS = ["Dictation", "Conversation", "Companion", "Tools", "Models & keys",
-        "Appearance", "Hotkeys", "Support"]
+#: tab -> its sub-pages (None: a single page), in the documented order
+SUBTABS = {
+    "Dictation": ["Transcription", "Refinement"],
+    "Conversation": ["Engine", "Flow", "Screen"],
+    "Companion": ["General", "Voice & thinking", "Presence", "Notifications",
+                  "Memory"],
+    "Sound": ["Microphone & music", "Echo guard", "Spoken voice"],
+    "Tools": ["Search", "Writing & screen", "MCP servers", "Rules"],
+    "Models & keys": ["Models by role", "Keys", "Presets"],
+    "Appearance": None, "Hotkeys": None, "Support": None,
+}
+TABS = list(SUBTABS)
+
+#: the height a sub-page may ask for, in windows: about a screen and a half
+MAX_SCREENS = 1.5
+
+
+def _leaves(win: Gtk.Window):
+    """(tab, sub-page or None, ScrolledWindow) for every page that scrolls."""
+    nb = _notebook(win)
+    out = []
+    for i, tab in enumerate(TABS):
+        page = nb.get_nth_page(i)
+        if SUBTABS[tab] is None:
+            out.append((tab, None, page))
+            continue
+        for j, sub in enumerate(SUBTABS[tab]):
+            out.append((tab, sub, page.get_nth_page(j)))
+    return out
 
 
 def _notebook(win: Gtk.Window) -> Gtk.Notebook:
@@ -47,6 +74,19 @@ def test_every_tab_builds():
     labels = [nb.get_tab_label_text(nb.get_nth_page(i))
               for i in range(nb.get_n_pages())]
     assert labels == TABS, labels
+    for i, tab in enumerate(TABS):
+        page = nb.get_nth_page(i)
+        if SUBTABS[tab] is None:
+            assert isinstance(page, Gtk.ScrolledWindow), tab
+            continue
+        assert isinstance(page, Gtk.Notebook) and page.get_scrollable(), (
+            f"{tab} is not a scrollable nested notebook")
+        assert page.get_tab_pos() == Gtk.PositionType.TOP, f"{tab}: tabs not on top"
+        subs = [page.get_tab_label_text(page.get_nth_page(j))
+                for j in range(page.get_n_pages())]
+        assert subs == SUBTABS[tab], (tab, subs)
+        assert all(isinstance(page.get_nth_page(j), Gtk.ScrolledWindow)
+                   for j in range(page.get_n_pages())), f"{tab}: a sub-page without its own scroll"
     print(f"✓ {len(labels)} tabs build: {', '.join(labels)}")
 
 
@@ -71,15 +111,55 @@ def test_label_columns_align():
     """Every page puts its label column at one x, across separate cards."""
     win = SettingsDialog._instance
     nb = _notebook(win)
-    for i in range(nb.get_n_pages()):
+    for i, tab in enumerate(TABS):
         nb.set_current_page(i)
-        win.show_all()
-        while Gtk.events_pending():
-            Gtk.main_iteration()
-        widths = _field_label_widths(nb.get_nth_page(i))
-        assert len(set(widths)) <= 1, (
-            f"tab {TABS[i]} has ragged label columns: {sorted(set(widths))}")
-    print("✓ label columns align on every tab")
+        inner = nb.get_nth_page(i)
+        for j in range(inner.get_n_pages() if SUBTABS[tab] else 0):
+            inner.set_current_page(j)
+            win.show_all()
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            widths = _field_label_widths(inner.get_nth_page(j))
+            assert len(set(widths)) <= 1, (
+                f"{tab} › {SUBTABS[tab][j]} has ragged label columns: "
+                f"{sorted(set(widths))}")
+        if SUBTABS[tab] is None:
+            win.show_all()
+            while Gtk.events_pending():
+                Gtk.main_iteration()
+            widths = _field_label_widths(inner)
+            assert len(set(widths)) <= 1, (
+                f"tab {tab} has ragged label columns: {sorted(set(widths))}")
+    print("✓ label columns align on every sub-page")
+
+
+def test_no_subpage_needs_more_than_a_screen_and_a_half():
+    """Splitting is the point: no sub-page may ask for a long scroll."""
+    win = SettingsDialog._instance
+    _w, height = win.get_size()
+    too_tall = []
+    for tab, sub, sw in _leaves(win):
+        natural = sw.get_child().get_preferred_height()[1]   # the page body
+        if natural > MAX_SCREENS * height:
+            too_tall.append(f"{tab} › {sub or '-'}: {natural}px")
+    assert not too_tall, f"over {MAX_SCREENS} screens of {height}px: {too_tall}"
+    print(f"✓ every sub-page fits in {MAX_SCREENS} screens")
+
+
+def test_a_plugin_can_aim_at_a_subpage():
+    """Plugin.tab "tab/sub" lands the card on that sub-page; a bare tab, on its first."""
+    from loquivox.services import plugins
+    seen = []
+    win = SettingsDialog._instance
+    for tab, sub, sw in _leaves(win):
+        if tab == "Companion" and sub == "Memory":
+            assert "no longer repeats" in " ".join(
+                w.get_label() for w in _widgets(sw) if isinstance(w, Gtk.Label))
+            seen.append("memory")
+    assert seen == ["memory"]
+    assert {p.tab for p in plugins.all_plugins() if p.settings} >= {
+        "companion/memory", "tools/search"}
+    print("✓ plugin cards reach their sub-page")
 
 
 def _field_label_widths(widget, found=None):
@@ -211,22 +291,21 @@ def test_wheel_over_a_control_scrolls_the_page():
     could only be scrolled along its edge.
     """
     win = SettingsDialog._instance
-    nb = _notebook(win)
     checked = 0
-    for i in range(nb.get_n_pages()):
-        page = nb.get_nth_page(i)          # the ScrolledWindow itself
+    for tab, sub, page in _leaves(win):    # the ScrolledWindow itself
+        where = f"{tab} › {sub}" if sub else tab
         reached = []
         page.connect("scroll-event", lambda *a: reached.append(True))
         controls = _scroll_hungry(page)
         for w in controls:
             before = _value_of(w)
             assert w.emit("scroll-event", _wheel(win)), (
-                f"{type(w).__name__} on tab {TABS[i]} still handles the wheel")
+                f"{type(w).__name__} on {where} still handles the wheel")
             assert _value_of(w) == before, (
-                f"{type(w).__name__} on tab {TABS[i]} changed value on scroll")
+                f"{type(w).__name__} on {where} changed value on scroll")
             checked += 1
         assert reached or not controls, (
-            f"tab {TABS[i]}: the wheel never reached the page")
+            f"{where}: the wheel never reached the page")
     print(f"\u2713 {checked} controls pass the wheel through to the page")
 
 
@@ -360,8 +439,7 @@ def test_conversation_settings_say_where_they_apply():
 
 
 def _tab(name: str) -> Gtk.Widget:
-    nb = _notebook(SettingsDialog._instance)
-    return nb.get_nth_page(TABS.index(name))
+    return _notebook(SettingsDialog._instance).get_nth_page(TABS.index(name))
 
 
 def _widgets(widget, found=None):
@@ -392,15 +470,15 @@ def test_settings_live_where_they_are_used():
     cls = SettingsDialog
     for attr, tab in (("_toggle_mode_check", "Dictation"),
                       ("_chat_enabled_check", "Appearance"),
-                      ("_tts_enabled_check", "Models & keys"),
+                      ("_tts_enabled_check", "Sound"),
                       ("_engine_combo", "Conversation"),
                       ("_talk_semantic_check", "Conversation"),
-                      ("_media_combo", "Companion"),
-                      ("_media_duck_scale", "Companion"),
-                      ("_comp_duck_ai", "Companion"),
+                      ("_media_combo", "Sound"),
+                      ("_media_duck_scale", "Sound"),
+                      ("_comp_duck_ai", "Sound"),
                       ("_backend_combo", "Dictation"),
                       ("_pp_scale", "Dictation"),
-                      ("_voice_combo", "Models & keys")):
+                      ("_voice_combo", "Sound")):
         assert _on_tab(getattr(cls, attr), tab), f"{attr} is not on {tab}"
     assert _on_tab(_control("Models & keys", "Provider"), "Models & keys")
     assert not any(_on_tab(w, "Models & keys") for w in (cls._engine_combo,))
@@ -619,6 +697,8 @@ if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
     test_label_columns_align()
+    test_no_subpage_needs_more_than_a_screen_and_a_half()
+    test_a_plugin_can_aim_at_a_subpage()
     test_one_apply_button_outside_the_scroll()
     test_apply_runs_every_tab()
     test_handlers_find_their_widgets()

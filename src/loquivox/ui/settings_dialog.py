@@ -177,19 +177,7 @@ class SettingsDialog:
             getattr(notebook, f"set_margin_{m}")(12)
 
         cls._appliers = []   # the pages fill it back in as they are built
-        for label, build in (
-            (N_("Dictation"), cls._build_dictation_page),
-            (N_("Conversation"), cls._build_conversation_page),
-            (N_("Companion"), cls._build_companion_page),
-            (N_("Tools"), cls._build_tools_page),
-            (N_("Models & keys"), cls._build_models_page),
-            (N_("Appearance"), cls._build_appearance_page),
-            (N_("Hotkeys"), cls._build_hotkeys_section),
-            (N_("Support"), cls._build_support_page),
-        ):
-            page = cls._page()
-            build(page)
-            notebook.append_page(cls._scroll(page), Gtk.Label(label=_(label)))
+        cls._build_tabs(notebook)
 
         root.pack_start(notebook, True, True, 0)
 
@@ -440,47 +428,92 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     # Pages: one per use. Each only assembles groups built further down.
     # -----------------------------------------------------------------
-    @classmethod
-    def _build_dictation_page(cls, vbox: Gtk.Box) -> None:
-        """The ears, how recording starts, and what is done to the text."""
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        cls._build_transcription_section(vbox, labels)
-        cls._build_recording_section(vbox, labels)
-        cls._build_postprocess_section(vbox)
+    #: The window's map: (tab, sub-pages). A tab with sub-pages is a nested
+    #: notebook, tabs along the top (a sidebar would cost 120-160 px of the
+    #: 640 the window has); one without is a single page. A plugin asks for its
+    #: card with ``Plugin.tab = "tab/sub"``, so the dialog names no plugin.
+    _TABS = (
+        (N_("Dictation"), "dictation",
+         (("transcription", N_("Transcription")), ("refinement", N_("Refinement")))),
+        (N_("Conversation"), "conversation",
+         (("engine", N_("Engine")), ("flow", N_("Flow")), ("screen", N_("Screen")))),
+        (N_("Companion"), "companion",
+         (("general", N_("General")), ("voice", N_("Voice & thinking")),
+          ("presence", N_("Presence")), ("notifications", N_("Notifications")),
+          ("memory", N_("Memory")))),
+        (N_("Sound"), "sound",
+         (("mic", N_("Microphone & music")), ("echo", N_("Echo guard")),
+          ("voice", N_("Spoken voice")))),
+        (N_("Tools"), "tools",
+         (("search", N_("Search")), ("writing", N_("Writing & screen")),
+          ("mcp", N_("MCP servers")), ("rules", N_("Rules")))),
+        (N_("Models & keys"), "models",
+         (("roles", N_("Models by role")), ("keys", N_("Keys")),
+          ("presets", N_("Presets")))),
+        (N_("Appearance"), "appearance", None),
+        (N_("Hotkeys"), "hotkeys", None),
+        (N_("Support"), "support", None),
+    )
+
+    #: "tab/sub" -> (page box, its label size group), filled by ``_build_tabs``
+    _subpages: dict = {}
 
     @classmethod
-    def _build_conversation_page(cls, vbox: Gtk.Box) -> None:
+    def _build_tabs(cls, notebook: Gtk.Notebook) -> None:
         """
-        The F4/F6 conversation, whole: the engine and its voice, then how it
-        behaves. They used to sit on two tabs, which is why one checkbox here
-        was greyed out by a combo there.
+        Build every page up front (one Apply must reach all of them), then
+        assemble the notebooks: each page gets its own ScrolledWindow and its
+        own label column, so nothing scrolls or aligns with a neighbour.
         """
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        cls._build_engine_section(vbox, labels)
-        cls._build_talk_section(vbox, labels)
+        cls._subpages = {}
+        for _label, key, subs in cls._TABS:
+            for sub, _sl in subs or (("", ""),):
+                cls._subpages[f"{key}/{sub}" if sub else key] = (
+                    cls._page(), Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL))
 
-    @classmethod
-    def _build_tools_page(cls, vbox: Gtk.Box) -> None:
-        """What the conversation can reach: one card per plugin."""
-        cls._build_plugin_cards(vbox, "tools",
-                                Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL))
+        def at(path: str):
+            return cls._subpages[path]
 
-    @classmethod
-    def _build_models_page(cls, vbox: Gtk.Box) -> None:
-        """
-        Who does the work and with which keys: a preset, the chat/vision
-        provider, the voice that reads answers aloud, the API keys.
+        box, lab = at("dictation/transcription")
+        cls._build_transcription_section(box, lab)
+        cls._build_recording_section(box, lab)
+        cls._build_postprocess_section(at("dictation/refinement")[0])
 
-        One size group for the whole page: the label column lines up across
-        separate cards, which is most of what stops it reading as a heap. The
-        presets reach into the Dictation and Conversation tabs too — the
-        slots live where they are used, the shortcut lives here.
-        """
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        cls._build_presets(vbox)
-        cls._build_chat_section(vbox, labels)            # the brain
-        cls._build_voice_section(vbox, labels)           # the mouth
-        cls._build_api_keys_section(vbox, labels)
+        flow, flow_lab = at("conversation/flow")
+        screen, screen_lab = at("conversation/screen")
+        cls._build_engine_section(*at("conversation/engine"))
+        cls._build_talk_section(flow, flow_lab, screen, screen_lab)
+
+        cls._build_companion_section(*at("companion/general"))
+        cls._build_music_section(*at("sound/mic"))
+        cls._build_voice_section(*at("sound/voice"))
+        # Presets first: they reach into the other tabs' slots, the shortcut lives here.
+        cls._build_presets(at("models/presets")[0])
+        cls._build_chat_section(*at("models/roles"))
+        cls._build_api_keys_section(*at("models/keys"))
+        cls._build_appearance_page(at("appearance")[0])
+        cls._build_hotkeys_section(at("hotkeys")[0])
+        cls._build_support_page(at("support")[0])
+
+        for _label, key, subs in cls._TABS:
+            for i, (sub, _sl) in enumerate(subs or ()):
+                box, lab = at(f"{key}/{sub}")
+                cls._build_plugin_cards(box, f"{key}/{sub}", lab, first=(i == 0))
+                if not box.get_children():
+                    cls._note(box, _("Nothing to set here yet."))
+
+        for label, key, subs in cls._TABS:
+            if subs is None:
+                notebook.append_page(cls._scroll(at(key)[0]),
+                                     Gtk.Label(label=_(label)))
+                continue
+            inner = Gtk.Notebook()
+            inner.set_scrollable(True)
+            inner.set_show_border(False)   # the outer notebook already frames it
+            for sub, sub_label in subs:
+                inner.append_page(cls._scroll(at(f"{key}/{sub}")[0]),
+                                  Gtk.Label(label=_(sub_label)))
+            notebook.append_page(inner, Gtk.Label(label=_(label)))
 
     # -----------------------------------------------------------------
     # Companion tab: the always-present bubble
@@ -489,14 +522,6 @@ class SettingsDialog:
                    "timer", "weather")
     _CLICK_MODES = (("silent", N_("Silence the companion")),
                     ("active", N_("Wake the companion")))
-
-    @classmethod
-    def _build_companion_page(cls, vbox: Gtk.Box) -> None:
-        """Everything about the companion: itself, its sounds, what it forgets."""
-        labels = Gtk.SizeGroup(mode=Gtk.SizeGroupMode.HORIZONTAL)
-        cls._build_companion_section(vbox, labels)
-        cls._build_music_section(vbox, labels)
-        cls._build_plugin_cards(vbox, "companion", labels)
 
     @classmethod
     def _build_companion_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
@@ -702,9 +727,11 @@ class SettingsDialog:
     # Plugin cards: what the conversation can reach beyond the models
     # -----------------------------------------------------------------
     @classmethod
-    def _build_plugin_cards(cls, vbox: Gtk.Box, tab: str, labels: Gtk.SizeGroup) -> None:
+    def _build_plugin_cards(cls, vbox: Gtk.Box, tab: str, labels: Gtk.SizeGroup,
+                            first: bool = False) -> None:
         """
-        One card per plugin that asked for this tab.
+        One card per plugin that asked for this page ("tab/sub"). A plugin that
+        names only the tab ("tools") lands on its first page (``first``).
 
         The dialog knows none of them by name: a plugin hands over a builder
         (see ``services/plugins.py``) and the tab it belongs on, and gets the
@@ -715,7 +742,8 @@ class SettingsDialog:
         from loquivox.services import plugins
 
         for plugin in plugins.all_plugins():
-            if plugin.settings is None or plugin.tab != tab:
+            if plugin.settings is None or not (
+                    plugin.tab == tab or (first and plugin.tab == tab.split("/")[0])):
                 continue
             try:
                 plugin.settings(cls, vbox, labels)
@@ -2031,8 +2059,9 @@ class SettingsDialog:
         return True
 
     @classmethod
-    def _build_talk_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
-        """Conversation knobs: who may end the briefing, and how it converses."""
+    def _build_talk_section(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup,
+                            screen: Gtk.Box, screen_labels: Gtk.SizeGroup) -> None:
+        """Conversation knobs: who may end the briefing, how it converses, what it sees."""
         ai_key = config_module.CFG.HOTKEY_DEFS['ai'][0]
         talk_key = config_module.CFG.HOTKEY_DEFS['talk'][0]
         body = cls._group(
@@ -2197,7 +2226,7 @@ class SettingsDialog:
         body.pack_start(instr_scroll, False, False, 0)
 
         body = cls._group(
-            vbox, _("Screen context"),
+            screen, _("Screen context"),
             _("Most of what you are about to dictate is already on your screen. "
             "The focused window is captured when the session starts, in "
             "parallel with your first sentence, and described by the vision "
@@ -2225,13 +2254,13 @@ class SettingsDialog:
             "as confident nonsense. A session that cannot do the framing you "
             "pick falls back to the whole screen and says so.")
         )
-        cls._field(body, _("Capture"), cls._talk_shot_region, labels)
+        cls._field(body, _("Capture"), cls._talk_shot_region, screen_labels)
         cls._talk_shot_region.connect("changed", lambda _w: cls._update_talk_sensitivity())
 
         cls._talk_shot_cursor = Gtk.SpinButton.new_with_range(200, 7680, 100)
         cls._talk_shot_cursor.set_value(int(config_module.CFG.TALK_SCREENSHOT_CURSOR_PX))
         cls._talk_shot_cursor.set_halign(Gtk.Align.START)
-        cls._field(body, _("Box width (px)"), cls._talk_shot_cursor, labels)
+        cls._field(body, _("Box width (px)"), cls._talk_shot_cursor, screen_labels)
 
         cls._talk_shot_max = Gtk.SpinButton.new_with_range(0, 7680, 128)
         cls._talk_shot_max.set_value(int(config_module.CFG.TALK_SCREENSHOT_MAX_PX))
@@ -2240,7 +2269,7 @@ class SettingsDialog:
             _("Longest edge of the uploaded image — what keeps a 4K capture small. "
             "0 uploads it as captured.")
         )
-        cls._field(body, _("Downscale to (px)"), cls._talk_shot_max, labels)
+        cls._field(body, _("Downscale to (px)"), cls._talk_shot_max, screen_labels)
 
         cls._talk_shot_clip = Gtk.CheckButton(
             label=_("Put back what was on the clipboard afterwards"))
@@ -2255,7 +2284,7 @@ class SettingsDialog:
         body.pack_start(cls._talk_shot_clip, False, False, 0)
         cls._update_talk_sensitivity()
 
-        cls._note(vbox,
+        cls._note(screen,
                   _("Timings, prompts and the turn-detection thresholds live "
                   "under <tt>[talk]</tt> in config.toml."))
 

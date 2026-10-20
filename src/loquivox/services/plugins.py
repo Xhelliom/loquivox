@@ -183,9 +183,9 @@ class Plugin:
     #: class (for ``_group``/``_field``/``_actions``), the page box and its
     #: label size group.
     settings: Optional[Callable[..., None]] = None
-    #: the Settings tab that holds that card — "tools" for a plugin, or
-    #: "companion" for one that is part of the companion's own behaviour. The
-    #: dialog never names a plugin, only the tab it asked for.
+    #: the Settings page that holds that card: "tab/sub-page" ("tools/search",
+    #: "companion/memory"), or a bare tab, which means its first sub-page. The
+    #: dialog never names a plugin, only the page it asked for.
     tab: str = "tools"
     #: a source's own loop, run on a daemon thread for the life of the
     #: companion (``start_sources``), or of the session when it is off. Called with the desk's ``put`` and the event that ends it; it must return once that event is set, and must not raise.

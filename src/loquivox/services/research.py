@@ -244,6 +244,7 @@ PLUGIN = Plugin(
                        if question_of(args) else ""),
     result_note=N_("🔎 Result received — the assistant will tell you"),
     settings=_settings,
+    tab="tools/search",
 )
 register(PLUGIN)
 

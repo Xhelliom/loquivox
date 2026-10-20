@@ -290,4 +290,5 @@ def _settings(dialog, vbox, labels) -> None:
         dialog._field(body, f"{rule['when']}" + (f" {rule['if']}" if rule["if"] else ""), label, labels)
 
 
-register(Plugin(name="rules", enabled=lambda: False, settings=_settings))
+register(Plugin(name="rules", enabled=lambda: False, settings=_settings,
+                tab="tools/rules"))
