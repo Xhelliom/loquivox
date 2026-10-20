@@ -157,6 +157,13 @@ try:
     assert reply.text == "Le lot 13 est prêt." and not reply.done, reply
     print("✓ a lead-in before tool calls is said first, not again, without the marker")
 
+    # 4d. a reply the user cut in on is not kept as heard
+    reply = session.add_assistant("Explication jamais dite.")
+    assert session.turns[-1]["content"] == "Explication jamais dite."
+    session.forget(reply)
+    assert all(t["content"] != "Explication jamais dite." for t in session.turns)
+    print("✓ a reply that was never said is forgotten")
+
     # 5. the loop names no provider or model
     src = (ROOT / "src/loquivox/services/talk.py").read_text()
     body = src[src.index("def _with_tools"):src.index("def consult")]

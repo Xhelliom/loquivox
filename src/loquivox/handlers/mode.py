@@ -794,7 +794,10 @@ class ModeHandler:
                 reply = session.reply_with_result(
                     message, on_delta=lambda t: ChatManager.stream("assistant", t), say=_say)
                 if reply is not None and reply.text:
-                    _say(reply.text)
+                    if cut:   # `_say` would stay silent: the model must not think it was heard
+                        session.forget(reply)
+                    else:
+                        _say(reply.text)
                 continue
 
             text = ModeHandler._talk_transcribe(audio)

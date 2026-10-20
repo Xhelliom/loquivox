@@ -457,10 +457,13 @@ def test_a_source_linked_to_a_server_is_explained_with_its_read_tools():
                                                      stop.wait(30))))
     try:
         session = TalkSession()
-        assert _wait(session.desks.ready)
         said = {}
-        while (found := session.desks.take()) is not None:
-            said[found[0].name] = found[1]["content"]
+
+        def both():
+            while (found := session.desks.take()) is not None:
+                said[found[0].name] = found[1]["content"]
+            return {"linked", "plain"} <= said.keys()
+        assert _wait(both), said
         session.desks.close()
     finally:
         plugins._REGISTRY.pop("linked", None)

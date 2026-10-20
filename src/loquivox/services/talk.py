@@ -429,7 +429,8 @@ class TalkSession:
 
         ``say``: what a round writes *before* its tool calls ("Il demande
         … je regarde") is handed to it at once, so a short first
-        sentence is heard while the reads run, and it is kept in the turns.
+        sentence is spoken before the reads start (``say`` is synchronous: they
+        wait for it), and it is kept in the turns.
         The returned answer is only the last round's, so nothing is said twice.
         """
         cfg = config_module.CFG
@@ -524,6 +525,11 @@ class TalkSession:
         if clean:
             self.turns.append({"role": "assistant", "content": clean})
         return TalkReply(clean, done)
+
+    def forget(self, reply: TalkReply) -> None:
+        """Drop a reply that was recorded but never said (the user had cut in)."""
+        if reply.text and self.turns and self.turns[-1] == {"role": "assistant", "content": reply.text}:
+            self.turns.pop()
 
     def mark_interrupted(self) -> None:
         """
