@@ -115,6 +115,24 @@ def test_redact_anthropic_key():
     print("✓ an Anthropic key never survives the redactor")
 
 
+def test_anthropic_client_sends_its_version_header():
+    import os
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test"
+    api._anthropic_client = None
+    client = api.get_ai_client("anthropic")
+    assert client.default_headers.get("anthropic-version") == "2023-06-01"
+    api._anthropic_client = None
+    print("✓ anthropic client lists models with its version header")
+
+
+def test_auto_delegation_follows_the_provider_picked_in_settings():
+    from loquivox.services.live_talk import resolve_delegation
+    for provider, want in (("openai", "responses"), ("groq", "client"), ("anthropic", "client")):
+        STATE.ai_provider = provider
+        assert resolve_delegation("auto") == want, provider
+    print("✓ auto delegation reads STATE.ai_provider")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

@@ -1005,7 +1005,7 @@ def resolve_delegation(choice: Optional[str] = None) -> str:
         picked = "auto"
     if picked != "auto":
         return picked
-    return "responses" if cfg.AI_PROVIDER == "openai" else "client"
+    return "responses" if STATE.ai_provider == "openai" else "client"
 
 
 if __name__ == "__main__":
@@ -1363,14 +1363,14 @@ if __name__ == "__main__":
     finally:
         config_module.CFG = cfg
 
-    # "auto" follows the configured provider; forcing either overrides it.
+    # "auto" follows the provider Settings picked (STATE); forcing either overrides it.
     for provider, choice, expected in (("groq", "auto", "client"),
                                        ("openai", "auto", "responses"),
                                        ("openai", "client", "client"),
                                        ("groq", "responses", "responses"),
                                        ("groq", "nonsense", "client")):
+        STATE.ai_provider = provider
         config_module.CFG = cfg.__class__(**{**cfg.__dict__,
-                                             "AI_PROVIDER": provider,
                                              "TALK_LIVE_DELEGATION": choice})
         assert resolve_delegation() == expected, (provider, choice)
     config_module.CFG = cfg

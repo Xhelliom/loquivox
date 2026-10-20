@@ -544,8 +544,8 @@ CATALOG = {
         "Exemple :\nTu réponds toujours en français, simplement et sans formalisme. Le contexte est technique : sois précis, et demande une précision plutôt que de deviner. Les seuls mots anglais sont les termes techniques.",
     "Screen context":
         "Contexte d'écran",
-    "Most of what you are about to dictate is already on your screen. The focused window is captured when the session starts, in parallel with your first sentence, and described by the vision model; <b>S</b> looks again once something has changed. Off by default — that window leaves the machine each time.":
-        "L'essentiel de ce que vous allez dicter est déjà à l'écran. La fenêtre au premier plan est capturée au début de la session, en parallèle de votre première phrase, et décrite par le modèle de vision ; <b>S</b> regarde à nouveau quand quelque chose a changé. Désactivé par défaut — cette fenêtre quitte la machine à chaque fois.",
+    "Most of what you are about to dictate is already on your screen. The focused window is captured when the session starts, in parallel with your first sentence, and described by the vision model; <b>S</b> looks again once something has changed. {ai_key} and the companion always capture; the box below only decides it for {talk_key}, and is off by default. Each time, that window leaves the machine.":
+        "L'essentiel de ce que vous allez dicter est déjà à l'écran. La fenêtre au premier plan est capturée au début de la session, en parallèle de votre première phrase, et décrite par le modèle de vision ; <b>S</b> regarde à nouveau quand quelque chose a changé. {ai_key} et le compagnon capturent toujours ; la case ci-dessous ne décide que pour {talk_key}, et elle est décochée par défaut. À chaque fois, cette fenêtre quitte la machine.",
     "The focused window (recommended)":
         "La fenêtre au premier plan (recommandé)",
     "A box around the cursor (X11 / Hyprland)":
@@ -706,8 +706,8 @@ CATALOG = {
         "non assignée",
     "Press a key to bind it (no need to know its name)":
         "Appuyez sur une touche pour l'assigner (inutile d'en connaître le nom)",
-    "Who answers {ai_key} and {talk_key} (the chat model), who reads the screen for them (the vision model) — and who writes the final text, whichever conversation engine is in use. The lists come from the provider itself, so a model your account no longer has stops being offered.":
-        "Qui répond à {ai_key} et {talk_key} (le modèle de chat), qui lit l'écran pour eux (le modèle de vision) — et qui écrit le texte final, quel que soit le moteur de conversation utilisé. Les listes viennent du fournisseur lui-même, donc un modèle que votre compte n'a plus cesse d'être proposé.",
+    "The agent answers {ai_key}, {talk_key} and the companion and runs their tools; the chat model writes the final text, refines your dictation and judges what the memory drops; the vision model reads the screen. The lists come from the provider itself, so a model your account no longer has stops being offered.":
+        "L'agent répond à {ai_key}, {talk_key} et au compagnon et lance leurs outils ; le modèle de chat écrit le texte final, raffine votre dictée et juge ce que la mémoire écarte ; le modèle de vision lit l'écran. Les listes viennent du fournisseur lui-même, donc un modèle que votre compte n'a plus cesse d'être proposé.",
     "<small>✓ {v0} applied — takes effect on the next talk session.</small>":
         "<small>✓ {v0} appliqué — effectif à la prochaine session de conversation.</small>",
     "<small>✓ {engine} — takes effect on the next talk session.</small>":
@@ -716,8 +716,8 @@ CATALOG = {
         "Le même interrupteur que {v0}. Les sessions de conversation peuvent quand même lire leurs réponses à voix haute quand il est désactivé (onglet Conversation).",
     "⏳ Listing {provider} models…":
         "⏳ Liste des modèles de {provider}…",
-    "✓ Applied — chat {chat}, vision {vision}.":
-        "✓ Appliqué — chat {chat}, vision {vision}.",
+    "✓ Applied — chat {chat}, vision {vision}, agent {agent}.":
+        "✓ Appliqué — chat {chat}, vision {vision}, agent {agent}.",
     "Auto":
         "Auto",
     "How the dictation key ({key}) starts and stops a recording.":
@@ -822,8 +822,8 @@ CATALOG = {
         "La leur — leur recherche, exécutée de leur côté",
     "⚠️ Could not list models — {v0}":
         "⚠️ Impossible de lister les modèles — {v0}",
-    "✓ {v0} models available on {provider}. Pick or type one, then Apply.":
-        "✓ {v0} modèles disponibles chez {provider}. Choisissez-en un ou saisissez-le, puis Appliquer.",
+    "✓ {v0} models available on {provider}. Pick or type one, then Apply. An empty agent model follows the chat model.":
+        "✓ {v0} modèles disponibles chez {provider}. Choisissez-en un ou saisissez-le, puis Appliquer. Un modèle d'agent vide suit le modèle de chat.",
     "whisper.cpp: ❌ download failed: {e}":
         "whisper.cpp : ❌ échec du téléchargement : {e}",
     "❌ {human} install failed — {msg}":

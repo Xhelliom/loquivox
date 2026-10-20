@@ -185,9 +185,9 @@ def test_handlers_find_their_widgets():
 def test_greying_a_control_greys_its_label():
     """A live label beside a dead control is the tell of a hand-built row."""
     cls = SettingsDialog
-    cls._talk_shot_check.set_active(False)
+    cls._talk_shot_region.set_active_id("window")
     cls._on_talk_shot_toggled(cls._talk_shot_check)
-    region = cls._talk_shot_region
+    region = cls._talk_shot_cursor
     label = _label_before(region)
     assert label is not None, "the Capture row lost its label"
     assert not region.get_sensitive() and not label.get_sensitive(), (
@@ -447,13 +447,13 @@ def test_dependent_fields_grey_out():
         cls._media_combo.set_active_id(media)
         assert on(*duck) == [want] * 3, (media, on(*duck))
 
-    for region, want in (("window", False), ("screen", False), ("cursor", True)):
-        cls._talk_shot_check.set_active(True)
-        cls._talk_shot_region.set_active_id(region)
-        assert cls._talk_shot_cursor.get_sensitive() is want, region
-    cls._talk_shot_check.set_active(False)
-    assert not cls._talk_shot_cursor.get_sensitive()
-    assert not cls._talk_shot_region.get_sensitive()
+    # F4 and the companion capture whatever the F6 box says: framing stays live.
+    for shot in (True, False):
+        cls._talk_shot_check.set_active(shot)
+        for region, want in (("window", False), ("screen", False), ("cursor", True)):
+            cls._talk_shot_region.set_active_id(region)
+            assert cls._talk_shot_cursor.get_sensitive() is want, (shot, region)
+        assert cls._talk_shot_region.get_sensitive() and cls._talk_shot_max.get_sensitive()
 
     cls._pp_translate_check.set_active(False)
     for level, want in ((0, False), (4, False), (POSTPROCESS_CUSTOM_LEVEL, True)):
@@ -473,6 +473,41 @@ def test_dependent_fields_grey_out():
         check.set_active(active)
         assert on(provider, model) == [active] * 2, active
     print("✓ ducking, box width, custom prompt, cutting in and search follow their switch")
+
+
+def test_live_fields_follow_the_companion():
+    """The companion runs on Live, so its voice and delegation are never dead."""
+    from loquivox import config as config_module
+    cls = SettingsDialog
+    cls._engine_combo.set_active_id("cascade")
+    cfg = config_module.CFG
+    try:
+        for companion, want in ((True, True), (False, False)):
+            config_module.CFG = cfg.__class__(**{**cfg.__dict__, "COMPANION_ENABLED": companion})
+            cls._on_talk_engine_changed(cls._engine_combo)
+            assert cls._live_voice.get_sensitive() is want, companion
+            assert cls._live_delegation.get_sensitive() is want, companion
+    finally:
+        config_module.CFG = cfg
+    print("✓ Live voice and delegation stay live while the companion runs")
+
+
+def test_read_aloud_is_cascade_only():
+    cls = SettingsDialog
+    for engine, want in (("cascade", True), ("realtime", False), ("live", False)):
+        cls._engine_combo.set_active_id(engine)
+        assert cls._talk_speak_check.get_sensitive() is want, engine
+    cls._engine_combo.set_active_id("cascade")
+    print("✓ read-replies-aloud follows the cascade")
+
+
+def test_agent_model_is_a_list_and_prose_is_true():
+    cls = SettingsDialog
+    assert isinstance(cls._agent_model, Gtk.ComboBoxText)
+    texts = " ".join(w.get_label() or "" for w in _widgets(cls._instance.get_child())
+                     if isinstance(w, Gtk.Label))
+    assert "responds to" not in texts and "répond à F4" not in texts
+    print("✓ agent model is a combo")
 
 
 def test_no_stale_wording():
@@ -537,6 +572,9 @@ if __name__ == "__main__":
     test_settings_live_where_they_are_used()
     test_tray_only_settings_are_set_from_the_dialog()
     test_dependent_fields_grey_out()
+    test_live_fields_follow_the_companion()
+    test_read_aloud_is_cascade_only()
+    test_agent_model_is_a_list_and_prose_is_true()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     SettingsDialog._instance.destroy()

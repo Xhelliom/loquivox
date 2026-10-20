@@ -87,7 +87,10 @@ def get_ai_client(provider: str):
                         "ANTHROPIC_API_KEY is not set — add it in Settings → API Keys."
                     )
                 from openai import OpenAI
-                _anthropic_client = OpenAI(api_key=api_key, base_url=ANTHROPIC_BASE_URL)
+                _anthropic_client = OpenAI(
+                    api_key=api_key, base_url=ANTHROPIC_BASE_URL,
+                    # Without it models.list() is refused (anthropic-version is required).
+                    default_headers={"anthropic-version": "2023-06-01"})
             return _anthropic_client
     if provider != "openai":
         return get_client()
