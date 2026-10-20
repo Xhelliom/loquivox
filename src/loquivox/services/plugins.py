@@ -389,6 +389,7 @@ class Desk:
                 message = self._results.get_nowait()
             except queue.Empty:
                 return None
+            queued = self._queued.pop(id(message), None)
             if self.plugin.still_true is None or self._holds(message):
                 if self.plugin.is_tool:
                     return message
@@ -396,7 +397,6 @@ class Desk:
                     name=self.plugin.name, content=message.get("content", ""))
                 if self.plugin.loads:
                     framed += EXPLAIN_FRAME.format(group=self.plugin.loads)
-                    queued = self._queued.pop(id(message), None)
                     if queued is not None:     # notification → handed to the model
                         print(f"⏱️  {self.plugin.name}: notification waited "
                               f"{time.monotonic() - queued:.1f}s before being said")
@@ -412,6 +412,8 @@ class Desk:
                 break
             if self.plugin.still_true is None or self._holds(message):
                 kept.append(message)
+            else:
+                self._queued.pop(id(message), None)
         for message in kept:
             self._results.put(message)
 

@@ -367,19 +367,23 @@ class TalkSession:
         return self._answer(on_delta)
 
     def reply_with_result(self, message: Dict[str, Any],
-                          on_delta: Optional[Callable[[str], None]] = None
+                          on_delta: Optional[Callable[[str], None]] = None,
+                          say: Optional[Callable[[str], None]] = None
                           ) -> Optional[TalkReply]:
         """
         A plugin's answer came back: keep it in the turns, and answer it.
 
         The message is whatever the plugin made of its result — the loops that
         poll the desks hand it straight over, so a new plugin needs no branch
-        here or in either engine.
+        here or in either engine. ``say`` is handed the words a round wrote
+        before its tool calls (see ``_with_tools``), so the caller can speak
+        them while the rest is still being found.
         """
         self.turns.append(message)
-        return self._answer(on_delta)
+        return self._answer(on_delta, say)
 
-    def _answer(self, on_delta: Optional[Callable[[str], None]]) -> Optional[TalkReply]:
+    def _answer(self, on_delta: Optional[Callable[[str], None]],
+                say: Optional[Callable[[str], None]] = None) -> Optional[TalkReply]:
         """
         One spoken reply for the turns so far, with every enabled plugin's
         tool on the table.
@@ -395,13 +399,14 @@ class TalkSession:
         stream = None if on_delta is None else (lambda t: on_delta(_strip_marker(t)))
         base = ([{"role": "system", "content": self.system_prompt()}]
                 + self._context_messages() + self._spoken_to())
-        answer = self._with_tools(base, stream)
+        answer = self._with_tools(base, stream, say)
         if not answer:
             return None
         return self.add_assistant(answer)
 
     def _with_tools(self, base: List[Dict[str, Any]],
-                    stream: Optional[Callable[[str], None]]) -> Optional[str]:
+                    stream: Optional[Callable[[str], None]],
+                    say: Optional[Callable[[str], None]] = None) -> Optional[str]:
         """
         The agent loop: our model, every enabled plugin's tool on the table,
         calls run *here* and their real result goes back into the exchange,
@@ -421,6 +426,11 @@ class TalkSession:
         with the question the plugin built from the arguments it froze, and a
         call that failed (and was not followed by one that worked) is
         announced as the failure it was.
+
+        ``say``: what a round writes *before* its tool calls ("Il demande
+        … je regarde") is handed to it at once, so a short first
+        sentence is heard while the reads run, and it is kept in the turns.
+        The returned answer is only the last round's, so nothing is said twice.
         """
         cfg = config_module.CFG
         deadline = time.monotonic() + cfg.AGENT_MAX_SEC
@@ -441,6 +451,10 @@ class TalkSession:
                     return failure
                 # Never an empty turn: the user must hear something.
                 return answer if (answer or "").strip() else NOT_DONE
+            lead = _strip_marker(answer or "")
+            if lead and say is not None:
+                self.turns.append({"role": "assistant", "content": lead})
+                say(lead)
             exchange.append({"role": "assistant", "content": answer or None,
                              "tool_calls": [{"id": c["id"], "type": "function",
                                              "function": {"name": c["name"],

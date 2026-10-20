@@ -133,6 +133,30 @@ try:
     assert "was done" in answer or "a été fait" in answer, answer
     print("✓ the bound after a done call does not say nothing was done")
 
+    # 4c. the words written before a tool call are said at once, once, marker-free
+    config_module.CFG = config_module.CFG.__class__(
+        **{**config_module.CFG.__dict__, "AGENT_MAX_TURNS": 4})
+    session = TalkSession()
+    session.add_user("où en est le lot ?")
+    spoken, order = [], []
+    fake_real = ai_module.AIService.complete
+
+    def lead_in(messages, on_delta=None, tools=None, tool_calls_out=None, **kw):
+        if not tools_text(messages):
+            tool_calls_out.extend([call("find_lot", project="x")])
+            return "Je regarde. [[WRITE]]"
+        order.append(list(spoken))     # what was already said when round 2 started
+        return "Le lot 13 est prêt."
+    ai_module.AIService.complete = staticmethod(lead_in)
+    try:
+        reply = session._answer(None, spoken.append)
+    finally:
+        ai_module.AIService.complete = fake_real
+    assert spoken == ["Je regarde."], spoken
+    assert order == [["Je regarde."]], (order, "the lead-in waited for the tools")
+    assert reply.text == "Le lot 13 est prêt." and not reply.done, reply
+    print("✓ a lead-in before tool calls is said first, not again, without the marker")
+
     # 5. the loop names no provider or model
     src = (ROOT / "src/loquivox/services/talk.py").read_text()
     body = src[src.index("def _with_tools"):src.index("def consult")]
