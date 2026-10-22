@@ -112,6 +112,28 @@ CATALOG = {
         "<small>✓ Mémoire enregistrée — effective immédiatement.</small>",
     "🔇 Rule saved…":
         "🔇 Règle retenue…",
+    "What the companion remembers":
+        "Ce dont le compagnon se souvient",
+    "Facts retained by voice (\"remember that…\") or at the end of a session. Edit the text or the project, tick Delete or add a line, then Apply. The file: ":
+        "Faits retenus à la voix (« retiens que… ») ou à la fin d'une session. Modifiez le texte ou le projet, cochez Supprimer ou ajoutez une ligne, puis Appliquer. Le fichier : ",
+    "Project":
+        "Projet",
+    "requested":
+        "demandé",
+    "automatic":
+        "auto",
+    "Fact":
+        "Fait",
+    "{n} fact(s) retained":
+        "{n} fait(s) retenu(s)",
+    "Remember that…":
+        "Retiens que…",
+    "Add a fact":
+        "Ajouter un fait",
+    "<small>✓ Facts saved — effective immediately.</small>":
+        "<small>✓ Faits enregistrés — effectifs immédiatement.</small>",
+    "🧠 Fact retained…":
+        "🧠 Fait retenu…",
     "🧠 Recalling…":
         "🧠 Je cherche dans ce que j'ai retenu…",
     "Delete":

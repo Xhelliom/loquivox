@@ -393,3 +393,140 @@ RECALL = Plugin(
     note=lambda args: _("🧠 Recalling…"),
 )
 register(RECALL)
+
+
+def facts() -> List[Dict[str, str]]:
+    """The retained facts, from the file, read afresh. Missing or malformed is none."""
+    try:
+        raw = tomllib.loads(FACTS_FILE.read_text(encoding="utf-8")).get("facts", [])
+    except (OSError, ValueError):
+        return []
+    return [{k: str(f.get(k, "")).strip() for k in ("id", "text", "project", "date", "source")}
+            for f in raw if isinstance(f, dict) and str(f.get("text", "")).strip()]
+
+
+def _save_facts(items: List[Dict[str, str]]) -> None:
+    out = "".join(
+        "\n[[facts]]\n" + "".join(f"{k} = {json.dumps(f[k], ensure_ascii=False)}\n"
+                                  for k in ("id", "text", "project", "date", "source"))
+        for f in items)
+    FACTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = FACTS_FILE.with_suffix(".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    os.replace(tmp, FACTS_FILE)
+
+
+def _fact(text: str, project: str = "") -> Dict[str, str]:
+    return {"id": uuid.uuid4().hex[:8], "text": text.strip(), "project": project.strip(),
+            "date": date.today().isoformat(), "source": "asked"}
+
+
+def add_fact(text: str, project: str = "") -> Dict[str, str]:
+    """A fact the user asked to retain ("retiens que…"); ``source = "asked"``."""
+    fact = _fact(text, project)
+    with _lock:
+        _save_facts(facts() + [fact])
+    return fact
+
+
+def replace_facts(items: Sequence[Tuple[Optional[str], str, str]],
+                  shown: Optional[Sequence[str]] = None) -> None:
+    """
+    Settings' writer, like ``replace``: ``(id or None, text, project)`` per row.
+    An id keeps its date and source; ``None`` is a manual addition; an empty
+    text deletes, but only for the ids in ``shown`` — a fact learned while the
+    dialog was open is not in the list and is kept.
+    """
+    with _lock:
+        edits = {rid: (text.strip(), project.strip()) for rid, text, project in items if rid is not None}
+        shown = set(edits if shown is None else shown)
+        kept = []
+        for f in facts():
+            if f["id"] not in shown:
+                kept.append(f)
+            elif edits.get(f["id"], ("",))[0]:
+                kept.append({**f, "text": edits[f["id"]][0], "project": edits[f["id"]][1]})
+        kept += [_fact(text, project) for rid, text, project in items if rid is None and text.strip()]
+        _save_facts(kept)
+
+
+def _remember_run(arguments: Dict[str, Any]) -> str:
+    text = str(arguments.get("text", "")).strip()
+    if not text:
+        return ""
+    return add_fact(text, str(arguments.get("project", ""))).get("text", "")
+
+
+def _remember_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
+    return {"role": "system", "content": (
+        f"FACT RETAINED: «{result}». Confirm in ONE short spoken sentence, in the "
+        "user's language, what you will remember — and nothing else.")}
+
+
+def _facts_settings(dialog, vbox, labels) -> None:
+    """Settings → Companion → Memory → « What the companion remembers »."""
+    from gi.repository import Gtk
+
+    body = dialog._group(
+        vbox, _("What the companion remembers"),
+        _("Facts retained by voice (\"remember that…\") or at the end of a session. "
+          "Edit the text or the project, tick Delete or add a line, then Apply. "
+          "The file: ") + str(FACTS_FILE))
+    rows: List[Tuple[str, Gtk.Entry, Gtk.Entry, Gtk.CheckButton]] = []
+    shown = facts()
+    for f in shown:
+        entry, project = Gtk.Entry(text=f["text"]), Gtk.Entry(text=f["project"], width_chars=12)
+        project.set_placeholder_text(_("Project"))
+        drop = Gtk.CheckButton(label=_("Delete"))
+        side = Gtk.Box(spacing=8)
+        for w in (project, Gtk.Label(label=_("requested") if f["source"] == "asked" else _("automatic")), drop):
+            side.pack_start(w, False, False, 0)
+        dialog._field(body, f["date"] or _("Fact"), entry, labels, extra=side)
+        rows.append((f["id"], entry, project, drop))
+    body.pack_start(Gtk.Label(label=_("{n} fact(s) retained").format(n=len(shown)), xalign=0), False, False, 0)
+    new, new_project = Gtk.Entry(), Gtk.Entry(width_chars=12)
+    new.set_placeholder_text(_("Remember that…"))
+    new_project.set_placeholder_text(_("Project"))
+    dialog._field(body, _("Add a fact"), new, labels, extra=new_project)
+    status = Gtk.Label()
+
+    def _apply(_btn=None) -> None:
+        items = [(rid, "" if drop.get_active() else e.get_text(), p.get_text()) for rid, e, p, drop in rows]
+        items.append((None, new.get_text(), new_project.get_text()))
+        try:
+            replace_facts(items, [rid for rid, *_rest in rows])
+        except OSError as e:
+            status.set_markup(f"<small>❌ {e}</small>")
+            return
+        new.set_text("")
+        new_project.set_text("")
+        status.set_markup(_("<small>✓ Facts saved — effective immediately.</small>"))
+
+    dialog._actions(body, _apply, status)
+
+
+REMEMBER = Plugin(
+    name="remember",
+    description=(
+        "Retain a fact the user asks you to keep. Call it when they say things "
+        "like « retiens que je préfère les mails courts », « souviens-toi que "
+        "Zeta part en novembre ». `text` is one self-contained sentence in "
+        "their words; `project` only if they name one."),
+    parameters={
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "description": "The fact, one self-contained sentence."},
+            "project": {"type": "string", "description": "Project name, only if named."},
+        },
+        "required": ["text"],
+    },
+    started=("The fact is being saved. Say nothing about it yet; a system message "
+             "will tell you when to confirm."),
+    run=_remember_run,
+    message=_remember_message,
+    chat_only=True,
+    note=lambda args: _("🧠 Fact retained…"),
+    settings=_facts_settings,
+    tab="companion/memory",
+)
+register(REMEMBER)
