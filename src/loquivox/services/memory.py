@@ -23,6 +23,7 @@ under, but the scope the model types is only a hint: the judge reads it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -409,8 +410,13 @@ def facts(strict: bool = False) -> List[Dict[str, str]]:
         if strict:
             raise ValueError(f"{FACTS_FILE} is unreadable, left untouched: {e}") from e
         return []
-    return [{k: str(f.get(k, "")).strip() for k in ("id", "text", "project", "date", "source")}
-            for f in raw if isinstance(f, dict) and str(f.get("text", "")).strip()]
+    out = [{k: str(f.get(k, "")).strip() for k in ("id", "text", "project", "date", "source")}
+           for f in raw if isinstance(f, dict) and str(f.get("text", "")).strip()]
+    for f in out:
+        # A hand-written fact has no id: a stable one from its content, so the card and Apply agree.
+        # shortcut: two identical lines (same text, project, date) share an id, so they edit together.
+        f["id"] = f["id"] or hashlib.sha1("\0".join((f["text"], f["project"], f["date"])).encode()).hexdigest()[:8]
+    return out
 
 
 def _save_facts(items: List[Dict[str, str]]) -> None:

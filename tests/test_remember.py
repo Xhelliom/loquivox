@@ -61,4 +61,15 @@ assert memory.REMEMBER.run({"text": "nouveau"}) == ""
 assert "NOT RETAINED" in memory.REMEMBER.message({}, "")["content"]
 assert memory.FACTS_FILE.read_text(encoding="utf-8") == bad
 memory.FACTS_FILE.unlink()
+
+# hand-written facts without id: editing one and deleting the other leaves nothing merged or lost
+memory.FACTS_FILE.write_text('[[facts]]\ntext = "a"\ndate = "2026-01-01"\n\n'
+                             '[[facts]]\ntext = "b"\ndate = "2026-01-01"\n\n'
+                             '[[facts]]\ntext = "c"\ndate = "2026-01-01"\n', encoding="utf-8")
+a, b, c = memory.facts()
+assert len({a["id"], b["id"], c["id"]}) == 3 and memory.facts()[0]["id"] == a["id"]
+memory.replace_facts([(a["id"], "a2", ""), (b["id"], "", ""), (c["id"], "c", "")],
+                     shown=[a["id"], b["id"], c["id"]])
+assert [f["text"] for f in memory.facts()] == ["a2", "c"], memory.facts()
+memory.FACTS_FILE.unlink()
 print("ok")
