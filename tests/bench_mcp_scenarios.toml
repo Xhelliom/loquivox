@@ -49,6 +49,18 @@ calls = [{ tool = "board.launch_lot", args = { lot = 13, confirmed = true } }]
 executed = ["launch_lot"]
 
 [[scenario]]
+name = "oui tardif"
+# live-client: the consult runs once before the yes reaches the turns, then again
+[[scenario.turns]]
+say = "lance le lot 13 de loquivox"
+calls = [{ tool = "board.launch_lot" }]
+[[scenario.turns]]
+say = "oui"
+late = true
+calls = [{ tool = "board.launch_lot", args = { lot = 13, confirmed = true } }]
+executed = ["launch_lot"]
+
+[[scenario]]
 name = "un oui puis un non"
 [[scenario.turns]]
 say = "lance le lot 13 de loquivox"

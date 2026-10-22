@@ -47,6 +47,9 @@ Check = Tuple[str, bool]
 VERBOSE = False
 
 
+ENGINE = "cascade"
+
+
 def load(path: Path = SCENARIOS) -> Dict[str, Any]:
     with open(path, "rb") as f:
         return tomllib.load(f)
@@ -127,8 +130,16 @@ def run_scenario(sc: Dict[str, Any], log: Path, seed: List[Dict[str, str]] | Non
         for turn in sc["turns"]:
             made.clear(), statuses.clear()
             before = log.read_text().splitlines() if log.exists() else []
-            reply = session.reply(turn["say"])
-            text = reply.text if reply else ""
+            if ENGINE == "live-client":
+                # Live client delegation: the voice hears, our model consults
+                if turn.get("late"):    # delegation fires before the yes is transcribed
+                    session.consult()
+                    made.clear(), statuses.clear()
+                session.add_user(turn["say"])
+                text = session.consult() or ""
+            else:
+                reply = session.reply(turn["say"])
+                text = reply.text if reply else ""
             ran = [json.loads(l) for l in (log.read_text().splitlines() if log.exists() else [])[len(before):]]
             acted = [r["tool"] for r in ran if r["acts"]]
             if VERBOSE:
@@ -162,12 +173,16 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--provider", help="agent provider (default: the configured one)")
     ap.add_argument("--model", help="agent model (default: the configured one)")
+    ap.add_argument("--engine", choices=["cascade", "live-client"], default="cascade",
+                    help="live-client goes through TalkSession.consult(), like Live's delegation")
     ap.add_argument("--only", help="run scenarios whose name contains this")
     ap.add_argument("--scenarios", type=Path, default=SCENARIOS)
     ap.add_argument("-v", "--verbose", action="store_true", help="list every check and what was said")
     opts = ap.parse_args(argv)
     global VERBOSE
     VERBOSE = opts.verbose
+    global ENGINE
+    ENGINE = opts.engine
 
     from loquivox.secrets import load_secrets
     load_secrets()

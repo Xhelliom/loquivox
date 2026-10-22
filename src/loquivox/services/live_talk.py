@@ -50,7 +50,7 @@ import sounddevice as sd
 
 import loquivox.config as config_module
 from loquivox.i18n import _
-from loquivox.services import media
+from loquivox.services import mcp_tools, media
 from loquivox.services.audio import resolve_input_device
 from loquivox.services.talk import _strip_marker, echo_note, user_said_done, user_said_stop
 from loquivox.services.vad import EchoGate
@@ -376,6 +376,8 @@ class LiveTalk:
     #: how long a delegation waits for a sentence whose transcription has not
     #: even begun (no end-of-input-transcription event exists to wait for)
     SETTLE_FIRST = 3.0
+    #: same, while an action waits for its yes: a one-word "oui" transcribes late
+    SETTLE_FIRST_YES = 8.0
 
     def _settle(self, expect_new: bool = False) -> None:
         """
@@ -390,7 +392,8 @@ class LiveTalk:
         """
         now = time.monotonic
         start = now()
-        deadline = start + self.SETTLE_MAX
+        first = self.SETTLE_FIRST_YES if mcp_tools.awaiting(self._session) else self.SETTLE_FIRST
+        deadline = start + max(self.SETTLE_MAX, first)
         while now() < deadline:
             with self._lock:
                 last = self._last_delta.get("user") if "user" in self._live else None
@@ -398,7 +401,7 @@ class LiveTalk:
                 if now() - last >= self.SETTLE_QUIET:
                     break
             elif (not expect_new or self._session.user_turns > self._consulted_turns
-                  or now() - start >= self.SETTLE_FIRST):
+                  or now() - start >= first):
                 break
             time.sleep(0.05)
         self._flush_turns()
