@@ -21,7 +21,7 @@ from loquivox.managers.overlay import OverlayManager
 from loquivox.platform import get_clipboard
 from loquivox.services.ai import AIService
 from loquivox.services.audio import AudioService
-from loquivox.services import events
+from loquivox.services import events, memory
 from loquivox.services.clipboard import ClipboardService
 from loquivox.services.image import ImageService
 from loquivox.services.tts import TTSService
@@ -480,6 +480,8 @@ class ModeHandler:
             STATE.talk_engine = "cascade"
             STATE.talk_session = None
             session.desks.close()        # stop the plugins watching for this session
+            if not write:
+                memory.remember_async(session)   # F4 only; F6 writes a text instead
             events.emit("talk.ended", mode=mode)
             ModeHandler.reset_capture()  # a turn may have died mid-flight
             OverlayManager.hide()

@@ -23,7 +23,7 @@ from typing import Callable, Optional
 
 import loquivox.config as config_module
 from loquivox.i18n import N_
-from loquivox.services import events, media, plugins
+from loquivox.services import events, media, memory, plugins
 from loquivox.state import STATE, SettingsManager
 
 #: the bubble menu is this list
@@ -332,6 +332,7 @@ class Companion:
             STATE.vad, STATE.talk_engine, STATE.talk_session = None, "cascade", None
             STATE.current_mode = previous_mode
             session.desks.close()
+            memory.remember_async(session)
             STATE.talk_active = STATE.companion_session = False
             while not STATE.talk_click.empty():     # a click meant for this session
                 STATE.talk_click.get_nowait()
