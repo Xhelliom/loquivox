@@ -573,7 +573,12 @@ class ModeHandler:
         if STATE.companion_session:
             from loquivox.ui.capture_halo import show_capture
             show_capture(image)
-        description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
+        try:
+            description = (AIService.vision(cfg.TALK_SCREEN_PROMPT, image) or "").strip()
+        except Exception as e:
+            print(f"❌ Screen context: {STATE.ai_vision_provider}/{STATE.ai_vision_model} "
+                  f"refused the capture: {e}")
+            return ""
         elapsed = time.time() - started
         if not description:
             # Not the same thing as "nothing useful up there", and it used to

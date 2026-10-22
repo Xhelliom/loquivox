@@ -183,9 +183,12 @@ class AIService:
                 messages + [{"role": "system", "content": TEXT_ONLY}], model, provider)
 
     @staticmethod
-    @safe_execute("AI Vision")
     def vision(prompt: str, image_base64: str) -> Optional[str]:
-        """Send vision completion request with image."""
+        """Send vision completion request with image, on the vision provider.
+
+        Raises on an HTTP error: the caller says it, a bare None would read as
+        "the model answered nothing".
+        """
         messages = AIService.build_messages(prompt)
         # Replace last user message with multimodal content
         messages[-1] = {
@@ -195,4 +198,5 @@ class AIService:
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
             ]
         }
-        return AIService._complete(messages, STATE.ai_vision_model)
+        return AIService._complete(messages, STATE.ai_vision_model,
+                                   STATE.ai_vision_provider)
