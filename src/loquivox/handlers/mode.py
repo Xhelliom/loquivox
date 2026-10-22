@@ -680,6 +680,7 @@ class ModeHandler:
 
         cancelled = False
         plugin_seen = [float("-inf")]
+        reason = "?"
         try:
             with keys.exclusive(grab=not KeyboardHandler.free_keyboard()):
                 while True:
@@ -697,26 +698,35 @@ class ModeHandler:
                         continue
                     if pressed == "cancel":
                         cancelled = True
+                        reason = "stop phrase" if quiet else "cancel key"
                         break
                     if pressed == "finish":
+                        reason = "key"
                         break
                     # "send" (Space) means "end this turn now", which is the
                     # server's call here — ignoring it beats ending the
                     # briefing on a key that means something else.
                     if talk.error is not None:
+                        reason = "error"
                         break
                     # The transcript that ends the briefing arrives while its
                     # audio is still queued, so this keeps looping until the
                     # sentence has actually been heard — closing on the event
                     # itself cuts the assistant off mid-word.
                     if talk.done and talk.finished_speaking():
+                        reason = "briefing over"
                         break
-                    if session.user_turns >= cfg.TALK_MAX_TURNS:
+                    # A briefing's limit: a chat (F4) or the companion has no
+                    # text to write, and under Live every barge-in splits a turn.
+                    if session.write and session.user_turns >= cfg.TALK_MAX_TURNS:
+                        reason = "max_turns"
                         break
                     if quiet and ModeHandler._companion_idle(talk, session, plugin_seen) >= cfg.COMPANION_IDLE_TIMEOUT:
+                        reason = "idle"
                         break   # nobody is talking any more: back to standby
         finally:
             talk.close()
+        print(f"🔚 {label} session ended: {reason} ({session.user_turns} user turns)")
         if talk.error is not None:
             print(f"⚠️  {label} talk ended: {talk.error}")
         return cancelled
