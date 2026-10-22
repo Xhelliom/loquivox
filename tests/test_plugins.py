@@ -225,8 +225,11 @@ def test_the_live_engine_answers_the_backend_with_the_real_result(case=WEATHER_C
 
     try:
         _call("nothing_here")
-        time.sleep(0.05)
-        assert not outputs, "a tool this session never declared was answered"
+        # Still answered: the server closes the session over a call left without
+        # an output. Nothing ran, so nothing reaches the turns.
+        assert _wait(lambda: len(outputs) == 1), "an unknown call got no output"
+        assert not session.turns, session.turns
+        outputs.clear()
         _call(case.name)
         assert _wait(lambda: bool(outputs)), "the Live engine dropped a tool call"
     finally:
