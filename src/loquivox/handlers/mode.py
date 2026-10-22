@@ -770,12 +770,13 @@ class ModeHandler:
 
         # A briefing's limit only: a chat (F4) ends on the key, not on a count.
         while not session.write or session.user_turns < cfg.TALK_MAX_TURNS:
-            idle_action = "finish" if session.user_turns else "cancel"
-            audio, action = ModeHandler._talk_listen(keys, idle_action, session,
-                                                     prefix=prefix)
+            audio, action = ModeHandler._talk_listen(keys, session, prefix=prefix)
             prefix = None
+            idled = action == "idle"
+            if idled:   # walked away: ends the session like Enter, or drops it if nothing was said
+                action = "finish" if session.user_turns else "cancel"
             if action == "cancel":
-                return end("cancel", True)
+                return end("idle" if idled else "cancel", True)
             if action == "result":
                 # Nothing was said: drop the (silent) capture without paying
                 # for its transcription. The turn is the assistant's.
@@ -821,7 +822,7 @@ class ModeHandler:
                 if text:
                     ChatManager.add_message("user", f"🗣️ {text}")
                     session.add_user(text)
-                return end("key", False)
+                return end("idle" if idled else "key", False)
             if not text:
                 continue  # nothing said (or a hallucination) — just listen again
 
@@ -852,7 +853,7 @@ class ModeHandler:
         return end("max_turns", False)
 
     @staticmethod
-    def _talk_listen(keys, idle_action: str, session,
+    def _talk_listen(keys, session,
                      prefix: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], str]:
         """
         Record one spoken turn and return ``(audio, action)``.
@@ -864,7 +865,7 @@ class ModeHandler:
         ``_talk_turn_complete``). On top of that: Space / the talk key end the
         turn now, the turn timeout ends it eventually, and Enter/Esc end the
         conversation. A turn where nothing at all was said for
-        ``TALK_IDLE_TIMEOUT`` yields ``idle_action``: the user has walked away
+        ``TALK_IDLE_TIMEOUT`` yields ``"idle"``: the user has walked away
         from the microphone, not paused mid-sentence.
 
         ``prefix`` is the audio of an interruption — this turn began while the
@@ -947,7 +948,7 @@ class ModeHandler:
                                          STATE.capture_rate):
                             break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
-                        action = idle_action
+                        action = "idle"
                         break
                     if not vad.speech_started and session.desks.ready():
                         # A plugin's answer is back and the user has not

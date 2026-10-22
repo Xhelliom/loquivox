@@ -90,7 +90,7 @@ def test_delegation_after_close_is_dropped():
 def test_cascade_chat_is_not_capped_and_says_why():
     calls = []
 
-    def listen(keys, idle, session, prefix=None):
+    def listen(keys, session, prefix=None):
         calls.append(1)
         session.user_turns = 31               # past the briefing limit
         return None, ("cancel" if len(calls) == 2 else "result")
@@ -103,6 +103,22 @@ def test_cascade_chat_is_not_capped_and_says_why():
         dropped = ModeHandler._talk_converse(session, Keys())
     assert dropped and len(calls) == 2 and "session ended: cancel (31 user turns)" in out.getvalue(), out.getvalue()
     print("✓ the cascade does not cap a chat, and prints its reason")
+
+
+def test_cascade_idle_prints_idle():
+    def run_idle(turns):
+        session = SimpleNamespace(write=False, user_turns=turns, desks=SimpleNamespace(take=lambda: None))
+        ModeHandler._talk_listen = staticmethod(lambda keys, session, prefix=None: (None, "idle"))
+        ModeHandler._talk_transcribe = staticmethod(lambda audio: "")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            dropped = ModeHandler._talk_converse(session, Keys())
+        return dropped, out.getvalue()
+    dropped, out = run_idle(3)
+    assert not dropped and "session ended: idle (3 user turns)" in out, out
+    dropped, out = run_idle(0)
+    assert dropped and "session ended: idle (0 user turns)" in out, out
+    print("✓ an idle end prints 'idle', and keeps finish/cancel behaviour")
 
 
 def test_close_during_consult_sends_nothing():
@@ -124,4 +140,5 @@ if __name__ == "__main__":
     test_briefing_is_capped_and_says_why()
     test_delegation_after_close_is_dropped()
     test_cascade_chat_is_not_capped_and_says_why()
+    test_cascade_idle_prints_idle()
     test_close_during_consult_sends_nothing()
