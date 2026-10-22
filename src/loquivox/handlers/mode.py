@@ -680,6 +680,7 @@ class ModeHandler:
 
         cancelled = False
         plugin_seen = [float("-inf")]
+        reason = "?"
         try:
             with keys.exclusive(grab=not KeyboardHandler.free_keyboard()):
                 while True:
@@ -697,26 +698,35 @@ class ModeHandler:
                         continue
                     if pressed == "cancel":
                         cancelled = True
+                        reason = "cancel"   # the companion's stop phrase and its key both land here
                         break
                     if pressed == "finish":
+                        reason = "key"
                         break
                     # "send" (Space) means "end this turn now", which is the
                     # server's call here — ignoring it beats ending the
                     # briefing on a key that means something else.
                     if talk.error is not None:
+                        reason = "error"
                         break
                     # The transcript that ends the briefing arrives while its
                     # audio is still queued, so this keeps looping until the
                     # sentence has actually been heard — closing on the event
                     # itself cuts the assistant off mid-word.
                     if talk.done and talk.finished_speaking():
+                        reason = "briefing over"
                         break
-                    if session.user_turns >= cfg.TALK_MAX_TURNS:
+                    # A briefing's limit: a chat (F4) or the companion has no
+                    # text to write, and under Live every barge-in splits a turn.
+                    if session.write and session.user_turns >= cfg.TALK_MAX_TURNS:
+                        reason = "max_turns"
                         break
                     if quiet and ModeHandler._companion_idle(talk, session, plugin_seen) >= cfg.COMPANION_IDLE_TIMEOUT:
+                        reason = "idle"
                         break   # nobody is talking any more: back to standby
         finally:
             talk.close()
+        print(f"🔚 {label} session ended: {reason} ({session.user_turns} user turns)")
         if talk.error is not None:
             print(f"⚠️  {label} talk ended: {talk.error}")
         return cancelled
@@ -753,13 +763,20 @@ class ModeHandler:
 
         cfg = config_module.CFG
         prefix = None  # audio captured over a reply — the next turn's first words
-        while session.user_turns < cfg.TALK_MAX_TURNS:
-            idle_action = "finish" if session.user_turns else "cancel"
-            audio, action = ModeHandler._talk_listen(keys, idle_action, session,
-                                                     prefix=prefix)
+
+        def end(reason: str, dropped: bool) -> bool:
+            print(f"🔚 Talk session ended: {reason} ({session.user_turns} user turns)")
+            return dropped
+
+        # A briefing's limit only: a chat (F4) ends on the key, not on a count.
+        while not session.write or session.user_turns < cfg.TALK_MAX_TURNS:
+            audio, action = ModeHandler._talk_listen(keys, session, prefix=prefix)
             prefix = None
+            idled = action == "idle"
+            if idled:   # walked away: ends the session like Enter, or drops it if nothing was said
+                action = "finish" if session.user_turns else "cancel"
             if action == "cancel":
-                return True
+                return end("idle" if idled else "cancel", True)
             if action == "result":
                 # Nothing was said: drop the (silent) capture without paying
                 # for its transcription. The turn is the assistant's.
@@ -805,7 +822,7 @@ class ModeHandler:
                 if text:
                     ChatManager.add_message("user", f"🗣️ {text}")
                     session.add_user(text)
-                return False
+                return end("idle" if idled else "key", False)
             if not text:
                 continue  # nothing said (or a hallucination) — just listen again
 
@@ -814,7 +831,7 @@ class ModeHandler:
                 # "Vas-y, écris-le" — no point paying for a reply that would
                 # only say "ok"; the turn still counts as part of the brief.
                 session.add_user(text)
-                return False
+                return end("stop phrase", False)
 
             OverlayManager.set_status(_("Thinking…"))
             reply = session.reply(
@@ -831,13 +848,12 @@ class ModeHandler:
                 # The model took the floor to the writing phase — either because
                 # the user said so in words the phrase list doesn't cover, or
                 # (finish_by_model) because it judged the brief complete.
-                return False
-        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached"
-              + (" — writing the text" if session.write else ""))
-        return False
+                return end("briefing over", False)
+        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
+        return end("max_turns", False)
 
     @staticmethod
-    def _talk_listen(keys, idle_action: str, session,
+    def _talk_listen(keys, session,
                      prefix: Optional[np.ndarray] = None) -> Tuple[Optional[np.ndarray], str]:
         """
         Record one spoken turn and return ``(audio, action)``.
@@ -849,7 +865,7 @@ class ModeHandler:
         ``_talk_turn_complete``). On top of that: Space / the talk key end the
         turn now, the turn timeout ends it eventually, and Enter/Esc end the
         conversation. A turn where nothing at all was said for
-        ``TALK_IDLE_TIMEOUT`` yields ``idle_action``: the user has walked away
+        ``TALK_IDLE_TIMEOUT`` yields ``"idle"``: the user has walked away
         from the microphone, not paused mid-sentence.
 
         ``prefix`` is the audio of an interruption — this turn began while the
@@ -932,7 +948,7 @@ class ModeHandler:
                                          STATE.capture_rate):
                             break
                     if not vad.speech_started and vad.elapsed >= cfg.TALK_IDLE_TIMEOUT:
-                        action = idle_action
+                        action = "idle"
                         break
                     if not vad.speech_started and session.desks.ready():
                         # A plugin's answer is back and the user has not

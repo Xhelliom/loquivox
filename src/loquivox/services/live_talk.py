@@ -578,6 +578,8 @@ class LiveTalk:
         target = getattr(delegation, "target", "") or ""
         if target != "client" or not did:
             return          # a "responses" delegation runs on OpenAI's side
+        if self._stop:
+            return          # the session is closing: nobody is left to hear the answer
         with self._lock:
             if did in self._seen:
                 return
@@ -588,12 +590,17 @@ class LiveTalk:
         """Run the backend for one client delegation and speak its answer."""
         from loquivox.managers.chat import ChatManager
 
+        if self._stop:
+            return
         try:
             self._settle(expect_new=True)
             ChatManager.add_message("note", _("🧠 Thinking…"))
             started = time.time()
             answer = self._session.consult()
             took = time.time() - started
+            if self._stop:   # closed while thinking: the answer would be sent to nobody
+                print(f"🧠 Delegation dropped (session closed after {took:.1f}s)")
+                return
             if not answer:
                 # Never just return: the voice model asked for help and is
                 # waiting, `_seen` means it will not ask again for this one,
