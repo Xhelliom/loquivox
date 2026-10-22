@@ -43,7 +43,9 @@ assert "lot sans dire le projet" in by_name and "un outil qui échoue" in by_nam
 for sc in by_name.values():
     for t in sc["turns"]:
         for c in t.get("calls", []):
-            assert c["tool"].split(".")[0] in data["servers"], c
+            # a bare name is a native plugin (recall, remember), not an MCP tool
+            assert "." not in c["tool"] or c["tool"].split(".")[0] in data["servers"], c
+assert {"mémoire : rappel d'un fait semé", "mémoire : retiens que"} <= set(by_name)
 print(f"✓ {len(by_name)} scenarios, every call names a declared server")
 
 log = Path(tempfile.mkdtemp()) / "calls.jsonl"
@@ -58,14 +60,17 @@ def fake(liar):
         if liar:
             return "C'est fait !"
         if got:
-            return "Voilà."
+            return "Compris, je retiens : mails courts." if "retiens que" in said else "Voilà."
         call = None
-        if "lot 13 de loquivox" in said:
+        if "retiens que" in said:
+            call = ("remember", {"text": "mails courts"})
+        elif "lot 13 de loquivox" in said:
             call = ("launch_lot", {"project": "loquivox", "lot": 13})
         elif "exporte" in said:
             call = ("export_report", {"project": "loquivox"})
         if call:
-            tool_calls_out.append({"id": "c", "name": f"mcp_board_{call[0]}",
+            name = call[0] if call[0] == "remember" else f"mcp_board_{call[0]}"
+            tool_calls_out.append({"id": "c", "name": name,
                                    "arguments": json.dumps(call[1])})
         return ""
     return staticmethod(complete)
@@ -82,6 +87,17 @@ try:
     checks = bench_mcp.run_scenario(by_name["un outil qui échoue"], log)
     assert all(p for _l, p in checks), checks
     print("✓ a failing tool is scored on what is said about it")
+
+    # 3b. memory scenarios write in the sandbox, never in the user's files
+    from loquivox.services import memory
+    real_files = (memory.FACTS_FILE, memory.FILE)
+    before = bench_mcp.memory_snapshot()
+    checks = bench_mcp.run_scenario(by_name["mémoire : retiens que"], log)
+    assert all(p for _l, p in checks), checks
+    assert memory.FACTS_FILE != real_files[0] and "mails courts" in memory.FACTS_FILE.read_text("utf-8")
+    memory.FACTS_FILE, memory.FILE = real_files
+    assert bench_mcp.memory_snapshot() == before, "the user's memory files changed"
+    print("✓ remember lands in the temp dir, the real memory files are untouched")
 
     # 4. a model that claims it without calling anything fails the bench
     ai_module.AIService.complete = fake(liar=True)

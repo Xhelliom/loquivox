@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import loquivox.config as config_module  # noqa: E402
 import loquivox.managers.chat as chat_module  # noqa: E402
-from loquivox.services import mcp_tools, plugins  # noqa: E402
+from loquivox.services import mcp_tools, memory, plugins  # noqa: E402
 from loquivox.services.ai import AIService  # noqa: E402
 from loquivox.services.talk import TalkSession  # noqa: E402
 from loquivox.state import STATE  # noqa: E402
@@ -81,8 +81,24 @@ def _match_calls(expected: List[Dict[str, Any]], made: List[Tuple[str, Dict[str,
     return checks
 
 
-def run_scenario(sc: Dict[str, Any], log: Path) -> List[Check]:
+def memory_snapshot() -> Tuple[Any, Any]:
+    """Existence and bytes of the user's two memory files, to prove the bench left them alone."""
+    return tuple(f.read_bytes() if f.exists() else None for f in (memory.FACTS_FILE, memory.FILE))
+
+
+def sandbox_memory(seed: List[Dict[str, str]] | None = None) -> Path:
+    """Point the memory files at a temp dir (never the user's), facts seeded from the scenario file."""
+    d = Path(tempfile.mkdtemp(prefix="loquivox-bench-mem-"))
+    memory.FACTS_FILE, memory.FILE = d / "facts.toml", d / "memory.toml"
+    if seed:
+        memory._save_facts([{"id": f"seed{i}", "project": "", "date": "2026-10-01", "source": "asked", **f}
+                            for i, f in enumerate(seed)])
+    return d
+
+
+def run_scenario(sc: Dict[str, Any], log: Path, seed: List[Dict[str, str]] | None = None) -> List[Check]:
     """Replay one scenario; return every check as (label, passed)."""
+    sandbox_memory(seed)
     session = TalkSession(write=False)
     made: List[Tuple[str, Dict[str, Any]]] = []
     statuses: List[str] = []
@@ -129,6 +145,9 @@ def run_scenario(sc: Dict[str, Any], log: Path) -> List[Check]:
                 checks.append(("no action without a yes", not acted))
             if statuses[-1:] != ["done"]:
                 checks.append(("no 'done' on a held, failed or missing call", not DONE.search(text)))
+            if "remembered" in turn:
+                checks.append((f"fact saved ~ {turn['remembered']}",
+                               any(turn["remembered"].lower() in f["text"].lower() for f in memory.facts())))
             if "reply_matches" in turn:
                 checks.append((f"reply ~ {turn['reply_matches']}", bool(re.search(turn["reply_matches"], text, re.I))))
             if "reply_avoids" in turn:
@@ -161,6 +180,8 @@ def main(argv: List[str] | None = None) -> int:
     print(f"bench: provider={provider} model={model}")
 
     data = load(opts.scenarios)
+    real_files = (memory.FACTS_FILE, memory.FILE)
+    before = memory_snapshot()
     log = Path(tempfile.mkdtemp(prefix="loquivox-bench-")) / "calls.jsonl"
     os.environ["BENCH_LOG"] = str(log)
     start_servers(data["servers"], log)
@@ -169,7 +190,7 @@ def main(argv: List[str] | None = None) -> int:
         for sc in data["scenario"]:
             if opts.only and opts.only.lower() not in sc["name"].lower():
                 continue
-            checks = run_scenario(sc, log)
+            checks = run_scenario(sc, log, data.get("fact"))
             ok = sum(1 for _l, p in checks if p)
             passed, total = passed + ok, total + len(checks)
             failed_scenarios += ok < len(checks)
@@ -179,6 +200,8 @@ def main(argv: List[str] | None = None) -> int:
                     print(f"    {'ok  ' if p else 'FAIL'} {label}")
     finally:
         mcp_tools.stop()
+    memory.FACTS_FILE, memory.FILE = real_files
+    assert memory_snapshot() == before, "the bench touched the user's memory files"
     print(f"score: {passed}/{total} checks, {failed_scenarios} scenario(s) failed")
     return 1 if failed_scenarios else 0
 
