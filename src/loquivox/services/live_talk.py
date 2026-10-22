@@ -221,6 +221,8 @@ class LiveTalk:
         #: consult again — and an in-flight-only guard would let a fast
         #: backend be asked twice for the same thing.
         self._seen: set = set()
+        # Per delegation: the calls of one backend response, see _on_response_event.
+        self._calls: dict = {}
         self._lock = threading.Lock()
         #: set once the briefing is over — a finish phrase or the model's marker
         self.done = False
@@ -635,19 +637,39 @@ class LiveTalk:
         inner = getattr(event, "event", None)
         if not isinstance(inner, dict):
             return
+        did = str(getattr(event, "delegation_id", "") or "")
+        if inner.get("type") == "response.completed":
+            self._calls.setdefault(did, {"open": set(), "done": False, "n": 0})["done"] = True
+            self._maybe_continue(did)
+            return
         if inner.get("type") != "response.output_item.done":
             return
         item = inner.get("item")
         if not isinstance(item, dict) or item.get("type") != "function_call":
             return
+        call_id = str(item.get("call_id") or "")
+        # Registered here, on the loop, before any thread can answer: a fast
+        # first result must see that its siblings are still owed.
+        group = self._calls.setdefault(did, {"open": set(), "done": False, "n": 0})
+        group["open"].add(call_id)
+        group["n"] += 1
+        # An unknown tool is still a call: the server wants an output for each.
         desk = self._session.desks.get(str(item.get("name") or ""))
-        if desk is None:
-            return
         threading.Thread(target=self._answer_call, daemon=True,
-                         args=(desk, str(item.get("call_id") or ""),
-                               str(item.get("arguments") or ""))).start()
+                         args=(desk, call_id, str(item.get("arguments") or ""),
+                               did)).start()
 
-    def _answer_call(self, desk, call_id: str, arguments: str) -> None:
+    def _maybe_continue(self, did: str) -> None:
+        """``response.create`` once the response is complete and every call has its output."""
+        group = self._calls.get(did)
+        if group and group["done"] and group["n"] and not group["open"]:
+            del self._calls[did]
+            asyncio.run_coroutine_threadsafe(self._continue(), self._loop)
+
+    async def _continue(self) -> None:
+        await self._conn.response.create()
+
+    def _answer_call(self, desk, call_id: str, arguments: str, did: str = "") -> None:
         """
         Run one plugin and give the backend its actual answer.
 
@@ -678,13 +700,15 @@ class LiveTalk:
         from loquivox.managers.chat import ChatManager
 
         try:
+            if desk is None:
+                raise LookupError("unknown tool")
             message = desk.run_now(arguments)
         except Exception as e:
             # `run_now` is documented never to raise, and the belt here is not
             # redundant: the backend response stays paused until this call is
             # answered, so a plugin that broke the contract would hang it for
             # the rest of the session.
-            print(f"⚠️  Plugin {desk.plugin.name} broke its contract: {e}")
+            print(f"⚠️  Plugin call {call_id} failed: {e}")
             message = None
         if message is not None:
             self._session.turns.append(message)
@@ -694,23 +718,26 @@ class LiveTalk:
         # until this call is answered, so an unusable result is still an answer.
         output = message["content"] if message is not None else "No result."
         try:
-            asyncio.run_coroutine_threadsafe(self._tool_result(call_id, output),
+            asyncio.run_coroutine_threadsafe(self._tool_result(call_id, output, did),
                                              self._loop)
         except Exception as e:
-            print(f"⚠️  {desk.plugin.name} result not sent to the backend: {e}")
+            print(f"⚠️  Call {call_id} result not sent to the backend: {e}")
 
-    async def _tool_result(self, call_id: str, output: str) -> None:
+    async def _tool_result(self, call_id: str, output: str, did: str = "") -> None:
         """
-        Submit one tool result, then continue the backend response.
+        Submit one tool result; the last one of its response continues it.
 
         Both halves are required: "appending a function result does not
-        automatically continue the response", and ``response.item.create`` has
-        no acknowledgment of its own, so there is nothing to wait for between
-        them.
+        automatically continue the response". But ``response.create`` before
+        every call of a parallel response has its output closes the session
+        (``function_call_outputs_required``), so it waits for the last one.
         """
         await self._conn.response.item.create(item={
             "type": "function_call_output", "call_id": call_id, "output": output})
-        await self._conn.response.create()
+        group = self._calls.get(did)
+        if group:
+            group["open"].discard(call_id)
+            self._maybe_continue(did)
 
     # --- microphone → session ---------------------------------------------
 
@@ -1326,6 +1353,25 @@ if __name__ == "__main__":
                                             "arguments": "{}"}}))
         assert _wait_for(lambda: bool(outputs))
         assert outputs[0][1], "the backend was left waiting for ever"
+
+        # Parallel calls of one response: a single response.create, only after
+        # the last output (and a call to an unknown tool still gets one).
+        outputs.clear()
+        resp._calls.clear()
+        resp._session.desks.get = lambda name: desk if name == "lookup" else None
+        for cid, name in (("p1", "lookup"), ("p2", "ghost")):
+            resp._handle(_Event(type="response.event", delegation_id="item_5",
+                                event={"type": "response.output_item.done",
+                                       "item": {"type": "function_call", "name": name,
+                                                "call_id": cid, "arguments": "{}"}}))
+        assert _wait_for(lambda: len(outputs) == 2), outputs
+        assert resp._calls["item_5"]["open"] == {"p1", "p2"}  # coroutines not run here
+        # Simulate the loop running them: both outputs, then completed.
+        resp._calls["item_5"]["open"].clear()
+        resp._handle(_Event(type="response.event", delegation_id="item_5",
+                            event={"type": "response.completed", "response": {}}))
+        assert [o[0] for o in outputs].count("LiveTalk._continue") == 1, outputs
+        assert "item_5" not in resp._calls
     finally:
         asyncio.run_coroutine_threadsafe = real_schedule
 
