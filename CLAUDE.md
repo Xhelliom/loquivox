@@ -751,6 +751,12 @@ repeats » lists them (editable text, Delete, manual add, count),
 written by the single Apply through `memory.replace()` — which keeps an id's
 scope, date and count. The core names no source; `tests/test_memory.py` drives
 one it has never heard of.
+`remember(text, project?)` (`chat_only`) is the other half — "retiens que…" —
+and `recall(query)` reads back; both go through `~/.config/loquivox/facts.toml`
+(`[[facts]]`: `id`, `text`, `project`, `date`, `source` = auto/asked), read
+afresh, never rewritten when unreadable. A fact without `id` (written by hand)
+gets a content hash from `facts()`; Settings → Companion → Memory edits them
+through `memory.replace_facts()`, like the rules.
 
 ### Presence across restarts and absences (`handlers/companion.py`, `platform/`)
 

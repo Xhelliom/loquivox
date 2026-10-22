@@ -1127,6 +1127,24 @@ def test_rules_can_open_config_toml():
     print("✓ Rules has a button that opens config.toml")
 
 
+def test_facts_dated_alike_keep_distinct_labels():
+    """remember_session writes up to 3 facts the same day; each row needs its own label."""
+    from loquivox.services import memory
+    real = memory.FACTS_FILE
+    memory.FACTS_FILE = real.with_name("facts-labels.toml")
+    try:
+        memory.add_fact("un"); memory.add_fact("deux")
+        SettingsDialog._instance.destroy()
+        SettingsDialog.show()
+        test_no_label_appears_twice_in_the_window()
+    finally:
+        memory.FACTS_FILE.unlink(missing_ok=True)
+        memory.FACTS_FILE = real
+        SettingsDialog._instance.destroy()
+        SettingsDialog.show()
+    print("✓ two facts of the same day do not repeat a label")
+
+
 if __name__ == "__main__":
     test_every_tab_builds()
     test_window_fits_its_default_width()
@@ -1166,5 +1184,6 @@ if __name__ == "__main__":
     test_no_label_appears_twice_in_the_window()
     test_mcp_state_follows_the_servers_without_reopening()
     test_rules_can_open_config_toml()
+    test_facts_dated_alike_keep_distinct_labels()
     SettingsDialog._instance.destroy()
     print("\nAll settings-layout checks passed.")
