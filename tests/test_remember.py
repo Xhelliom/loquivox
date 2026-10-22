@@ -46,4 +46,19 @@ assert "s1" not in by_id and late in by_id                                  # de
 assert any(f["text"] == "Zeta part en novembre" and f["source"] == "asked" for f in by_id.values())
 assert memory.RECALL.run({"query": "Postgres"}) == memory.NOTHING           # no restart needed
 assert "très courts" in memory.RECALL.run({"query": "mails"}) or "très courts" in memory.RECALL.run({"project": "mail"})
+
+# a malformed facts.toml is never overwritten: writers refuse, the tool says it could not retain
+bad = "[[facts]\nid = \"x\"\ntext = \"précieux\""
+memory.FACTS_FILE.write_text(bad, encoding="utf-8")
+for write in (lambda: memory.add_fact("nouveau"), lambda: memory.replace_facts([(None, "nouveau", "")])):
+    try:
+        write()
+        raise SystemExit("writer overwrote an unreadable file")
+    except ValueError:
+        pass
+assert memory.FACTS_FILE.read_text(encoding="utf-8") == bad and memory.facts() == []   # display stays tolerant
+assert memory.REMEMBER.run({"text": "nouveau"}) == ""
+assert "NOT RETAINED" in memory.REMEMBER.message({}, "")["content"]
+assert memory.FACTS_FILE.read_text(encoding="utf-8") == bad
+memory.FACTS_FILE.unlink()
 print("ok")

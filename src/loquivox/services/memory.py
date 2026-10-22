@@ -395,11 +395,19 @@ RECALL = Plugin(
 register(RECALL)
 
 
-def facts() -> List[Dict[str, str]]:
-    """The retained facts, from the file, read afresh. Missing or malformed is none."""
+def facts(strict: bool = False) -> List[Dict[str, str]]:
+    """
+    The retained facts, from the file, read afresh. Missing is none. Malformed
+    is none too, unless ``strict`` (the writers): they raise ``ValueError``
+    rather than rewrite, and so destroy, a file they could not read.
+    """
     try:
         raw = tomllib.loads(FACTS_FILE.read_text(encoding="utf-8")).get("facts", [])
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as e:
+        if strict:
+            raise ValueError(f"{FACTS_FILE} is unreadable, left untouched: {e}") from e
         return []
     return [{k: str(f.get(k, "")).strip() for k in ("id", "text", "project", "date", "source")}
             for f in raw if isinstance(f, dict) and str(f.get("text", "")).strip()]
@@ -425,7 +433,7 @@ def add_fact(text: str, project: str = "") -> Dict[str, str]:
     """A fact the user asked to retain ("retiens que…"); ``source = "asked"``."""
     fact = _fact(text, project)
     with _lock:
-        _save_facts(facts() + [fact])
+        _save_facts(facts(strict=True) + [fact])
     return fact
 
 
@@ -441,7 +449,7 @@ def replace_facts(items: Sequence[Tuple[Optional[str], str, str]],
         edits = {rid: (text.strip(), project.strip()) for rid, text, project in items if rid is not None}
         shown = set(edits if shown is None else shown)
         kept = []
-        for f in facts():
+        for f in facts(strict=True):
             if f["id"] not in shown:
                 kept.append(f)
             elif edits.get(f["id"], ("",))[0]:
@@ -454,10 +462,19 @@ def _remember_run(arguments: Dict[str, Any]) -> str:
     text = str(arguments.get("text", "")).strip()
     if not text:
         return ""
-    return add_fact(text, str(arguments.get("project", ""))).get("text", "")
+    try:
+        return add_fact(text, str(arguments.get("project", ""))).get("text", "")
+    except (OSError, ValueError) as e:
+        print(f"❌ remember: {e}")
+        return ""
 
 
 def _remember_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
+    if not result:
+        return {"role": "system", "content": (
+            "FACT NOT RETAINED: the memory file could not be written. Say in ONE "
+            "short spoken sentence, in the user's language, that you could not "
+            "remember it — and nothing else.")}
     return {"role": "system", "content": (
         f"FACT RETAINED: «{result}». Confirm in ONE short spoken sentence, in the "
         "user's language, what you will remember — and nothing else.")}
@@ -465,7 +482,7 @@ def _remember_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
 
 def _facts_settings(dialog, vbox, labels) -> None:
     """Settings → Companion → Memory → « What the companion remembers »."""
-    from gi.repository import Gtk
+    from gi.repository import GLib, Gtk
 
     body = dialog._group(
         vbox, _("What the companion remembers"),
@@ -495,8 +512,8 @@ def _facts_settings(dialog, vbox, labels) -> None:
         items.append((None, new.get_text(), new_project.get_text()))
         try:
             replace_facts(items, [rid for rid, *_rest in rows])
-        except OSError as e:
-            status.set_markup(f"<small>❌ {e}</small>")
+        except (OSError, ValueError) as e:
+            status.set_markup(f"<small>❌ {GLib.markup_escape_text(str(e))}</small>")
             return
         new.set_text("")
         new_project.set_text("")
