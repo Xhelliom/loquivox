@@ -112,6 +112,8 @@ CATALOG = {
         "<small>✓ Mémoire enregistrée — effective immédiatement.</small>",
     "🔇 Rule saved…":
         "🔇 Règle retenue…",
+    "🧠 Recalling…":
+        "🧠 Je cherche dans ce que j'ai retenu…",
     "Delete":
         "Supprimer",
     "Rule":
