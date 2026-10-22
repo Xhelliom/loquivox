@@ -225,6 +225,16 @@ def _spoken_name(name: str) -> str:
     return re.sub(r"^mcp_[A-Za-z0-9-]+_", "", name).replace("_", " ")
 
 
+ANSWER_LAST = "Answer the last request."
+
+
+def _ends_on_user(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Some providers (Anthropic) refuse a request ending on an assistant turn (prefill)."""
+    if messages and messages[-1]["role"] == "assistant":
+        return messages + [{"role": "user", "content": ANSWER_LAST}]
+    return messages
+
+
 class TalkSession:
     """One spoken conversation, and the text it produces."""
 
@@ -451,7 +461,7 @@ class TalkSession:
                 break
             calls: List[Dict[str, str]] = []
             provider, model = AIService.agent_target()
-            answer = AIService.complete(base + exchange, model=model, provider=provider,
+            answer = AIService.complete(_ends_on_user(base + exchange), model=model, provider=provider,
                                         on_delta=stream,
                                         tools=self.desks.chat_tools or None,
                                         tool_calls_out=calls)
@@ -610,6 +620,23 @@ if __name__ == "__main__":
     assert [t["role"] for t in _s._spoken_to()] == ["user", "user"]
     assert [t["role"] for t in _s.turns] == ["user", "system"], "the turns were rewritten"
     assert _s._spoken_to()[1]["content"] == "RESULT"
+
+    # A request must never end on an assistant turn (Anthropic: no prefill).
+    _a = [{"role": "system", "content": "s"}, {"role": "assistant", "content": "x"}]
+    assert _ends_on_user(_a)[-1]["role"] == "user" and _a[-1]["role"] == "assistant"
+    assert _ends_on_user(_s._spoken_to())[-1]["role"] == "user"
+    assert _ends_on_user(_a[:1])[-1]["role"] == "system", "only an assistant tail is touched"
+
+    # Through the real path: a delegation whose last turn is the voice's reply.
+    _sent = []
+    _real = AIService.complete
+    AIService.complete = staticmethod(lambda m, **kw: _sent.append(m) or "ok")
+    try:
+        _s.turns = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+        assert _s.consult() == "ok"
+    finally:
+        AIService.complete = _real
+    assert _sent[0][-1]["role"] == "user", "the delegation request ends on an assistant turn"
 
     # The marker only ends the briefing when the reply is not still asking.
     assert ends_briefing("D'accord, je rédige. [[WRITE]]")
