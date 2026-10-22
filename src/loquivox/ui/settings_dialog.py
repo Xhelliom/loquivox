@@ -104,6 +104,7 @@ class SettingsDialog:
     _research_model: Optional[Gtk.ComboBoxText] = None
     _judge_provider: Optional[Gtk.ComboBoxText] = None
     _judge_model: Optional[Gtk.ComboBoxText] = None
+    _vision_provider: Optional[Gtk.ComboBoxText] = None
     _vision_model: Optional[Gtk.ComboBoxText] = None
     _agent_provider: Optional[Gtk.ComboBoxText] = None
     _agent_model: Optional[Gtk.ComboBoxText] = None
@@ -1114,13 +1115,9 @@ class SettingsDialog:
         cls._chat_model = model_combo("")
         row(_("Final text"), cls._chat_provider, cls._chat_model)
 
-        # Vision has no provider of its own: it reads the screen on the chat's.
+        cls._vision_provider = provider_combo(providers, STATE.ai_vision_provider, False)
         cls._vision_model = model_combo("")
-        same = Gtk.Label(label=_("Same as chat"))
-        same.set_xalign(0)
-        same.set_size_request(130, -1)
-        same.get_style_context().add_class("dim-label")
-        row(_("Vision"), same, cls._vision_model)
+        row(_("Vision"), cls._vision_provider, cls._vision_model)
 
         cls._research_provider = provider_combo(
             list(cfg.RESEARCH_PROVIDERS), cfg.RESEARCH_PROVIDER, False)
@@ -1141,6 +1138,7 @@ class SettingsDialog:
         cls._chat_provider.connect("changed", lambda _c: cls._load_models_async())
         cls._agent_provider.connect("changed", lambda _c: cls._load_models_async())
         cls._judge_provider.connect("changed", lambda _c: cls._load_models_async())
+        cls._vision_provider.connect("changed", lambda _c: cls._load_models_async())
         cls._research_provider.connect("changed", cls._on_research_provider_changed)
 
     @classmethod
@@ -1533,6 +1531,7 @@ class SettingsDialog:
         provider = cls._chat_provider.get_active_id() or STATE.ai_provider
         agent_pid = (cls._agent_provider.get_active_id() if cls._agent_provider else "") or provider
         judge_pid = (cls._judge_provider.get_active_id() if cls._judge_provider else "") or provider
+        vision_pid = (cls._vision_provider.get_active_id() if cls._vision_provider else "") or provider
         cls._set_models_status(_("⏳ Listing {provider} models…").format(provider=provider))
 
         def work():
@@ -1548,11 +1547,12 @@ class SettingsDialog:
             ids, error = listing(provider)
             agent_ids, agent_error = (ids, error) if agent_pid == provider else listing(agent_pid)
             judge_ids, judge_error = (ids, error) if judge_pid == provider else listing(judge_pid)
+            vision_ids, vision_error = (ids, error) if vision_pid == provider else listing(vision_pid)
 
             def done():
                 for combo, current, found in (
                         (cls._chat_model, STATE.ai_chat_model, ids),
-                        (cls._vision_model, STATE.ai_vision_model, ids),
+                        (cls._vision_model, STATE.ai_vision_model, vision_ids),
                         (cls._agent_model, STATE.ai_agent_model, agent_ids),
                         (cls._judge_model, STATE.ai_judge_model, judge_ids)):
                     if combo is None:
@@ -1562,7 +1562,7 @@ class SettingsDialog:
                     for mid in found:
                         combo.append_text(mid)
                     combo.get_child().set_text(typed)
-                failure = error or agent_error or judge_error
+                failure = error or agent_error or judge_error or vision_error
                 if failure:
                     cls._set_models_status(_("⚠️ Could not list models — {v0}").format(v0=failure[:120]))
                 else:
@@ -1605,6 +1605,7 @@ class SettingsDialog:
         config_module.reload_config()
         STATE.ai_provider = cls._chat_provider.get_active_id() or STATE.ai_provider
         STATE.ai_chat_model, STATE.ai_vision_model = chat, vision
+        STATE.ai_vision_provider = cls._vision_provider.get_active_id() or STATE.ai_vision_provider
         STATE.ai_agent_provider = cls._agent_provider.get_active_id() or ""
         STATE.ai_agent_model = text(cls._agent_model)
         STATE.ai_judge_provider = cls._judge_provider.get_active_id() or ""

@@ -116,6 +116,40 @@ def test_complete_routes_to_the_agent_provider():
     print("✓ complete() reaches the provider it is told to")
 
 
+def test_vision_reads_on_its_own_provider_not_the_chats():
+    seen = []
+    STATE.ai_provider, STATE.ai_vision_provider = "anthropic", "groq"
+    STATE.ai_vision_model = "qwen/qwen3.8-27b"
+    real = AIService._complete
+    AIService._complete = staticmethod(
+        lambda messages, model, provider=None: seen.append((model, provider)) or "ok")
+    try:
+        assert AIService.vision("what?", "AAAA") == "ok"
+    finally:
+        AIService._complete = real
+    assert seen == [("qwen/qwen3.8-27b", "groq")], seen
+    print("✓ chat on Anthropic, vision on Groq: the capture goes to Groq")
+
+
+def test_a_vision_http_error_is_raised_not_swallowed():
+    # mode.py says it; a bare None would read as "the model returned nothing"
+    real = AIService._complete
+
+    def boom(messages, model, provider=None):
+        raise RuntimeError("Error code: 404 - not_found_error")
+    AIService._complete = staticmethod(boom)
+    try:
+        try:
+            AIService.vision("what?", "AAAA")
+        except RuntimeError as e:
+            assert "404" in str(e)
+        else:
+            raise AssertionError("the error was swallowed")
+    finally:
+        AIService._complete = real
+    print("✓ a vision HTTP error reaches the caller")
+
+
 def test_anthropic_is_a_provider_with_a_managed_key():
     assert "anthropic" in config_module.CFG.AI_PROVIDERS
     assert "ANTHROPIC_API_KEY" in MANAGED_KEYS

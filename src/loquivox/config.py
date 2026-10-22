@@ -167,6 +167,9 @@ class Config:
     AGENT_PROVIDER: str = ""
     MODEL_AGENT: str = ""
     MODEL_VISION: str = "qwen/qwen3.8-27b"
+    # Vision has its own provider: its model id (qwen…) means nothing to the chat's
+    # Anthropic. Not "" = the chat's, on purpose: groq is where the default model lives.
+    VISION_PROVIDER: str = "groq"
     #: who answers the talk engines' ``research`` tool — a model that can search
     #: the web: OpenAI's Responses API + web_search, or a Groq compound model.
     RESEARCH_PROVIDER: str = "groq"
@@ -1093,6 +1096,8 @@ def _build_config() -> Config:
         overrides["AGENT_PROVIDER"] = str(models.get("agent_provider", ""))
     if "agent" in models:
         overrides["MODEL_AGENT"] = str(models["agent"]).strip()
+    if models.get("vision_provider") in base.AI_PROVIDERS:
+        overrides["VISION_PROVIDER"] = str(models["vision_provider"])
     if "vision" in models:
         overrides["MODEL_VISION"] = str(models["vision"])
     if models.get("research_provider") in base.RESEARCH_PROVIDERS:

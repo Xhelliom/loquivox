@@ -932,10 +932,9 @@ def test_models_are_set_in_the_role_table_and_nowhere_else():
         row = _control("Models & keys", role)
         assert isinstance(row, Gtk.Box), role
         combos = [w for w in row.get_children() if isinstance(w, Gtk.ComboBox)]
-        # vision has no provider of its own: it reads on the chat's
-        assert len(combos) == (1 if role == "Vision" else 2), (role, "a provider and a model")
+        assert len(combos) == 2, (role, "a provider and a model")
     for name in ("_agent_provider", "_agent_model", "_chat_provider", "_chat_model",
-                 "_vision_model", "_research_provider", "_research_model",
+                 "_vision_provider", "_vision_model", "_research_provider", "_research_model",
                  "_judge_provider", "_judge_model"):
         assert where[id(getattr(cls, name))] == ("Models & keys", "Models by role"), name
     for name in ("_agent_provider", "_judge_provider"):
@@ -955,8 +954,9 @@ def test_the_role_table_applies():
     restore = _tmp_config()
     saved = (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model,
              STATE.ai_agent_provider, STATE.ai_agent_model,
-             STATE.ai_judge_provider, STATE.ai_judge_model)
+             STATE.ai_judge_provider, STATE.ai_judge_model, STATE.ai_vision_provider)
     try:
+        cls._vision_provider.set_active_id("openai")
         cls._chat_provider.set_active_id("groq")
         cls._chat_model.get_child().set_text("chat-m")
         cls._vision_model.get_child().set_text("vision-m")
@@ -970,6 +970,7 @@ def test_the_role_table_applies():
         cls._on_apply_models(None)
         assert (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model) == (
             "groq", "chat-m", "vision-m")
+        assert STATE.ai_vision_provider == "openai"
         assert AIService.agent_target() == ("openai", "agent-m")
         assert AIService.judge_target() == ("groq", "judge-m")
         cfg = config_module.CFG
@@ -978,7 +979,7 @@ def test_the_role_table_applies():
         restore()
         (STATE.ai_provider, STATE.ai_chat_model, STATE.ai_vision_model,
          STATE.ai_agent_provider, STATE.ai_agent_model,
-         STATE.ai_judge_provider, STATE.ai_judge_model) = saved
+         STATE.ai_judge_provider, STATE.ai_judge_model, STATE.ai_vision_provider) = saved
     print("✓ the role table writes the five roles on Apply")
 
 

@@ -118,6 +118,8 @@ provider = "groq"
 # (pip install -e '.[tts]'; the voice is fetched once, ~60 MB).
 chat = "openai/gpt-oss-120b"
 vision = "qwen/qwen3.6-27b"
+# Vision reads on its own provider, whatever the chat uses (default "groq").
+# vision_provider = "groq"
 # The research tool of talk mode (F4/F6): the conversational model hands a
 # question to this one, which can search the web, and keeps talking until the
 # answer is back. "openai" uses the Responses API with web_search (needs

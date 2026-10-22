@@ -97,6 +97,7 @@ class SettingsManager:
                 "ai_agent_provider": state.ai_agent_provider,
                 "ai_agent_model": state.ai_agent_model,
                 "ai_vision_model": state.ai_vision_model,
+                "ai_vision_provider": state.ai_vision_provider,
                 "ai_judge_provider": state.ai_judge_provider,
                 "ai_judge_model": state.ai_judge_model,
                 "tts_enabled": state.tts_enabled,
@@ -206,6 +207,7 @@ class AppState:
     ai_agent_provider: str = CFG.AGENT_PROVIDER   # "" = the chat's
     ai_agent_model: str = CFG.MODEL_AGENT         # "" = the chat's
     ai_vision_model: str = CFG.MODEL_VISION
+    ai_vision_provider: str = CFG.VISION_PROVIDER
     ai_judge_provider: str = ""   # the memory judge; "" = the chat's
     ai_judge_model: str = ""      # "" = the chat's
 
@@ -251,7 +253,7 @@ class AppState:
         if "tts_model" in saved:
             self.tts_model = saved["tts_model"]
         for key in ("ai_provider", "ai_chat_model", "ai_vision_model",
-                    "ai_agent_provider", "ai_agent_model",
+                    "ai_vision_provider", "ai_agent_provider", "ai_agent_model",
                     "ai_judge_provider", "ai_judge_model"):
             if key in saved and (saved[key] or key.startswith(("ai_agent", "ai_judge"))):
                 setattr(self, key, saved[key])
