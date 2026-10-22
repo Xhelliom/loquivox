@@ -639,8 +639,10 @@ class LiveTalk:
             return
         did = str(getattr(event, "delegation_id", "") or "")
         if inner.get("type") == "response.completed":
-            self._calls.setdefault(did, {"open": set(), "done": False, "n": 0})["done"] = True
-            self._maybe_continue(did)
+            # No call registered: nothing is owed, and no group is left behind.
+            if did in self._calls:
+                self._calls[did]["done"] = True
+                self._maybe_continue(did)
             return
         if inner.get("type") != "response.output_item.done":
             return
@@ -659,12 +661,32 @@ class LiveTalk:
                          args=(desk, call_id, str(item.get("arguments") or ""),
                                did)).start()
 
+    #: How long to wait for ``response.completed`` once every known call has
+    #: its output. Not observed on a paused response (the log keeps no events),
+    #: so the continuation must never depend on it alone.
+    CALLS_GRACE = 1.5
+
     def _maybe_continue(self, did: str) -> None:
-        """``response.create`` once the response is complete and every call has its output."""
+        """
+        ``response.create`` once every call has its output *and* the response
+        is complete. Without ``response.completed`` the same continuation goes
+        out ``CALLS_GRACE`` after the last output — shortcut: a call announced
+        later than that would be missed, the case the completion event exists for.
+        """
         group = self._calls.get(did)
-        if group and group["done"] and group["n"] and not group["open"]:
+        if not group or not group["n"] or group["open"]:
+            return
+        if group["done"]:
             del self._calls[did]
             asyncio.run_coroutine_threadsafe(self._continue(), self._loop)
+        else:
+            self._loop.call_later(self.CALLS_GRACE, self._grace, did, group["n"])
+
+    def _grace(self, did: str, n: int) -> None:
+        group = self._calls.get(did)
+        if group and group["n"] == n and not group["open"]:
+            group["done"] = True
+            self._maybe_continue(did)
 
     async def _continue(self) -> None:
         await self._conn.response.create()
@@ -1354,24 +1376,67 @@ if __name__ == "__main__":
         assert _wait_for(lambda: bool(outputs))
         assert outputs[0][1], "the backend was left waiting for ever"
 
-        # Parallel calls of one response: a single response.create, only after
-        # the last output (and a call to an unknown tool still gets one).
-        outputs.clear()
-        resp._calls.clear()
-        resp._session.desks.get = lambda name: desk if name == "lookup" else None
-        for cid, name in (("p1", "lookup"), ("p2", "ghost")):
-            resp._handle(_Event(type="response.event", delegation_id="item_5",
-                                event={"type": "response.output_item.done",
-                                       "item": {"type": "function_call", "name": name,
-                                                "call_id": cid, "arguments": "{}"}}))
-        assert _wait_for(lambda: len(outputs) == 2), outputs
-        assert resp._calls["item_5"]["open"] == {"p1", "p2"}  # coroutines not run here
-        # Simulate the loop running them: both outputs, then completed.
-        resp._calls["item_5"]["open"].clear()
-        resp._handle(_Event(type="response.event", delegation_id="item_5",
-                            event={"type": "response.completed", "response": {}}))
-        assert [o[0] for o in outputs].count("LiveTalk._continue") == 1, outputs
-        assert "item_5" not in resp._calls
+        # Parallel calls of one response, through the REAL ``_tool_result`` on a
+        # running loop: a single response.create, after the last output, whether
+        # ``response.completed`` lands before the outputs, after them, or never
+        # (a Held plugin answers like any other, and an unknown tool still gets one).
+        asyncio.run_coroutine_threadsafe = real_schedule
+        wire: list = []
+
+        class _Wire:
+            @staticmethod
+            async def create() -> None:
+                wire.append("create")
+
+            class item:
+                @staticmethod
+                async def create(item) -> None:
+                    await asyncio.sleep(0.05 if item["call_id"] == "p1" else 0)
+                    wire.append(item["call_id"])
+
+        resp._conn = _Event(response=_Wire)
+        resp.CALLS_GRACE = 0.3
+        threading.Thread(target=resp._loop.run_forever, daemon=True).start()
+        held = _Desk("Run launch_lot? — ask the user")    # a Held result is an output too
+        resp._session.desks.get = lambda name: {"lookup": desk, "held": held}.get(name)
+
+        def _call(did, cid, name):
+            resp._loop.call_soon_threadsafe(resp._handle, _Event(
+                type="response.event", delegation_id=did,
+                event={"type": "response.output_item.done",
+                       "item": {"type": "function_call", "name": name,
+                                "call_id": cid, "arguments": "{}"}}))
+
+        def _completed(did):
+            resp._loop.call_soon_threadsafe(resp._handle, _Event(
+                type="response.event", delegation_id=did,
+                event={"type": "response.completed", "response": {}}))
+
+        # a) completed arrives while the outputs are still on their way
+        for cid, name in (("p1", "lookup"), ("p2", "held"), ("p3", "ghost")):
+            _call("r_a", cid, name)
+        _completed("r_a")
+        assert _wait_for(lambda: wire.count("create") == 1), wire
+        assert wire[-1] == "create" and sorted(wire[:-1]) == ["p1", "p2", "p3"], wire
+        # b) completed arrives after every output
+        wire.clear()
+        for cid in ("q1", "q2"):
+            _call("r_b", cid, "lookup")
+        assert _wait_for(lambda: len(wire) == 2), wire
+        _completed("r_b")
+        assert _wait_for(lambda: wire[-1:] == ["create"]), wire
+        # c) completed never comes: the grace period continues, once
+        wire.clear()
+        for cid in ("s1", "s2"):
+            _call("r_c", cid, "lookup")
+        assert _wait_for(lambda: wire[-1:] == ["create"]), wire
+        time.sleep(0.6)
+        assert wire.count("create") == 1 and len(wire) == 3, wire
+        # d) a response without calls leaves nothing behind
+        _completed("r_d")
+        time.sleep(0.1)
+        assert "r_d" not in resp._calls, resp._calls
+        resp._loop.call_soon_threadsafe(resp._loop.stop)
     finally:
         asyncio.run_coroutine_threadsafe = real_schedule
 
