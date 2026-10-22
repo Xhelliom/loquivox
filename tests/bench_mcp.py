@@ -81,6 +81,11 @@ def _match_calls(expected: List[Dict[str, Any]], made: List[Tuple[str, Dict[str,
     return checks
 
 
+def memory_snapshot() -> Tuple[Any, Any]:
+    """Existence and bytes of the user's two memory files, to prove the bench left them alone."""
+    return tuple(f.read_bytes() if f.exists() else None for f in (memory.FACTS_FILE, memory.FILE))
+
+
 def sandbox_memory(seed: List[Dict[str, str]] | None = None) -> Path:
     """Point the memory files at a temp dir (never the user's), facts seeded from the scenario file."""
     d = Path(tempfile.mkdtemp(prefix="loquivox-bench-mem-"))
@@ -175,7 +180,8 @@ def main(argv: List[str] | None = None) -> int:
     print(f"bench: provider={provider} model={model}")
 
     data = load(opts.scenarios)
-    user_facts = memory.FACTS_FILE
+    real_files = (memory.FACTS_FILE, memory.FILE)
+    before = memory_snapshot()
     log = Path(tempfile.mkdtemp(prefix="loquivox-bench-")) / "calls.jsonl"
     os.environ["BENCH_LOG"] = str(log)
     start_servers(data["servers"], log)
@@ -194,7 +200,8 @@ def main(argv: List[str] | None = None) -> int:
                     print(f"    {'ok  ' if p else 'FAIL'} {label}")
     finally:
         mcp_tools.stop()
-    assert memory.FACTS_FILE != user_facts, "the bench must never touch the user's facts"
+    memory.FACTS_FILE, memory.FILE = real_files
+    assert memory_snapshot() == before, "the bench touched the user's memory files"
     print(f"score: {passed}/{total} checks, {failed_scenarios} scenario(s) failed")
     return 1 if failed_scenarios else 0
 
