@@ -41,6 +41,13 @@ out = memory.RECALL.run({"query": "kubernetes"})
 assert out == memory.NOTHING and "invent nothing" in memory.RECALL.message({}, out)["content"]
 assert memory.RECALL.run({}) == memory.NOTHING
 
+# question filler alone must not match anything ("sur" is in "on garde Postgres sur ce projet")
+memory.FACTS_FILE.write_text(
+    '\n[[facts]]\nid = "x"\ntext = "on garde Postgres sur ce projet"\nproject = "loquivox"\n'
+    'date = "2026-10-01"\nsource = "session"\n', encoding="utf-8")
+assert memory.RECALL.run({"query": "où on en était sur kubernetes ?"}) == memory.NOTHING
+assert "Postgres" in memory.RECALL.run({"query": "où on en était sur loquivox ?"})
+
 # offered like any tool: chat_only, so never in a briefing
 assert memory.RECALL.chat_only and memory.RECALL.is_tool and memory.RECALL in plugins.all_plugins()
 print("ok")

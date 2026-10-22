@@ -326,13 +326,22 @@ RECALL_FRAME = (
     "from them, in their language, and only from them.\n<facts>\n{facts}\n</facts>")
 
 
+# question filler that would match any fact ("où on en était sur X"); shortcut: fixed fr/en list, extend when a new one slips through
+STOPWORDS = frozenset(
+    "sur était etait les des une aux que qui quoi est ont pour dans avec pas par plus "
+    "tout tous cette ces son ses mon mes ton tes nos vos leur leurs elle ils elles nous vous "
+    "où en on quel quelle quels quelles comment pourquoi quand what where when how why which "
+    "the was were are and for with about this that these those from have has had did does "
+    "you your our their his her its who whom".split())
+
+
 def recall(query: str = "", project: str = "") -> List[Dict[str, str]]:
     """The most recent retained facts matching a keyword of ``query`` and/or ``project``."""
     try:
         items = tomllib.loads(FACTS_FILE.read_text(encoding="utf-8")).get("facts", [])
     except (OSError, ValueError):
         return []
-    words = [w for w in re.findall(r"\w+", query.casefold()) if len(w) > 2]
+    words = [w for w in re.findall(r"\w+", query.casefold()) if len(w) > 2 and w not in STOPWORDS]
     project = project.strip().casefold()
     if not words and not project:
         return []
