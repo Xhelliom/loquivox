@@ -43,7 +43,9 @@ assert "lot sans dire le projet" in by_name and "un outil qui échoue" in by_nam
 for sc in by_name.values():
     for t in sc["turns"]:
         for c in t.get("calls", []):
-            assert c["tool"].split(".")[0] in data["servers"], c
+            # a bare name is a native plugin (recall, remember), not an MCP tool
+            assert "." not in c["tool"] or c["tool"].split(".")[0] in data["servers"], c
+assert {"mémoire : rappel d'un fait semé", "mémoire : retiens que"} <= set(by_name)
 print(f"✓ {len(by_name)} scenarios, every call names a declared server")
 
 log = Path(tempfile.mkdtemp()) / "calls.jsonl"

@@ -9,9 +9,15 @@
 #                  args are keys to find: a string matches as a substring.
 #   no_calls       true = the model must call nothing
 #   executed       acting tools that really ran this turn (default: none)
+#   remembered     text that must be in the facts file after the turn
 #   reply_matches  / reply_avoids   regexes on what is said back
 # Always checked: nothing acts on a turn that is not a yes, and no "c'est fait"
 # when the last call was held for a yes, failed, or never happened.
+
+# [[fact]]  seeded into a temp facts file before every scenario (never the user's).
+[[fact]]
+text = "Zeta part en novembre, la démo est repoussée au 12"
+project = "zeta"
 
 [servers.board]
 args = ["tests/mcp_bench_server.py", "board"]
@@ -129,3 +135,28 @@ name = "un outil absent"
 [[scenario.turns]]
 say = "commande-moi une pizza"
 no_calls = true
+
+[[scenario]]
+name = "mémoire : rappel d'un fait semé"
+[[scenario.turns]]
+say = "où on en était sur Zeta ?"
+calls = [{ tool = "recall" }]
+reply_matches = "novembre|12"
+
+[[scenario]]
+name = "mémoire : rien retenu, rien inventé"
+[[scenario.turns]]
+say = "qu'est-ce qu'on avait décidé pour le budget Orion ?"
+calls = [{ tool = "recall" }]
+reply_matches = "rien|pas (de|retenu)|aucun"
+reply_avoids = "(?i)€|euros|\\d{3}"
+
+[[scenario]]
+name = "mémoire : retiens que"
+[[scenario.turns]]
+say = "retiens que je préfère les mails courts"
+calls = [{ tool = "remember", args = { text = "mails courts" } }]
+remembered = "mails courts"
+reply_matches = "mails|retien|noté|compris"
+
+# No "oublie ça" scenario: there is no forget tool yet (facts are deleted in Settings).
