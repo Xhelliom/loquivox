@@ -87,7 +87,41 @@ def test_delegation_after_close_is_dropped():
     print("✓ a delegation after close() is not started")
 
 
+def test_cascade_chat_is_not_capped_and_says_why():
+    calls = []
+
+    def listen(keys, idle, session, prefix=None):
+        calls.append(1)
+        session.user_turns = 31               # past the briefing limit
+        return None, ("cancel" if len(calls) == 2 else "result")
+
+    session = SimpleNamespace(write=False, user_turns=0, desks=SimpleNamespace(take=lambda: None))
+    mode_module.CFG = config_module.CFG = replace(config_module.CFG, TALK_MAX_TURNS=30)
+    ModeHandler._talk_listen = staticmethod(listen)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        dropped = ModeHandler._talk_converse(session, Keys())
+    assert dropped and len(calls) == 2 and "session ended: cancel (31 user turns)" in out.getvalue(), out.getvalue()
+    print("✓ the cascade does not cap a chat, and prints its reason")
+
+
+def test_close_during_consult_sends_nothing():
+    talk = LiveTalk.__new__(LiveTalk)
+    talk._stop, sent = False, []
+    talk._settle = lambda **k: None
+    talk._append = lambda *a, **k: sent.append(a)
+    talk._session = SimpleNamespace(
+        consult=lambda: setattr(talk, "_stop", True) or "answer",   # close() lands mid-thought
+        desks=SimpleNamespace(coming=lambda: False))
+    with contextlib.redirect_stdout(io.StringIO()):
+        talk._consult("d1")
+    assert not sent, sent
+    print("✓ close() during consult() sends nothing")
+
+
 if __name__ == "__main__":
     test_companion_is_not_capped()
     test_briefing_is_capped_and_says_why()
     test_delegation_after_close_is_dropped()
+    test_cascade_chat_is_not_capped_and_says_why()
+    test_close_during_consult_sends_nothing()

@@ -698,7 +698,7 @@ class ModeHandler:
                         continue
                     if pressed == "cancel":
                         cancelled = True
-                        reason = "stop phrase" if quiet else "cancel key"
+                        reason = "cancel"   # the companion's stop phrase and its key both land here
                         break
                     if pressed == "finish":
                         reason = "key"
@@ -763,13 +763,19 @@ class ModeHandler:
 
         cfg = config_module.CFG
         prefix = None  # audio captured over a reply — the next turn's first words
-        while session.user_turns < cfg.TALK_MAX_TURNS:
+
+        def end(reason: str, dropped: bool) -> bool:
+            print(f"🔚 Talk session ended: {reason} ({session.user_turns} user turns)")
+            return dropped
+
+        # A briefing's limit only: a chat (F4) ends on the key, not on a count.
+        while not session.write or session.user_turns < cfg.TALK_MAX_TURNS:
             idle_action = "finish" if session.user_turns else "cancel"
             audio, action = ModeHandler._talk_listen(keys, idle_action, session,
                                                      prefix=prefix)
             prefix = None
             if action == "cancel":
-                return True
+                return end("cancel", True)
             if action == "result":
                 # Nothing was said: drop the (silent) capture without paying
                 # for its transcription. The turn is the assistant's.
@@ -815,7 +821,7 @@ class ModeHandler:
                 if text:
                     ChatManager.add_message("user", f"🗣️ {text}")
                     session.add_user(text)
-                return False
+                return end("key", False)
             if not text:
                 continue  # nothing said (or a hallucination) — just listen again
 
@@ -824,7 +830,7 @@ class ModeHandler:
                 # "Vas-y, écris-le" — no point paying for a reply that would
                 # only say "ok"; the turn still counts as part of the brief.
                 session.add_user(text)
-                return False
+                return end("stop phrase", False)
 
             OverlayManager.set_status(_("Thinking…"))
             reply = session.reply(
@@ -841,10 +847,9 @@ class ModeHandler:
                 # The model took the floor to the writing phase — either because
                 # the user said so in words the phrase list doesn't cover, or
                 # (finish_by_model) because it judged the brief complete.
-                return False
-        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached"
-              + (" — writing the text" if session.write else ""))
-        return False
+                return end("briefing over", False)
+        print(f"🗣️  Talk mode: {cfg.TALK_MAX_TURNS} turns reached — writing the text")
+        return end("max_turns", False)
 
     @staticmethod
     def _talk_listen(keys, idle_action: str, session,
