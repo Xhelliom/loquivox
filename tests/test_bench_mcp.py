@@ -99,6 +99,39 @@ try:
     assert bench_mcp.memory_snapshot() == before, "the user's memory files changed"
     print("✓ remember lands in the temp dir, the real memory files are untouched")
 
+    # 3c. the yes arrives late and the key is respelled: still one action, once
+    from loquivox.services.talk import TalkSession
+    from loquivox.state import STATE
+    session = TalkSession(write=False)
+    STATE.talk_session = session
+    plugin = next(p for p in mcp_tools._REGISTRY.values() if p.name == "mcp_board_launch_lot")
+    a = {"project": "loquivox", "lot": 13, "note": "a b"}
+    assert isinstance(plugin.run(dict(a)), mcp_tools.Held)
+    assert mcp_tools.awaiting(session)
+    session.add_user("oui")
+    assert isinstance(plugin.run(dict(a, note="a\u00a0 b")), mcp_tools.Held)   # re-asked: yes not spent
+    res = plugin.run(dict(a, note="a\u00a0 b", confirmed=True))
+    assert not isinstance(res, mcp_tools.Held), res
+    assert not mcp_tools.awaiting(session)
+    STATE.talk_session = None
+    print("✓ late yes + respelled arguments → runs once")
+
+    # 3d. arguments equal once normalised share one key, and one yes covers the second spelling
+    session = TalkSession(write=False)
+    STATE.talk_session = session
+    asked = {"project": "loquivox", "lot": 13, "note": "Le lot «\u00a0auth\u00a0» est  prêt "}
+    respelled = dict(asked, note="Le lot « auth » est prêt")
+    key = lambda a: json.dumps(mcp_tools._norm(a), sort_keys=True, default=str)
+    assert key(asked) == key(respelled) and asked != respelled
+    assert isinstance(plugin.run(dict(asked)), mcp_tools.Held)
+    assert isinstance(plugin.run(dict(respelled, confirmed=True)), mcp_tools.Held)   # no yes yet
+    session.add_user("oui")
+    res = plugin.run(dict(respelled, confirmed=True))
+    assert not isinstance(res, mcp_tools.Held), res
+    assert isinstance(plugin.run(dict(respelled, confirmed=True)), mcp_tools.Held)   # the yes is spent
+    STATE.talk_session = None
+    print("✓ «\u00a0»/folded/trailing spaces → same key, one yes covers the respelled call")
+
     # 4. a model that claims it without calling anything fails the bench
     ai_module.AIService.complete = fake(liar=True)
     for name in ("un outil absent", "lot 13 explicite"):
