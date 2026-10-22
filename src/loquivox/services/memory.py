@@ -491,14 +491,14 @@ def _facts_settings(dialog, vbox, labels) -> None:
           "The file: ") + str(FACTS_FILE))
     rows: List[Tuple[str, Gtk.Entry, Gtk.Entry, Gtk.CheckButton]] = []
     shown = facts()
-    for f in shown:
+    for i, f in enumerate(shown, 1):
         entry, project = Gtk.Entry(text=f["text"]), Gtk.Entry(text=f["project"], width_chars=12)
         project.set_placeholder_text(_("Project"))
         drop = Gtk.CheckButton(label=_("Delete"))
         side = Gtk.Box(spacing=8)
         for w in (project, Gtk.Label(label=_("requested") if f["source"] == "asked" else _("automatic")), drop):
             side.pack_start(w, False, False, 0)
-        dialog._field(body, f["date"] or _("Fact"), entry, labels, extra=side)
+        dialog._field(body, _("Fact {n}").format(n=i), entry, labels, extra=side)
         rows.append((f["id"], entry, project, drop))
     body.pack_start(Gtk.Label(label=_("{n} fact(s) retained").format(n=len(shown)), xalign=0), False, False, 0)
     new, new_project = Gtk.Entry(), Gtk.Entry(width_chars=12)

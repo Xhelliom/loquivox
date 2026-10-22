@@ -122,8 +122,8 @@ CATALOG = {
         "demandé",
     "automatic":
         "auto",
-    "Fact":
-        "Fait",
+    "Fact {n}":
+        "Fait {n}",
     "{n} fact(s) retained":
         "{n} fait(s) retenu(s)",
     "Remember that…":
