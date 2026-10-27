@@ -75,12 +75,14 @@ def _start_companion() -> bool:
         from loquivox.handlers import companion
         from loquivox.i18n import _
         from loquivox.services.presence import Presence
+        from loquivox.state import STATE
         from loquivox.ui.companion_bubble import CompanionBubble
 
         holder = []
         bubble = CompanionBubble(
             on_click=lambda: holder[0].click(),
-            modes=[(_(label), lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES])
+            modes=[(_(label), lambda m=m: holder[0].set_mode(m)) for m, label in companion.MODES],
+            current=lambda: [m for m, _l in companion.MODES].index(STATE.presence_mode))
         presence = Presence(lambda: holder[0].on_wake(),
                              wake_model=config_module.CFG.COMPANION_WAKE_WORD)
         holder.append(companion.install(presence, bubble))

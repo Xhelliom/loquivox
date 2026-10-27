@@ -207,6 +207,31 @@ def test_idle_never_cuts_a_conversation():
     assert STATE.presence_mode == "silent"
 
 
+def test_off_closes_the_mic_and_survives_a_restart():
+    c, log = _make()
+    c.set_mode("off")
+    assert "release" in log and not c.presence_on()
+    assert SettingsManager.load()["presence_mode"] == "off"
+    STATE.presence_mode = "active"            # a fresh process
+    comp.Companion(_Presence([]), _Bubble([])).start_modes()
+    assert STATE.presence_mode == "off"
+    c.toggle_silence()                        # F7 turns it back on rather than into silence
+    assert STATE.presence_mode == "active"
+
+
+def test_the_menu_lists_every_mode_and_checks_the_current_one():
+    from gi.repository import Gtk
+    from loquivox.ui import companion_bubble as cb
+    assert [m for m, _l in comp.MODES][:3] == ["off", "silent", "active"]
+    STATE.presence_mode = "silent"
+    bubble = cb.CompanionBubble.__new__(cb.CompanionBubble)
+    bubble._modes = [(label, lambda: None) for _m, label in comp.MODES]
+    bubble._current = lambda: [m for m, _l in comp.MODES].index(STATE.presence_mode)
+    items = bubble._build_menu().get_children()
+    assert len(items) == len(comp.MODES)
+    assert [i.get_active() for i in items] == [m == "silent" for m, _l in comp.MODES]
+
+
 def test_swayidle_lines():
     seen = []
     wayland.WaylandAway._idle_line("idle\n", seen.append)
