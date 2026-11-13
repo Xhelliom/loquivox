@@ -43,6 +43,7 @@ import re
 import tempfile
 import threading
 import time
+import unicodedata
 import weakref
 from asyncio import run_coroutine_threadsafe as _submit  # bound now: the engines' tests patch asyncio's
 from dataclasses import dataclass, field
@@ -113,6 +114,23 @@ _lock = threading.Lock()
 #: session → {(server, tool, arguments): how many times the user had spoken
 #: when we asked}; a question belongs to the session that heard it
 _pending: "weakref.WeakKeyDictionary[Any, Dict[Any, int]]" = weakref.WeakKeyDictionary()
+
+
+def _norm(v: Any) -> Any:
+    """Arguments as the user would hear them: NFKC, runs of space folded — a
+    model that rewrites a text with a no-break space must not become a new action."""
+    if isinstance(v, str):
+        return " ".join(unicodedata.normalize("NFKC", v).split())
+    if isinstance(v, dict):
+        return {k: _norm(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_norm(x) for x in v]
+    return v
+
+
+def awaiting(session: Any) -> bool:
+    """True while an acting call of this session waits for the user's yes."""
+    return bool(session is not None and _pending.get(session))
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -278,14 +296,18 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
         args = dict(args)
         confirmed = bool(args.pop("confirmed", False))
         if acting:
-            key = (s.name, tool.name, json.dumps(args, sort_keys=True, default=str))
+            key = (s.name, tool.name, json.dumps(_norm(args), sort_keys=True, default=str))
             from loquivox.state import STATE   # lazy: the rules CLI runs without GTK
             session = STATE.talk_session
             asked = _pending.setdefault(session, {}) if session is not None else {}
             spoken = session.user_turns if session is not None else 0
             if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
-                asked[key] = spoken
-                print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes")
+                fresh = key not in asked
+                # keep the first count: re-asking after the yes must not spend it
+                asked.setdefault(key, spoken)
+                print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes "
+                      f"(confirmed={'yes' if confirmed else 'no'}, spoken={spoken}, "
+                      f"asked={asked[key]}, key={'new' if fresh else 'same'})")
                 question = _("Run {tool} ({server}) with {args}? Say yes to go ahead.").format(
                     tool=tool.name, server=s.name,
                     args=", ".join(f"{k}={v}" for k, v in args.items()) or _("no arguments"))
