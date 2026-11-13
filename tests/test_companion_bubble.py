@@ -104,6 +104,13 @@ assert clicks == [1] and saved == [bubble._pos], (clicks, saved)
 bubble._on_press(ev(3))
 assert clicks == [1, "menu"], clicks
 
+# Stowed by a throw, _pos is still the release point: pulling the tab must drag from the edge.
+bubble._docked, bubble._edge, bubble._pos = True, "right", (700, 300)
+bubble.undock = lambda: setattr(bubble, "_docked", False); bubble.dock = lambda e, vx=0.0: None
+bubble._on_press(ev(1)); bubble._on_motion(ev(1, 10 + cb.DRAG_THRESHOLD + 5))
+assert bubble._pos[0] <= cb.rest_margin("right", cb.SIZE, 1920) + cb.DRAG_THRESHOLD + 5, bubble._pos
+bubble._on_release(ev(1)); bubble._docked = False
+
 # The render timer: ~60 fps only while something moves, 15 fps for the idle
 # sway, none when silent and settled, hidden, or when GTK animations are off.
 iv = cb.tick_interval

@@ -731,6 +731,8 @@ class CompanionBubble(Gtk.Window):
         if ev.button == 1:
             # X11: root coordinates, which do not move with the window.
             x, y = (ev.x, ev.y) if self._wl else (ev.x_root, ev.y_root)
+            if self._docked:      # after a throw _pos is the release point: drag from the edge instead
+                self._pos = (rest_margin(self._edge, self._w, self._screen_size()[0]), self._pos[1])
             self._drag.start(x, y, self._pos, None if self._wl else "click")
             self._trace = []
             self._press = True
