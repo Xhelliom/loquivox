@@ -126,7 +126,7 @@ def _run() -> None:
     gi.require_version("Gtk", "3.0")
     from gi.repository import GLib
 
-    from loquivox.config import CFG, HOTKEY_DESCRIPTIONS
+    from loquivox.config import CFG, HOTKEY_DESCRIPTIONS, spec_active
     from loquivox.handlers.keyboard import KeyboardHandler
     from loquivox.secrets import load_secrets
     from loquivox.state import STATE
@@ -144,7 +144,11 @@ def _run() -> None:
         print(f"🪵 Log: {log_path} · bug report: loquivox --report")
 
     i = 1
-    for mode_id, (label, _specs) in CFG.HOTKEY_DEFS.items():
+    for mode_id, (_label, specs) in CFG.HOTKEY_DEFS.items():
+        label = " / ".join(sp for sp in specs
+                           if spec_active(mode_id, sp, CFG.HOTKEYS_ACTIVE))
+        if specs and not label:
+            continue
         desc = HOTKEY_DESCRIPTIONS.get(mode_id, "Unknown Mode")
         print(f" {i}. {label:<13}: {desc}")
         i += 1

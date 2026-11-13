@@ -16,7 +16,7 @@ import evdev
 from evdev import InputDevice, ecodes
 
 from loquivox.config import (
-    CFG, MODIFIER_CODES, POSTPROCESS_MAX_LEVEL, modifier_name, resolve_hotkeys,
+    CFG, MODIFIER_CODES, SESSION_MODES, POSTPROCESS_MAX_LEVEL, modifier_name, resolve_hotkeys,
 )
 from loquivox.handlers.mode import ModeHandler
 from loquivox.i18n import _
@@ -192,6 +192,15 @@ class KeyboardHandler:
     _BY_TRIGGER: Dict[int, List[Tuple[str, Tuple[frozenset, ...]]]] = {}
     _held: set = set()
     _active: Dict[int, str] = {}
+    _scope: str = "all"     # [hotkeys] active, set by reload_hotkeys
+
+    @classmethod
+    def set_scope(cls, scope: str) -> None:
+        """The one writer of ``[hotkeys] active``: save it, apply it live."""
+        from loquivox.config import reload_config
+        from loquivox.config_io import update_section
+        update_section("hotkeys", {"active": scope})
+        cls.reload_hotkeys(reload_config())
 
     @classmethod
     def reload_hotkeys(cls, config: Any = None) -> None:
@@ -213,6 +222,7 @@ class KeyboardHandler:
         for entries in by_trigger.values():
             entries.sort(key=lambda b: len(b[1]), reverse=True)
         cls._BY_TRIGGER = by_trigger
+        cls._scope = getattr(cfg, "HOTKEYS_ACTIVE", "all")
 
     @staticmethod
     def _is_keyboard(dev: InputDevice) -> bool:
@@ -363,9 +373,22 @@ class KeyboardHandler:
     def _match_binding(cls, trigger: int) -> Optional[str]:
         """Mode whose chord (this trigger + currently-held modifiers) matches."""
         for mode, mods in cls._BY_TRIGGER.get(trigger, ()):  # most-specific first
-            if all(group & cls._held for group in mods):
-                return mode
+            if not all(group & cls._held for group in mods):
+                continue
+            if not cls._scope_allows(mode, bool(mods)):
+                continue
+            return mode
         return None
+
+    @classmethod
+    def _scope_allows(cls, mode: str, is_chord: bool) -> bool:
+        """The single filter of ``[hotkeys] active``: bare keys / chords cut here."""
+        if cls._scope == "all" or is_chord and cls._scope == "chords":
+            return True
+        if mode in SESSION_MODES:   # Esc / Space: theirs while a session runs
+            return bool(STATE.recording or STATE.talk_active
+                        or STATE.stream_session is not None)
+        return False
 
     @classmethod
     def _is_recording_mode(cls, mode: str) -> bool:

@@ -124,7 +124,10 @@ network, no key, API error.
 | *(unbound)* | **Refine** | Stop, then pick this dictation's refinement level |
 
 Keys are **hold-to-talk** by default; tick *Toggle mode* in Settings → Dictation for press-to-start / press-to-stop.
-All of them are remappable in **Settings → Hotkeys**, combos included. `Refine` ships unbound —
+All of them are remappable in **Settings → Hotkeys**, combos included. If F4, F6… are
+needed in other apps, the same tab (or the tray menu → *Hotkeys*) can keep only the chords
+with a modifier (`active = "chords"`) or no global hotkey at all (`"none"`); Esc and Space
+still work during a recording. `Refine` ships unbound —
 assign a key to use it.
 
 Both conversations (`F4` and `F6`) can **look things up**: when the model needs a fact it

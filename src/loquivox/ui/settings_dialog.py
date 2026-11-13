@@ -2918,6 +2918,28 @@ class SettingsDialog:
         "companion": N_("Companion — silence"), "companion_wake": N_("Companion — wake"),
     }
 
+    _SCOPE_LABELS = (("all", N_("All")), ("chords", N_("With modifier only")),
+                     ("none", N_("None")))
+
+    @classmethod
+    def _grey_hotkeys(cls) -> None:
+        """Grey the bindings the chosen scope cuts (a session key is never cut)."""
+        from loquivox.config import spec_active
+        scope = cls._hotkey_scope.get_active_id()
+        for mode_id, entry in cls._hotkey_entries.items():
+            specs = entry.get_text().replace(",", " ").split()
+            on = not specs or any(spec_active(mode_id, sp, scope) for sp in specs)
+            entry.set_sensitive(on)
+        for btn, mode_id in zip(cls._hotkey_capture_btns, cls._hotkey_entries):
+            btn.set_sensitive(cls._hotkey_entries[mode_id].get_sensitive())
+
+    @classmethod
+    def refresh_hotkey_scope(cls) -> None:
+        """The tray changed the scope: show the same value here."""
+        combo = getattr(cls, "_hotkey_scope", None)
+        if combo is not None:
+            combo.set_active_id(config_module.CFG.HOTKEYS_ACTIVE)
+
     @classmethod
     def _build_hotkeys_section(cls, vbox: Gtk.Box) -> None:
         """Editable per-mode key bindings (evdev key names), applied live."""
@@ -2941,6 +2963,18 @@ class SettingsDialog:
         cls._hotkey_entries = {}
         cls._hotkey_capture_btns = []
 
+        scope_body = cls._group(
+            vbox, _("Which hotkeys listen"),
+            _("Global hotkeys are seen in every app. Cut the bare keys if F4, F6… "
+              "are needed elsewhere. Esc and Space still work during a recording; "
+              "the companion, tray and bubble are unaffected."))
+        cls._hotkey_scope = Gtk.ComboBoxText()
+        for value, label in cls._SCOPE_LABELS:
+            cls._hotkey_scope.append(value, _(label))
+        cls._hotkey_scope.set_active_id(config_module.CFG.HOTKEYS_ACTIVE)
+        cls._hotkey_scope.connect("changed", lambda _c: cls._grey_hotkeys())
+        cls._field(scope_body, _("Active hotkeys"), cls._hotkey_scope, labels)
+
         for mode_id, (_label, specs) in config_module.CFG.HOTKEY_DEFS.items():
             name = _(cls._HOTKEY_LABELS.get(mode_id, mode_id.replace("_", " ").title()))
             entry = Gtk.Entry()
@@ -2957,6 +2991,7 @@ class SettingsDialog:
             cls._hotkey_entries[mode_id] = entry
             cls._hotkey_capture_btns.append(capture_btn)
 
+        cls._grey_hotkeys()
         cls._note(vbox,
                   _("Click <b>⌨ Set</b> then press a key or combo (e.g. Alt+Space) — "
                   "or type space-separated specs like <tt>ALT+SPACE F3</tt> "
@@ -2985,7 +3020,7 @@ class SettingsDialog:
 
         from loquivox.config_io import ConfigWriteError, update_section
         try:
-            update_section("hotkeys", parsed)
+            update_section("hotkeys", {**parsed, "active": cls._hotkey_scope.get_active_id()})
         except ConfigWriteError as e:
             cls._set_hotkey_status(f"❌ {e}")
             return
@@ -3007,6 +3042,8 @@ class SettingsDialog:
     def _set_capture_enabled(cls, enabled: bool) -> None:
         for b in (cls._hotkey_capture_btns or []):
             b.set_sensitive(enabled)
+        if enabled:
+            cls._grey_hotkeys()
 
     @classmethod
     def _on_capture_hotkey(cls, _btn: Gtk.Button, mode_id: str, entry: Gtk.Entry) -> None:

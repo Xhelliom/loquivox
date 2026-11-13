@@ -23,7 +23,7 @@ import cairo
 import numpy as np
 
 from loquivox.i18n import N_, _
-from loquivox.config import CFG
+from loquivox.config import CFG, spec_active
 from loquivox.platform import SESSION_TYPE
 from loquivox.state import STATE
 
@@ -416,7 +416,9 @@ class GtkOverlay(Gtk.Window):
         The keycap labels of an action's primary binding — ``["Ctrl", "Space"]``
         — read from the live HOTKEY_DEFS (first spec wins), or None if unbound.
         """
-        specs = CFG.HOTKEY_DEFS.get(action, ("", []))[1]
+        import loquivox.config as live   # CFG is rebound by reload_config()
+        specs = [sp for sp in live.CFG.HOTKEY_DEFS.get(action, ("", []))[1]
+                 if spec_active(action, sp, live.CFG.HOTKEYS_ACTIVE)]
         if not specs:
             return None
         return [part.title() for part in specs[0].split("+") if part]

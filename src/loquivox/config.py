@@ -693,6 +693,8 @@ class Config:
     #: overlay's appearance table and is NOT this list: 'talk' has a look there
     #: but owns the microphone through its own session, not through the key.
     RECORDING_MODES: Tuple[str, ...] = ("dictation",)
+    # Which global hotkeys listen: "all", "chords" (modifier chords only) or "none".
+    HOTKEYS_ACTIVE: str = "all"
 
     # --- Hotkey Definitions ---
     # format: "id": (Label, [chord specs])
@@ -805,6 +807,19 @@ def parse_chord(spec: str) -> Tuple[int, Tuple[frozenset, ...]]:
         raise ValueError(f"empty hotkey spec '{spec}'")
     *mods, trigger = parts
     return _resolve_keycode(trigger), tuple(_resolve_modifier(m) for m in mods)
+
+
+HOTKEY_SCOPES = ("all", "chords", "none")
+# Keys that only mean something inside an open session: never "global", so the
+# scope does not cut them (KeyboardHandler lets them through only while one runs).
+SESSION_MODES = ("cancel", "pause", "refine")
+
+
+def spec_active(mode: str, spec: str, scope: str) -> bool:
+    """Does the ``active`` scope leave this chord spec listening?"""
+    if scope == "all" or mode in SESSION_MODES:
+        return True
+    return scope == "chords" and "+" in spec
 
 
 def resolve_hotkeys(cfg: "Config") -> Dict[str, list]:
@@ -1134,7 +1149,12 @@ def _build_config() -> Config:
     if "chat_auto_hide" in overlay:
         overrides["CHAT_AUTO_HIDE_SEC"] = int(overlay["chat_auto_hide"])
 
-    hotkeys = data.get("hotkeys", {})
+    hotkeys = dict(data.get("hotkeys", {}))
+    scope = str(hotkeys.pop("active", "all")).strip().lower()
+    if scope not in HOTKEY_SCOPES:
+        print(f"⚠️ config.toml [hotkeys] active: '{scope}' unknown — using 'all'")
+        scope = "all"
+    overrides["HOTKEYS_ACTIVE"] = scope
     if hotkeys:
         overrides["HOTKEY_DEFS"] = _build_hotkeys(base.HOTKEY_DEFS, hotkeys)
 

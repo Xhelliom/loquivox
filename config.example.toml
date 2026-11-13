@@ -138,6 +138,12 @@ restore_delay = 0.03
 terminal_cache_ttl = 0.2
 
 [hotkeys]
+# Which global hotkeys listen (also in Settings → Hotkeys and the tray menu):
+#   "all"    — every hotkey (default)
+#   "chords" — only chords with a modifier (ALT+SPACE…); bare keys are ignored
+#   "none"   — no global hotkey (companion wake word, tray and bubble still work)
+# Esc / Space keep working during a recording whatever this says.
+active = "all"
 # evdev key names without the KEY_ prefix (case-insensitive). The first entry is
 # the primary key, the rest are aliases. List available names with:
 #   python -c "from evdev import ecodes; print([k for k in dir(ecodes) if k.startswith('KEY_')])"
