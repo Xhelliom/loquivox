@@ -87,10 +87,11 @@ from types import SimpleNamespace as NS
 
 saved, clicks = [], []
 cb.save_position = saved.append
-bubble = NS(_on_click=lambda: clicks.append(1), _press=None, _drag=cb.Drag(), _wl=True, _pos=(24, 24),
+bubble = NS(_on_click=lambda: clicks.append(1), _press=None, _docked=False, _w=cb.SIZE, _drop=cb.DROP, _trace=[],
+            _edge="right", _sp={"stretch": cb.Spring()}, _drag=cb.Drag(), _wl=True, _pos=(24, 24),
             _screen_size=lambda: (1920, 1080), 
             _apply_position=lambda: None, _rest_scale=lambda: None, _stretch_toward=lambda dx, dy: None,
-            _sp={"stretch": cb.Spring()}, _popup_menu=lambda ev: clicks.append("menu"))
+            _popup_menu=lambda ev: clicks.append("menu"))
 bubble._on_press = lambda ev: cb.CompanionBubble._on_press(bubble, None, ev)
 bubble._on_motion = lambda ev: cb.CompanionBubble._on_motion(bubble, None, ev)
 bubble._on_release = lambda ev: cb.CompanionBubble._on_release(bubble, None, ev)
@@ -102,6 +103,13 @@ bubble._on_press(ev(1)); bubble._on_motion(ev(1, 10 + cb.DRAG_THRESHOLD + 5)); b
 assert clicks == [1] and saved == [bubble._pos], (clicks, saved)
 bubble._on_press(ev(3))
 assert clicks == [1, "menu"], clicks
+
+# Stowed by a throw, _pos is still the release point: pulling the tab must drag from the edge.
+bubble._docked, bubble._edge, bubble._pos = True, "right", (700, 300)
+bubble.undock = lambda: setattr(bubble, "_docked", False); bubble.dock = lambda e, vx=0.0: None
+bubble._on_press(ev(1)); bubble._on_motion(ev(1, 10 + cb.DRAG_THRESHOLD + 5))
+assert bubble._pos[0] <= cb.rest_margin("right", cb.SIZE, 1920) + cb.DRAG_THRESHOLD + 5, bubble._pos
+bubble._on_release(ev(1)); bubble._docked = False
 
 # The render timer: ~60 fps only while something moves, 15 fps for the idle
 # sway, none when silent and settled, hidden, or when GTK animations are off.
@@ -144,5 +152,91 @@ assert d.motion(41, 41, SCREEN) is None and not d.dragging, "below threshold = a
 d = cb.Drag(); d.start(40, 40, (10, 10), "click")
 assert d.motion(500, 40, SCREEN)[0] == (0, 10), "clamped inside the screen"
 print("drag ok")
+
+# ---- stowing against an edge, and the size ---------------------------------------
+# No periodic render at rest once stowed; only a session's tab breathes (~30 fps).
+dk = dict(moving=False, loud=False, anim=True, visible=True, docked=True)
+assert iv("idle", **dk) == 0 and iv("silent", **dk) == 0
+assert iv("idle", **{**dk, "loud": True}) == 0, "the standby mic's noise must not wake a stowed tab"
+assert iv("cloud", **dk) == 33 and iv("listening", **dk) == 33 and iv("speaking", **dk) == 33
+assert iv("idle", **{**dk, "moving": True}) == 16, "the slide itself is smooth"
+assert iv("cloud", **{**dk, "anim": False}) == 0, "GTK animations off: no timer"
+
+# The size is bounded, and the window follows the drop (the shadow margin is proportional).
+assert (cb.DROP_MIN, cb.DROP_MAX) == (32, 96) and cb.clamp_drop(5) == 32 and cb.clamp_drop(500) == 96
+assert cb.window_size(cb.DROP) == cb.SIZE and cb.window_size(96) > cb.window_size(32)
+
+# A release stows against the nearer edge, or not at all; a throw is projected.
+W, SW = cb.window_size(56), 1920
+assert cb.release_edge((0, 100), 0, 56, SW) == "right"
+assert cb.release_edge((SW - W, 100), 0, 56, SW) == "left"
+assert cb.release_edge((600, 100), 0, 56, SW) is None, "the middle of the screen stays put"
+assert cb.release_edge((150, 100), 0, 56, SW) is None
+assert cb.release_edge((150, 100), 1700, 56, SW) == "right", "a flick toward the edge counts"
+assert cb.release_edge((150, 100), -1700, 56, SW) is None, "...and one away from it does not"
+assert cb.velocity([(0.0, 0, 0), (0.05, 100, 0)])[0] == 2000 and cb.velocity([]) == (0.0, 0.0)
+# Stowed, exactly TAB_HIT px of the window stay on screen, on either edge.
+assert SW - W - cb.docked_margin("right", W, SW) == SW - cb.TAB_HIT
+assert SW - W - cb.docked_margin("left", W, SW) == -(W - cb.TAB_HIT)
+
+# Painting: dock 0 is the plain drop, dock 1 leaves only the tab in the state's colour.
+def frame(dock, edge=1, w=cb.SIZE, rgb=cb.STATES["cloud"], pulse=0.0):
+    surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, w)
+    edge_x = w + (0 if edge > 0 else -w) if dock < 1 else (cb.TAB_HIT if edge > 0 else w - cb.TAB_HIT)
+    cb.paint_window(cairo.Context(surf), cb.Look(rgb=rgb, alpha=1.0), w=w, dock=dock,
+                    edge=edge, edge_x=edge_x, pulse=pulse)
+    return surf
+def px(surf, x, y):
+    i = y * surf.get_stride() + x * 4
+    d = surf.get_data(); a = d[i + 3]
+    k = 255 / a if a else 0
+    return d[i + 2] * k, d[i + 1] * k, d[i] * k, a   # straight r, g, b (Cairo premultiplies), a
+assert frame(0.0).get_data() == render(rgb=cb.STATES["cloud"], alpha=1.0).get_data(), "dock 0 = the plain drop"
+for edge, x in ((1, cb.TAB_HIT - 2), (-1, cb.SIZE - cb.TAB_HIT + 2)):
+    r, g, b, a = px(frame(1.0, edge), x, cb.SIZE // 2)
+    assert a > 150 and r > 200 and b < 120, ("the tab is red in a cloud session", edge, (r, g, b, a))
+    assert px(frame(1.0, edge), cb.SIZE // 2, cb.SIZE // 2)[3] == 0, "nothing of the drop is left"
+assert px(frame(1.0, 1, rgb=cb.STATES["idle"]), cb.TAB_HIT - 2, cb.SIZE // 2)[2] > 200, "blue on standby"
+assert any(px(frame(0.5), x, cb.SIZE // 2)[3] for x in range(cb.SIZE)), "mid-flight the blob is drawn"
+big = frame(1.0, 1, w=cb.window_size(96))
+assert px(big, cb.TAB_HIT - 2, cb.window_size(96) // 2)[3] > 150, "the tab scales to any window"
+
+# The bubble's own geometry (no display needed: a stand-in with the real methods).
+from loquivox.state import SettingsManager
+with tempfile.TemporaryDirectory() as d:
+    f = Path(d) / "settings.json"
+    object.__setattr__(cb.CFG, "SETTINGS_FILE", f)
+    assert cb.load_size() == cb.DROP and cb.load_dock() is None
+    cb.save_size(500); cb.save_dock("left")
+    assert cb.load_size() == 96 and cb.load_dock() == "left", "size and edge survive a restart"
+    cb.save_dock(None); assert cb.load_dock() is None
+    SettingsManager.save(AppState())
+    assert cb.load_size() == 96, "SettingsManager.save erased the size"
+
+import math as _m
+calls = []
+stub = NS(_sp={"dock": cb.Spring(0.0, 0.4), "size": cb.Spring(56.0)}, _docked=False, _edge="right", _w=cb.SIZE,
+          _pos=(100, 50), _drag=cb.Drag(), _screen_size=lambda: (1920, 1080), _kick=lambda: calls.append("kick"),
+          _drop=56)
+stub._margin_right = lambda sw: cb.CompanionBubble._margin_right(stub, sw)
+stub.undock = lambda: cb.CompanionBubble.undock(stub)
+saved_dock = []
+cb.save_dock = saved_dock.append; cb.save_position = lambda p: None
+cb.CompanionBubble.dock(stub, "right", 800.0)
+assert stub._docked and saved_dock == ["right"] and stub._sp["dock"].target == 1.0
+assert stub._sp["dock"].damping < 1.0, "a throw bounces a little"
+stub._sp["dock"].value = 1.0
+assert stub._margin_right(1920) == cb.docked_margin("right", cb.SIZE, 1920)
+stub._sp["dock"].value = 0.4                     # undocking restarts from what is on screen
+before = stub._margin_right(1920)
+cb.CompanionBubble.undock(stub)
+assert not stub._docked and saved_dock[-1] is None and stub._sp["dock"].target == 0.0
+assert stub._sp["dock"].value == 0.4 and stub._margin_right(1920) == before, "no jump mid-way"
+stub._docked = True; stub._sp["dock"].value = 1.0
+cb.CompanionBubble.undock(stub)
+assert stub._pos[0] == cb.rest_margin("right", cb.SIZE, 1920), "fully stowed: out at the edge"
+stub._docked = False; cb.CompanionBubble.dock(stub, "left", 0.0)
+assert stub._sp["dock"].damping == 1.0, "a plain release settles without bounce"
+print("dock ok")
 
 print("✓ companion bubble OK")

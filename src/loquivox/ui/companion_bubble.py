@@ -11,9 +11,20 @@ standby, flat and still when silent. Never takes focus. Drag it anywhere; the
 spot is remembered in settings.json. A click calls ``on_click``, a right click
 pops a menu of presence modes.
 
+Stowing: drop it against the left or right edge (or throw it toward it: the
+release velocity is projected like a scroll's) and it flattens against the edge
+like a drop that sticks, then slides behind the screen, leaving a thin tab in
+the state's colour (red = cloud open, so the cost stays visible). A click or a
+half second of hover brings it back by the reverse motion; pulling the tab
+detaches it. An opening session leaves it stowed and the tab breathes. Resize:
+mouse wheel on the drop or Settings → Companion → General, ``DROP_MIN``..
+``DROP_MAX`` px; the window, the waves and the glass follow the scale. Edge,
+stowed state and size live in settings.json like the position.
+
 Motion: every value is a spring that restarts from what is on screen, so any
 animation can be interrupted. The render timer runs at ~60 fps only while
-something moves, 15 fps for the standby sway, and not at all otherwise. With
+something moves, 15 fps for the standby sway, ~30 fps for a stowed tab that
+breathes during a session, and not at all otherwise (a stowed idle tab: never). With
 GTK animations off there are no waves and no springs: colour and water level
 alone carry the state.
 
@@ -49,6 +60,14 @@ SIZE = 88                        # window side, px: the drop plus its shadow and
 DROP = 56                        # the drop's diameter, px (logical: GTK scales it)
 DEFAULT_POSITION = (24, 24)      # (distance from the right edge, from the top)
 SETTINGS_KEY = "companion_position"
+SIZE_KEY = "companion_size"      # the drop's diameter, px
+DOCK_KEY = "companion_dock"      # "left" / "right" when stowed, else absent
+DROP_MIN, DROP_MAX, DROP_STEP = 32, 96, 4
+TAB_HIT = 10                     # px of the window left on screen when stowed (the click target)
+TAB_THICK = 5                    # px the visible tab is thick
+EDGE_SNAP = 16                   # px from the edge (after projecting the throw) that stows
+HOVER_REVEAL_MS = 500            # hover this long on the tab and it comes out
+DECEL = 0.99                     # scroll deceleration rate used to project a throw
 DRAG_THRESHOLD = 4               # px of travel before a press becomes a drag
 SILENT_ALPHA = 0.6               # the grey water of the silent mode
 WATER = 0.55                     # share of the drop filled with water
@@ -95,11 +114,17 @@ def wave_dir(state: str) -> int:
     return -1 if state == "speaking" else 1
 
 
-def tick_interval(state: str, *, moving: bool, loud: bool, anim: bool, visible: bool) -> int:
-    """Render timer period in ms; 0 = no timer. ``moving``: a spring is still travelling."""
+def tick_interval(state: str, *, moving: bool, loud: bool, anim: bool, visible: bool,
+                  docked: bool = False) -> int:
+    """Render timer period in ms; 0 = no timer. ``moving``: a spring is still travelling.
+    ``docked``: stowed, where only a session's breathing tab is worth a timer."""
     if not visible or not anim:
         return 0
-    if moving or loud or state in ("listening", "speaking"):
+    if moving:
+        return 16
+    if docked:
+        return 33 if state in ("cloud", "listening", "speaking") else 0
+    if loud or state in ("listening", "speaking"):
         return 16
     return 0 if state == "silent" else 66
 
@@ -205,10 +230,131 @@ def save_position(pos: Tuple[int, int]) -> None:
         print(f"⚠️ Failed to save companion position: {e}")
 
 
-def clamp(pos: Tuple[int, int], screen: Tuple[int, int]) -> Tuple[int, int]:
+def clamp(pos: Tuple[int, int], screen: Tuple[int, int], size: int = SIZE) -> Tuple[int, int]:
     """Keep the whole bubble on screen."""
-    return (max(0, min(pos[0], screen[0] - SIZE)),
-            max(0, min(pos[1], screen[1] - SIZE)))
+    return (max(0, min(pos[0], screen[0] - size)),
+            max(0, min(pos[1], screen[1] - size)))
+
+
+def window_size(drop: float) -> int:
+    """The window that holds a ``drop`` px drop plus its shadow."""
+    return round(drop * SIZE / DROP)
+
+
+def clamp_drop(drop) -> int:
+    return max(DROP_MIN, min(DROP_MAX, int(round(drop))))
+
+
+def load_size() -> int:
+    try:
+        return clamp_drop(SettingsManager.load()[SIZE_KEY])
+    except Exception:
+        return DROP
+
+
+def save_size(drop: int) -> None:
+    try:
+        SettingsManager.update(SIZE_KEY, clamp_drop(drop))
+    except Exception as e:
+        print(f"⚠️ Failed to save companion size: {e}")
+
+
+def load_dock() -> Optional[str]:
+    edge = SettingsManager.load().get(DOCK_KEY)
+    return edge if edge in ("left", "right") else None
+
+
+def save_dock(edge: Optional[str]) -> None:
+    try:
+        SettingsManager.update(DOCK_KEY, edge)
+    except Exception as e:
+        print(f"⚠️ Failed to save companion dock: {e}")
+
+
+def rest_margin(edge: str, w: int, screen_w: int) -> int:
+    """margin-right of a bubble sitting against ``edge`` (the shadow margin is the gap)."""
+    return 0 if edge == "right" else screen_w - w
+
+
+def docked_margin(edge: str, w: int, screen_w: int) -> int:
+    """margin-right once stowed: only ``TAB_HIT`` px of the window stay on screen."""
+    return -(w - TAB_HIT) if edge == "right" else screen_w - TAB_HIT
+
+
+def release_edge(pos: Tuple[int, int], vx: float, drop: int, screen_w: int) -> Optional[str]:
+    """Which edge a release stows the bubble against, if any. ``pos`` = (margin-right, top),
+    ``vx`` the pointer's px/s (+ = rightwards): the throw is projected like a scroll's
+    (``DECEL``), so a flick toward an edge counts even from a few hundred px away."""
+    w = window_size(drop)
+    shadow = (w - drop) / 2
+    throw = vx / 1000 * DECEL / (1 - DECEL)
+    right = pos[0] + shadow - throw                      # gap to the right edge once thrown
+    left = (screen_w - w - pos[0]) + shadow + throw      # and to the left one
+    best = min((right, "right"), (left, "left"))
+    return best[1] if best[0] <= EDGE_SNAP else None
+
+
+def velocity(trace) -> Tuple[float, float]:
+    """px/s from the last ~80 ms of ``(t, x, y)`` samples (x, y in screen axes)."""
+    if len(trace) < 2:
+        return 0.0, 0.0
+    t1, x1, y1 = trace[-1]
+    old = next((p for p in trace if t1 - p[0] <= 0.08), trace[-2])
+    if old is trace[-1]:
+        old = trace[-2]
+    dt = max(t1 - old[0], 1e-3)
+    return (x1 - old[1]) / dt, (y1 - old[2]) / dt
+
+
+def _smooth(x: float) -> float:
+    x = max(0.0, min(1.0, x))
+    return x * x * (3 - 2 * x)
+
+
+def paint_window(cr: cairo.Context, look: Look, *, w: int = SIZE, unit: float = 1.0,
+                 dock: float = 0.0, edge: int = 1, edge_x: float = 0.0, pulse: float = 0.0,
+                 draw: Callable = None) -> None:
+    """The whole window: the drop (``draw``, in its SIZE box, scaled by ``unit`` and
+    centred in ``w``), squashed against the screen edge as ``dock`` goes 0 → 1 (``edge``:
+    +1 right, -1 left; ``edge_x`` = where the screen edge falls in window coordinates),
+    then the tab that stays on screen. Everything fades by springs' values, never cut."""
+    draw = draw or paint
+    cr.set_operator(cairo.OPERATOR_SOURCE)
+    cr.set_source_rgba(0, 0, 0, 0)
+    cr.paint()
+    cr.set_operator(cairo.OPERATOR_OVER)
+    s = max(0.0, dock)
+    fade = 1.0 - _smooth((s - 0.45) / 0.35)
+    if fade > 0.002:
+        cr.save()
+        if s > 0:   # the blob: pressed flat against the edge as the drop reaches it, taller as it flattens
+            outer = w / 2 + edge * DROP / 2 * unit
+            k = _smooth(edge * (outer - edge_x) / (DROP * unit * 0.5))
+            cr.translate(edge_x, w / 2)
+            cr.scale(1 - 0.65 * k, 1 + 0.22 * k)
+            cr.translate(-edge_x, -w / 2)
+        cr.translate(w / 2, w / 2)
+        cr.scale(unit, unit)
+        cr.translate(-SIZE / 2, -SIZE / 2)
+        draw(cr, Look(**{**look.__dict__, "opacity": look.opacity * fade}))
+        cr.restore()
+    tab = _smooth((s - 0.7) / 0.3)
+    if tab > 0.002:
+        thick = TAB_THICK + 2 * pulse
+        length = max(14.0, DROP * unit * 0.55) * (1 + 0.25 * pulse)
+        x = (TAB_HIT if edge > 0 else w - TAB_HIT) - thick    # centred on the screen edge: the outer half is offscreen
+        y = (w - length) / 2
+        rad = thick
+        cr.new_sub_path()
+        for cx, cy, a0 in ((x + 2 * thick - rad, y + rad, -90), (x + 2 * thick - rad, y + length - rad, 0),
+                           (x + rad, y + length - rad, 90), (x + rad, y + rad, 180)):
+            cr.arc(cx, cy, rad, math.radians(a0), math.radians(a0 + 90))
+        cr.close_path()
+        cr.set_source_rgba(*look.rgb, (0.7 + 0.3 * pulse) * look.alpha * tab)
+        cr.fill_preserve()
+        cr.set_source_rgba(1, 1, 1, 0.25 * tab)
+        cr.set_line_width(1)
+        cr.stroke()
 
 
 class Drag:
@@ -224,6 +370,7 @@ class Drag:
     them apart: it either followed the pointer or stayed near the press."""
 
     DECIDE_AT = 16   # px of first step: far enough apart to tell the readings
+    size = SIZE      # the window's side, for the clamp
 
     def __init__(self) -> None:
         self.press: Optional[Tuple[float, float, Tuple[int, int]]] = None
@@ -260,7 +407,7 @@ class Drag:
         self.dragging = self.dragging or math.hypot(dx, dy) >= DRAG_THRESHOLD
         if not self.dragging:
             return None
-        pos = clamp((round(mr - dx), round(mt + dy)), screen)
+        pos = clamp((round(mr - dx), round(mt + dy)), screen, self.size)
         self._moved = (mr - pos[0], pos[1] - mt)
         return pos, (dx, dy)
 
@@ -279,6 +426,14 @@ class CompanionBubble(Gtk.Window):
         self._current = current
         self._state = "idle"
         self._pos = load_position()
+        self._drop = load_size()                     # the drop's diameter, px
+        self._w = window_size(self._drop)            # the window
+        edge = load_dock()
+        self._docked, self._edge = edge is not None, edge or "right"
+        self._trace = []         # (t, x, y) of the pointer while dragging, for the throw
+        self._reveal_id = 0      # hover-to-reveal timer
+        self._breath = 0.0
+        self._applied = None
         self._press = None       # (x, y, pos) while the left button is down
         self._drag = Drag()
         self._hover = False
@@ -300,6 +455,8 @@ class CompanionBubble(Gtk.Window):
             stretch=Spring(0.0, response=0.4),
             glow=Spring(0.0),
             appear=Spring(0.0, response=0.35, damping=0.8),
+            dock=Spring(1.0 if self._docked else 0.0, response=0.4),   # 1 = stowed behind the edge
+            size=Spring(float(self._drop), response=0.25),
         )
         self._angle = 0.0
 
@@ -310,7 +467,7 @@ class CompanionBubble(Gtk.Window):
         visual = screen.get_rgba_visual()
         if visual and screen.is_composited():
             self.set_visual(visual)
-        self.set_default_size(SIZE, SIZE)
+        self.set_default_size(self._w, self._w)
         if wl:
             GtkLayerShell.init_for_window(self)
             GtkLayerShell.set_layer(self, GtkLayerShell.Layer.TOP)
@@ -323,12 +480,14 @@ class CompanionBubble(Gtk.Window):
             self.set_keep_above(True)
 
         self.area = Gtk.DrawingArea()
-        self.area.set_size_request(SIZE, SIZE)
+        self.area.set_size_request(self._w, self._w)
         self.area.connect("draw", self._on_draw)
         self.add(self.area)
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
                         | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.ENTER_NOTIFY_MASK
-                        | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+                        | Gdk.EventMask.LEAVE_NOTIFY_MASK | Gdk.EventMask.SCROLL_MASK
+                        | Gdk.EventMask.SMOOTH_SCROLL_MASK)
+        self.connect("scroll-event", self._on_scroll)
         self.connect("button-press-event", self._on_press)
         self.connect("button-release-event", self._on_release)
         self.connect("motion-notify-event", self._on_motion)
@@ -337,6 +496,10 @@ class CompanionBubble(Gtk.Window):
         self.connect("map", self._on_map)
         self.connect("unmap", lambda *_: self._stop_timer())
         self.connect("destroy", lambda *_: self._stop_timer())
+        self._drag.size = self._w
+        if self._docked:
+            self._pos = (rest_margin(self._edge, self._w, self._screen_size()[0]),
+                         clamp(self._pos, self._screen_size(), self._w)[1])
         self._apply_position()
         self._recolor()
         self.show_all()
@@ -391,8 +554,9 @@ class CompanionBubble(Gtk.Window):
             for s in self._sp.values():
                 s.jump()
             self._sp["calm"].value = 0.0
+        self._sync_geometry()
         want = tick_interval(self._state, moving=self._moving(), loud=self._loud,
-                             anim=self._anim(), visible=self.get_mapped())
+                             anim=self._anim(), visible=self.get_mapped(), docked=self._docked)
         if want != self._timer_ms:
             self._stop_timer()
             if want:
@@ -410,7 +574,7 @@ class CompanionBubble(Gtk.Window):
         """The drop falls in: scale 0.6 → 1 and opacity 0 → 1."""
         a = self._sp["appear"]
         a.value, a.velocity, a.target = 0.0, 0.0, 1.0
-        if not self._anim():
+        if not self._anim() or self._docked:     # a stowed tab does not fall in
             a.jump()
         self._kick()
 
@@ -425,13 +589,15 @@ class CompanionBubble(Gtk.Window):
             sp["stretch"].target = 0.0
         for s in sp.values():
             s.step(dt)
+        self._breath = (self._breath + dt * 2.6) % (2 * math.pi)
+        self._sync_geometry()
         speed = 1 + 2 * sp["level"].value
         d = wave_dir(self._state)
         self._phase[0] -= d * dt * 5.0 * speed
         self._phase[1] -= d * dt * 3.1 * speed
         self._phase = [p % (2 * math.pi) for p in self._phase]
         want = tick_interval(self._state, moving=self._moving(), loud=self._loud,
-                             anim=self._anim(), visible=self.get_mapped())
+                             anim=self._anim(), visible=self.get_mapped(), docked=self._docked)
         self.area.queue_draw()
         if want != self._timer_ms:
             self._timer = 0          # returning False below removes this source
@@ -445,16 +611,42 @@ class CompanionBubble(Gtk.Window):
         g = (display.get_primary_monitor() or display.get_monitor(0)).get_geometry()
         return g.width, g.height
 
+    def _fit_window(self) -> None:
+        """The window holds the drop as it is now or will be: it grows at once and
+        shrinks only as the drop does, so a resize never clips the water."""
+        sp = self._sp["size"]
+        w = window_size(math.ceil(max(sp.value, sp.target)))
+        if w != self._w:
+            self._w = self._drag.size = w
+            self.area.set_size_request(w, w)
+            self.resize(w, w)
+
+    def _sync_geometry(self) -> None:
+        """Re-apply the margins when the window size or the stowing spring moved."""
+        self._fit_window()
+        key = (self._w, round(self._sp["dock"].value, 3), self._pos)
+        if key != self._applied:
+            self._apply_position()
+
+    def _margin_right(self, screen_w: int) -> int:
+        """Where the window really is: ``_pos`` blended toward the stowed margin by the spring."""
+        d = self._sp["dock"].value
+        if d <= 0.0005:
+            return self._pos[0]
+        goal = docked_margin(self._edge, self._w, screen_w)
+        return round(self._pos[0] + (goal - self._pos[0]) * d)
+
     def _apply_position(self) -> None:
-        self._pos = clamp(self._pos, self._screen_size())
-        mr, mt = self._pos
+        self._pos = clamp(self._pos, self._screen_size(), self._w)
+        self._applied = (self._w, round(self._sp["dock"].value, 3), self._pos)
+        mr, mt = self._margin_right(self._screen_size()[0]), self._pos[1]
         if self._wl:
             GtkLayerShell.set_margin(self, GtkLayerShell.Edge.RIGHT, mr)
             GtkLayerShell.set_margin(self, GtkLayerShell.Edge.TOP, mt)
         else:
             display = Gdk.Display.get_default()
             g = (display.get_primary_monitor() or display.get_monitor(0)).get_geometry()
-            self.move(g.x + g.width - SIZE - mr, g.y + mt)
+            self.move(g.x + g.width - self._w - mr, g.y + mt)
 
     # ----------------------------------------------------------------- mouse
     def _rest_scale(self) -> None:
@@ -466,14 +658,83 @@ class CompanionBubble(Gtk.Window):
 
     def _set_hover(self, on: bool) -> bool:
         self._hover = on
+        if self._reveal_id:
+            GLib.source_remove(self._reveal_id)
+            self._reveal_id = 0
+        if on and self._docked and self._press is None:
+            self._reveal_id = GLib.timeout_add(HOVER_REVEAL_MS, self._hover_reveal)
         self._rest_scale()
         return False
+
+    def _hover_reveal(self) -> bool:
+        self._reveal_id = 0
+        if self._hover and self._docked and self._press is None:
+            self.undock()
+        return False
+
+    # ------------------------------------------------------------- stow / size
+    def dock(self, edge: str, vx: float = 0.0) -> None:
+        """Stow against ``edge``: the blob motion. ``vx`` (px/s, + = rightwards) is handed
+        to the spring, and only a throw gets a little bounce; a plain release settles."""
+        sp = self._sp["dock"]
+        self._docked, self._edge = True, edge
+        toward = vx * (1 if edge == "right" else -1)
+        away = abs(docked_margin(edge, self._w, self._screen_size()[0]) - self._pos[0]) or 1
+        sp.velocity = max(0.0, toward) / away if sp.rest else sp.velocity
+        sp.target = 1.0
+        sp.response, sp.damping = 0.4, 0.8 if toward > 200 else 1.0
+        screen_w = self._screen_size()[0]
+        save_position((rest_margin(edge, self._w, screen_w), self._pos[1]))
+        save_dock(edge)
+        self._kick()
+
+    def undock(self) -> None:
+        """Out again by the reverse motion, from wherever the stowing has got to."""
+        if not self._docked:
+            return
+        self._docked = False
+        sp = self._sp["dock"]
+        if sp.value >= 0.99:      # fully stowed: come out where the edge puts it; halfway, from where we are
+            self._pos = (rest_margin(self._edge, self._w, self._screen_size()[0]), self._pos[1])
+        sp.target, sp.response, sp.damping = 0.0, 0.4, 0.85
+        save_dock(None)
+        self._kick()
+
+    @run_on_main_thread
+    def set_size(self, drop: int, save: bool = True) -> None:
+        """Thread-safe. The drop's diameter in px, bounded; the window and the waves follow."""
+        drop = clamp_drop(drop)
+        if drop == self._drop:
+            return
+        self._drop = drop
+        sp = self._sp["size"]
+        sp.target, sp.response, sp.damping = float(drop), 0.25, 1.0
+        if save:
+            save_size(drop)
+        self._kick()
+
+    def _on_scroll(self, _w, ev) -> bool:
+        if self._docked:
+            return False
+        if ev.direction == Gdk.ScrollDirection.UP:
+            step = 1
+        elif ev.direction == Gdk.ScrollDirection.DOWN:
+            step = -1
+        elif ev.direction == Gdk.ScrollDirection.SMOOTH and ev.delta_y:
+            step = -1 if ev.delta_y > 0 else 1
+        else:
+            return False
+        self.set_size(self._drop + step * DROP_STEP)
+        return True
 
     def _on_press(self, _w, ev) -> bool:
         if ev.button == 1:
             # X11: root coordinates, which do not move with the window.
             x, y = (ev.x, ev.y) if self._wl else (ev.x_root, ev.y_root)
+            if self._docked:      # after a throw _pos is the release point: drag from the edge instead
+                self._pos = (rest_margin(self._edge, self._w, self._screen_size()[0]), self._pos[1])
             self._drag.start(x, y, self._pos, None if self._wl else "click")
+            self._trace = []
             self._press = True
             self._rest_scale()
         elif ev.button == 3:
@@ -487,8 +748,13 @@ class CompanionBubble(Gtk.Window):
         step = self._drag.motion(x, y, self._screen_size())
         if step is None:
             return True
+        if self._docked:          # pulling the tab detaches it, the drop follows from there
+            self.undock()
         self._pos, (dx, dy) = step
         self._apply_position()
+        sw = self._screen_size()[0]
+        self._trace = (self._trace + [(GLib.get_monotonic_time() / 1e6,
+                                       sw - self._w - self._pos[0], self._pos[1])])[-8:]
         self._stretch_toward(dx, dy)
         return True
 
@@ -513,7 +779,15 @@ class CompanionBubble(Gtk.Window):
         sp.target, sp.response, sp.damping = 0.0, 0.4, 1.0
         self._rest_scale()
         if self._drag.dragging:
-            save_position(clamp(self._pos, self._screen_size()))
+            pos = clamp(self._pos, self._screen_size(), self._w)
+            vx = velocity(self._trace)[0]
+            edge = release_edge(pos, vx, self._drop, self._screen_size()[0])
+            if edge:
+                self.dock(edge, vx)
+            else:
+                save_position(pos)
+        elif self._docked:        # a click on the tab brings the drop out, nothing else
+            self.undock()
         elif self._on_click:
             self._on_click()
         return True
@@ -549,7 +823,15 @@ class CompanionBubble(Gtk.Window):
 
     def _on_draw(self, _w, cr: cairo.Context) -> bool:
         from loquivox.ui.companion_bubble_styles import draw_current
-        draw_current(cr, self.look())    # the shipped drop unless another style is chosen
+        sp, sw = self._sp, self._screen_size()[0]
+        e = 1 if self._edge == "right" else -1
+        live = self._state in ("cloud", "listening", "speaking")
+        pulse = min(1.0, (0.5 + 0.5 * math.sin(self._breath)) * 0.6 * live
+                    + sp["level"].value + 12 * max(0.0, sp["bump"].value))
+        edge_x = self._w + self._margin_right(sw) if e > 0 else self._w + self._margin_right(sw) - sw
+        paint_window(cr, self.look(), w=self._w, unit=max(0.1, sp["size"].value / DROP),
+                     dock=sp["dock"].value, edge=e, edge_x=edge_x, pulse=pulse,
+                     draw=draw_current)    # the shipped drop unless another style is chosen
         return True
 
 

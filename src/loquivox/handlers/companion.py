@@ -404,6 +404,15 @@ def restyle() -> None:
         _companion.bubble._kick()
 
 
+def resize(px: int) -> None:
+    """Settings changed the bubble's size: it grows or shrinks now, and is remembered."""
+    if _companion is not None:
+        _companion.bubble.set_size(px)
+    else:
+        from loquivox.ui.companion_bubble import save_size
+        save_size(px)
+
+
 def toggle_silence() -> None:
     if _companion is not None:
         _companion.toggle_silence()

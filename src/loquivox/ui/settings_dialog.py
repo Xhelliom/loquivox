@@ -693,6 +693,13 @@ class SettingsDialog:
         cls._comp_style.set_active_id(cfg.COMPANION_BUBBLE_STYLE)
         cls._field(body, _("Bubble style"), cls._comp_style, labels)
 
+        from loquivox.ui import companion_bubble as _cb
+        cls._comp_size = Gtk.SpinButton.new_with_range(_cb.DROP_MIN, _cb.DROP_MAX, _cb.DROP_STEP)
+        cls._comp_size.set_value(_cb.load_size())
+        cls._comp_size_seen = cls._comp_size.get_value()
+        cls._comp_size.set_tooltip_text(_("Also on the mouse wheel over the bubble"))
+        cls._field(body, _("Bubble size (px)"), cls._comp_size, labels)
+
         cls._comp_status = Gtk.Label()
         cls._actions(body, cls._on_apply_companion, cls._comp_status)
 
@@ -1009,6 +1016,9 @@ class SettingsDialog:
         config_module.reload_config()
         from loquivox.handlers import companion
         companion.restyle()
+        if cls._comp_size.get_value() != cls._comp_size_seen:   # untouched field must not undo the wheel
+            cls._comp_size_seen = cls._comp_size.get_value()
+            companion.resize(int(cls._comp_size_seen))
         saved = _("<small>✓ Saved — the wake word and the click apply now, "
                   "the startup choice at the next launch.</small>")
         # Loading the model is slow and every Apply runs every tab's writer:
