@@ -34,8 +34,10 @@ CATALOG = {
         "Fort",
     "Custom":
         "Personnalisé",
-    "Active":
-        "Actif",
+    "Switched off":
+        "Éteint",
+    "Listening":
+        "À l'écoute",
     "Silent":
         "Silence",
     "cancel":

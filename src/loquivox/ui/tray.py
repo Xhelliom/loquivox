@@ -50,7 +50,7 @@ class TrayManager:
     def _icon_path() -> Path:
         """Shipped icon for the current state; recording wins over silence."""
         name = ("loquivox-recording-symbolic" if STATE.recording
-                else "loquivox-silent-symbolic" if STATE.presence_mode == "silent"
+                else "loquivox-silent-symbolic" if STATE.presence_mode != "active"
                 else "loquivox-symbolic")
         return Path(__file__).resolve().parent.parent / "assets" / f"{name}.svg"
 
@@ -111,7 +111,7 @@ class TrayManager:
         
         # Companion silence: the same switch as F7, ticked while silent
         silence = Gtk.CheckMenuItem(label=_("Companion silence"))
-        silence.set_active(STATE.presence_mode == "silent")
+        silence.set_active(STATE.presence_mode != "active")
         silence.connect("toggled", TrayManager._toggle_silence)
         menu.append(silence)
 
@@ -189,7 +189,7 @@ class TrayManager:
     def _toggle_silence(widget) -> None:
         """Same effect as F7; the menu is rebuilt by ``set_mode`` (also when F7 acts)."""
         want = widget.get_active()
-        if want == (STATE.presence_mode == "silent"):
+        if want == (STATE.presence_mode != "active"):
             return   # the menu is only catching up with the state
         from loquivox.handlers import companion
         companion.toggle_silence()

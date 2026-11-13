@@ -267,13 +267,16 @@ class Drag:
 
 class CompanionBubble(Gtk.Window):
     def __init__(self, on_click: Optional[Callable[[], None]] = None,
-                 modes: Sequence[Tuple[str, Callable[[], None]]] = ()):
-        """``modes``: ``(label, callback)`` pairs for the right-click menu."""
+                 modes: Sequence[Tuple[str, Callable[[], None]]] = (),
+                 current: Callable[[], int] = lambda: -1):
+        """``modes``: ``(label, callback)`` pairs for the right-click menu;
+        ``current``: index of the one to tick."""
         wl = HAS_LAYER_SHELL and SESSION_TYPE == "wayland"
         super().__init__(type=Gtk.WindowType.TOPLEVEL if wl else Gtk.WindowType.POPUP)
         self._wl = wl
         self._on_click = on_click
         self._modes = list(modes)
+        self._current = current
         self._state = "idle"
         self._pos = load_position()
         self._press = None       # (x, y, pos) while the left button is down
@@ -515,12 +518,17 @@ class CompanionBubble(Gtk.Window):
             self._on_click()
         return True
 
-    def _popup_menu(self, ev) -> None:
-        menu = Gtk.Menu()
-        for label, cb in self._modes:
-            item = Gtk.MenuItem(label=label)
+    def _build_menu(self) -> Gtk.Menu:
+        menu, now = Gtk.Menu(), self._current()
+        for i, (label, cb) in enumerate(self._modes):
+            item = Gtk.CheckMenuItem(label=label, active=i == now)
+            item.set_draw_as_radio(True)
             item.connect("activate", lambda _i, cb=cb: cb())
             menu.append(item)
+        return menu
+
+    def _popup_menu(self, ev) -> None:
+        menu = self._build_menu()
         menu.show_all()
         menu.popup_at_pointer(ev)
 

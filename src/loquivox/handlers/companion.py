@@ -10,9 +10,11 @@ on screen: no transcript in the chat, no final generation, nothing poured into
     wake word → bubble red + capture the active window (halo) → release the
     mic → Live session → silence → resume the mic, bubble back to standby
 
-Two presence modes, ``STATE.presence_mode``: ``active`` (listening) and
-``silent`` (mic closed, wake word ignored). The silence key, a click on the
-bubble and its menu all go through ``set_mode``.
+Presence modes, ``STATE.presence_mode``, all listed in ``MODES``: ``off``
+(mic closed, no wake word, no wake by a notification), ``silent`` (the same,
+but messages are kept for a summary on return) and ``active`` (listening). The
+silence key, a click on the bubble, its menu, the tray and Settings all go
+through ``set_mode``.
 """
 from __future__ import annotations
 
@@ -26,8 +28,9 @@ from loquivox.i18n import N_
 from loquivox.services import events, media, memory, plugins
 from loquivox.state import STATE, SettingsManager
 
-#: the bubble menu is this list
-MODES = (("active", N_("Active")), ("silent", N_("Silent")))
+#: the one table of presence modes: the bubble menu, F7 and the tray read it; a mode
+#: added here shows up in the menu (it must also say what it does in ``_set_mode``)
+MODES = (("off", N_("Switched off")), ("silent", N_("Silent")), ("active", N_("Listening")))
 
 
 class _NoKeys:
@@ -217,7 +220,7 @@ class Companion:
         STATE.talk_click.put("cancel")   # the session's own exit restores the rest
 
     def toggle_silence(self) -> None:
-        self.set_mode("active" if STATE.presence_mode == "silent" else "silent")
+        self.set_mode("silent" if STATE.presence_mode == "active" else "active")
 
     def click(self) -> None:
         """One click: to the configured mode, and back if already there."""
