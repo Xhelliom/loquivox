@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Dict
 
 from loquivox.i18n import _
+import loquivox.config as config_module
 from loquivox.config import CFG
 from loquivox.decorators import run_on_main_thread
 from loquivox.state import STATE, HAS_APP_INDICATOR
@@ -119,6 +120,19 @@ class TrayManager:
         chat_toggle.connect("toggled", TrayManager._toggle_chat)
         menu.append(chat_toggle)
 
+        scope_item = Gtk.MenuItem(label=_("Hotkeys"))
+        scope_menu = Gtk.Menu()
+        group = None
+        for value, label in (("all", _("All")), ("chords", _("With modifier only")),
+                             ("none", _("None"))):
+            radio = Gtk.RadioMenuItem.new_with_label_from_widget(group, label)
+            group = group or radio
+            radio.set_active(config_module.CFG.HOTKEYS_ACTIVE == value)
+            radio.connect("toggled", TrayManager._set_hotkey_scope, value)
+            scope_menu.append(radio)
+        scope_item.set_submenu(scope_menu)
+        menu.append(scope_item)
+
         settings_item = Gtk.MenuItem(label=_("Settings…"))
         settings_item.connect("activate", lambda w: SettingsDialog.show())
         menu.append(settings_item)
@@ -154,6 +168,22 @@ class TrayManager:
             ChatManager._destroy()
         else:
             ChatManager.refresh_overlay()
+
+    @staticmethod
+    def _set_hotkey_scope(widget, value: str) -> None:
+        """Same writer as Settings → Hotkeys; the dialog is told to follow."""
+        if not widget.get_active() or value == config_module.CFG.HOTKEYS_ACTIVE:
+            return
+        from loquivox.config_io import ConfigWriteError
+        from loquivox.handlers.keyboard import KeyboardHandler
+        from loquivox.ui.settings_dialog import SettingsDialog
+        try:
+            KeyboardHandler.set_scope(value)
+        except ConfigWriteError as e:
+            print(f"❌ {e}")
+            return
+        SettingsDialog.refresh_hotkey_scope()
+        TrayManager.update_menu()
 
     @staticmethod
     def _toggle_silence(widget) -> None:

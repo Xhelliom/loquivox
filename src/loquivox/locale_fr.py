@@ -314,6 +314,18 @@ CATALOG = {
         "Pause / reprise",
     "Stop + choose level":
         "Arrêter + choisir le niveau",
+    "Which hotkeys listen":
+        "Raccourcis à l'écoute",
+    "Global hotkeys are seen in every app. Cut the bare keys if F4, F6… are needed elsewhere. Esc and Space still work during a recording; the companion, tray and bubble are unaffected.":
+        "Les raccourcis globaux sont vus dans toutes les applis. Coupez les touches seules si F4, F6… servent ailleurs. Échap et Espace marchent toujours pendant un enregistrement ; le compagnon, le tray et la bulle ne changent pas.",
+    "Active hotkeys":
+        "Raccourcis actifs",
+    "All":
+        "Tous",
+    "With modifier only":
+        "Avec modificateur",
+    "None":
+        "Aucun",
     "Companion silence":
         "Silence du compagnon",
     "Groq Orpheus — English only (needs GROQ_API_KEY)":
