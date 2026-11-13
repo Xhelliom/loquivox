@@ -3018,17 +3018,14 @@ class SettingsDialog:
                 specs.append(tok.strip().upper())
             parsed[mode_id] = specs  # empty = unbound (e.g. the 'refine' action)
 
-        from loquivox.config_io import ConfigWriteError, update_section
+        # One writer for bindings and scope: saves, reloads CFG, applies live.
+        from loquivox.config_io import ConfigWriteError
+        from loquivox.handlers.keyboard import KeyboardHandler
         try:
-            update_section("hotkeys", {**parsed, "active": cls._hotkey_scope.get_active_id()})
+            KeyboardHandler.set_scope(cls._hotkey_scope.get_active_id(), parsed)
         except ConfigWriteError as e:
             cls._set_hotkey_status(f"❌ {e}")
             return
-
-        # Apply live: reload config and rebuild the keyboard listener's map so
-        # the new bindings take effect immediately — no service restart needed.
-        from loquivox.handlers.keyboard import KeyboardHandler
-        KeyboardHandler.reload_hotkeys(config_module.reload_config())
 
         cls._set_hotkey_status(_("✓ Saved and applied — your new hotkeys work right away."))
         print(f"⌨️  Hotkeys saved and applied live: {parsed}")

@@ -42,7 +42,7 @@ def item(label):
 
 STATE.answer_history = []
 assert labels() == ["(No History)", "Clear History", "Companion silence",
-                    "Show chat", "Settings…", "Quit"], labels()
+                    "Show chat", "Hotkeys", "Settings…", "Quit"], labels()
 
 STATE.presence_mode = "active"
 assert not item("Companion silence").get_active()

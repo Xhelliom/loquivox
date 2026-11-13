@@ -61,6 +61,14 @@ try:
     assert [spec_active("ai", s, sc) for sc in ("all", "chords", "none")
             for s in ("F4", "CTRL+F4")] == [True, True, False, True, False, False]
     assert spec_active("cancel", "ESC", "none")
+
+    # Survives a restart: _build_config reads [hotkeys] active from config.toml.
+    cfg_file = Path(config_module.CONFIG_FILE)
+    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+    for written, expected in (("chords", "chords"), ("none", "none"), ("bogus", "all")):
+        cfg_file.write_text(f'[hotkeys]\nactive = "{written}"\n')
+        assert config_module.reload_config().HOTKEYS_ACTIVE == expected, written
+    cfg_file.unlink()
 finally:
     load("all")
 print("✓ hotkey scope OK")

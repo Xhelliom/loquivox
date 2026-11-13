@@ -195,11 +195,12 @@ class KeyboardHandler:
     _scope: str = "all"     # [hotkeys] active, set by reload_hotkeys
 
     @classmethod
-    def set_scope(cls, scope: str) -> None:
-        """The one writer of ``[hotkeys] active``: save it, apply it live."""
+    def set_scope(cls, scope: str, bindings: Optional[Dict[str, Any]] = None) -> None:
+        """The one writer of ``[hotkeys] active``: save it (with the Settings
+        ``bindings``, if any, in the same pass), apply it live."""
         from loquivox.config import reload_config
         from loquivox.config_io import update_section
-        update_section("hotkeys", {"active": scope})
+        update_section("hotkeys", {**(bindings or {}), "active": scope})
         cls.reload_hotkeys(reload_config())
 
     @classmethod
