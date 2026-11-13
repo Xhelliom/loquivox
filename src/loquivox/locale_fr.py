@@ -394,6 +394,10 @@ CATALOG = {
         "Inactivité (min)",
     "Bubble style":
         "Style de la bulle",
+    "Bubble size (px)":
+        "Taille de la bulle (px)",
+    "Also on the mouse wheel over the bubble":
+        "Aussi à la molette sur la bulle",
     "Music and other sounds":
         "Musique et autres sons",
     "A classic Bluetooth headset pauses every player when its microphone opens, and nothing resumes them. Lowering the volume instead only shows on speakers, a wired headset or a Bluetooth LE Audio headset — on a classic one it behaves like resume.":

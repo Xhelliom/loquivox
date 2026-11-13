@@ -594,7 +594,7 @@ def test_every_companion_setting_is_on_the_companion_tab():
         for w in _widgets(sw):
             where[id(w)] = (tab, sub)
     for name, sub in (("_comp_wake", "General"), ("_comp_click", "General"),
-                      ("_comp_style", "General"), ("_comp_voice", "Voice & thinking"),
+                      ("_comp_style", "General"), ("_comp_size", "General"), ("_comp_voice", "Voice & thinking"),
                       ("_comp_delegation", "Voice & thinking"),
                       ("_comp_backend", "Voice & thinking"),
                       ("_comp_web", "Voice & thinking"),
