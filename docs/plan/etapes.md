@@ -149,8 +149,23 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Le journal ne cite pas les faits
   - [x] Self-check sans réseau (juge factice)
 
-### Lot — Lot 18 — Contexte, mails et MCP (planned, 2 at a time)
+### Lot — Lot 18 — Le oui sûr, contexte, mails et MCP (planned, 2 at a time)
 
+- **Le oui : une action ne part jamais sur un oui antérieur à la dernière question** — backlog
+
+  Régression de sécurité laissée par #111 (relecture et triage l'avaient signalée, fusionnée quand même). Dans `services/mcp_tools.py` `run`, `asked.setdefault(key, spoken)` garde le compte de la PREMIÈRE question. Scénario : l'agent demande (asked=3) ; l'utilisateur répond « non » (spoken=4) ; l'agent repose la même question sans confirmed ; puis rappelle avec confirmed=true sans que l'utilisateur ait reparlé → 4 > 3 → l'action PART sans oui. Règle à rétablir : une action ne part que si l'utilisateur a parlé APRÈS la dernière question posée pour cette clé.
+  
+  À préserver : le cas que #111 corrigeait — le oui de l'utilisateur arrive tard dans les tours sous Live (le modèle rappelle confirmed=true avant que le tour du oui soit compté) ; un appel confirmed=true trop tôt ne doit pas réarmer la question (il peut garder le compte), seul un appel NON confirmé (= une nouvelle question) le remet à jour. Garder la normalisation de clé.
+  
+  Aussi : `awaiting(session)` reste vrai toute la session après un refus (la clé n'est jamais retirée), d'où l'attente de 8 s de `_settle` sur tous les tours suivants : la borner (clé retirée ou périmée après N tours / un délai, ou au refus).
+  
+  Tests sans réseau : question → non → re-question → confirmed=true sans nouveau tour → Held ; question → oui tardif (confirmed=true avant que le tour soit compté, puis après) → l'action part une fois ; awaiting faux après un refus suivi de 2 tours ; et un test de `SETTLE_FIRST_YES` (live_talk). test_bench_mcp, test_plugins, test_mcp_deferred passent.
+
+  - [ ] question → non → re-question → confirmed=true sans nouveau tour : rien ne part (Held), test à l'appui
+  - [ ] le oui tardif sous Live marche toujours (test)
+  - [ ] awaiting() redevient faux après un refus, l'attente de 8 s ne colle plus à toute la session
+  - [ ] SETTLE_FIRST_YES a un test
+  - [ ] test_bench_mcp, test_plugins, test_mcp_deferred, test_agent_loop passent
 - **Mails : « réponds à ce mail » écrit une réponse bien mise en forme dans le champ** — backlog
 
   Sous F4 et le compagnon : le mail est la sélection (T) ou ce que montre l écran ; write_text reçoit une consigne de format mail (salutation, paragraphes, formule de fin, signature réglable dans Réglages › Outils › Écriture et écran). Le texte tapé doit garder ses retours à la ligne et paragraphes dans les champs web (Gmail, Outlook web) : vérifier le collage par ClipboardService et corriger si les sauts de ligne sont perdus. Question ouverte 6410346f (texte brut structuré ou HTML riche) : partir du texte brut bien structuré, le HTML hors périmètre.
@@ -166,6 +181,7 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [ ] Aucune capture ni appel de modèle supplémentaire
   - [ ] Fallback silencieux hors niri/X11
 - **MCP : relancer un serveur qui tombe en pleine session, et authentification des serveurs HTTP** — backlog
+  - after: Le oui : une action ne part jamais sur un oui antérieur à la dernière question
 
   Limites connues de services/mcp_tools.py (CLAUDE.md, « Not done ») : un serveur qui meurt en pleine session reste mort jusqu à ce qu on l éteigne et le rallume dans Réglages ; les serveurs par URL n ont ni en-têtes ni authentification. À faire : relancer automatiquement un serveur stdio tombé (avec un délai croissant et un plafond, une seule alerte dans le journal), et accepter des en-têtes pour un serveur HTTP (headers = { … } dans [mcp.servers.<nom>], valeurs lues depuis l environnement ou secrets.py, jamais écrites dans le journal ni dans le rapport de diagnostic). Rien ne bloque aujourd hui (deux serveurs locaux) : à faire avant le premier serveur distant.
 
