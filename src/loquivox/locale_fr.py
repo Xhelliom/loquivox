@@ -1054,6 +1054,8 @@ CATALOG = {
         'Modèle de recherche',
     'While the companion talks':
         'Pendant que le compagnon parle',
+    'Mail signature':
+        'Signature des mails',
     'Write on request':
         'Rédiger sur demande',
 }
