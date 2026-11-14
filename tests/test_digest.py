@@ -46,6 +46,7 @@ class _Presence:
     def resume(self): pass
     def start(self): pass
     def take_tail(self): return []
+    def open_follow_up(self, sec, cb): pass
 
 
 class _Bubble:

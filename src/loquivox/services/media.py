@@ -71,6 +71,16 @@ def _others() -> Dict[int, List[int]]:
             for si in inputs if si.get("volume") and not is_ours(si.get("properties", {}))}
 
 
+def mic_busy() -> bool:
+    """Another program is reading a microphone (a call, a recording). Unknown → False."""
+    try:
+        out = subprocess.run(["pactl", "--format=json", "list", "source-outputs"],
+                             capture_output=True, text=True, timeout=2).stdout
+        return any(not is_ours(o.get("properties", {})) for o in json.loads(out))
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
 def _set_volume(idx: int, raw: List[int]) -> None:
     _pactl("set-sink-input-volume", str(idx), *map(str, raw))
 

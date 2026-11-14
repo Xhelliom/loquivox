@@ -32,6 +32,7 @@ import numpy as np
 import sounddevice as sd
 
 from loquivox.services.audio import resolve_input_device
+from loquivox.services.turn_detector import turn_complete
 from loquivox.services.vad import VoiceActivityDetector
 
 RATE: int = 16000
@@ -87,6 +88,10 @@ class Presence:
         self.on_level: Optional[Callable[[float], None]] = None
         #: audio heard since the wake word, handed to the cloud session by take_tail()
         self._tail: Optional[list] = None
+        #: follow-up window: until when, who gets the utterance, and its blocks so far
+        self._follow_until = float("-inf")
+        self._follow_cb: Optional[Callable[[list], None]] = None
+        self._utt: list = []
 
     @property
     def listening(self) -> bool:
@@ -133,6 +138,32 @@ class Presence:
             stream.stop()
             stream.close()
         self.speaking = False
+        self._follow_until = float("-inf")   # a session (or a silence) closes the window
+
+    def open_follow_up(self, seconds: float, callback: Callable[[list], None]) -> None:
+        """For ``seconds``, hand ``callback`` each utterance the VAD keeps and Smart
+        Turn closes (float32 blocks, on its own thread). Outside it nothing is kept."""
+        self._utt = []
+        self._follow_cb = callback
+        self._follow_until = time.monotonic() + seconds
+
+    def keep_tail(self, blocks: list) -> None:
+        """Make ``blocks`` what ``take_tail`` returns: the utterance that opened the session."""
+        self._tail = list(blocks)
+
+    def _follow(self, block: np.ndarray) -> None:
+        if time.monotonic() > self._follow_until:
+            self._follow_cb, self._utt = None, []
+            return
+        self._utt.append(block.copy())
+        vad = self._vad
+        if not vad.speech_started:
+            del self._utt[:-5]   # a little pre-roll, not the silence before the voice
+        # ponytail: Smart Turn runs in the audio callback (one ONNX pass per pause); move it to a thread if it ever overruns
+        elif vad.ended and turn_complete(
+                vad, lambda: np.concatenate(self._utt)[-8 * RATE:], RATE):
+            utt, self._utt = self._utt, []
+            threading.Thread(target=self._follow_cb, args=(utt,), daemon=True).start()
 
     def take_tail(self) -> list:
         """What was said since the wake word (float32 blocks); empties the buffer."""
@@ -158,6 +189,8 @@ class Presence:
         # ponytail: capped at TAIL_MAX seconds; the session opens in a few
         if self._tail is not None and len(self._tail) < TAIL_MAX * RATE // BLOCK:
             self._tail.append(block.copy())
+        if self._follow_cb is not None:
+            self._follow(block)
         self.speaking = self._vad.speech_started and not self._vad.ended
         if self.on_level:
             rms = float(np.sqrt(np.mean(block ** 2))) if block.size else 0.0

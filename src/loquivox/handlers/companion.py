@@ -23,6 +23,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+import numpy as np
+
 import loquivox.config as config_module
 from loquivox.services.talk import resume_history
 from loquivox.i18n import N_
@@ -96,11 +98,58 @@ def _converse(session, prefix=()) -> None:
     ModeHandler._talk_converse_server(session, _NoKeys(), engine, "Live")
 
 
+_ADDRESSED = {"tu", "te", "toi", "ton", "ta", "tes", "vous", "votre", "vos"}
+_QUESTION = {"et", "est", "qui", "que", "quoi", "quel", "quelle", "quels", "quelles",
+             "comment", "pourquoi", "quand", "ou", "combien", "peux", "pourrais", "sais"}
+# ponytail: a short list of common imperatives; grow it from the journal's "non" lines
+_IMPERATIVE = {"dis", "donne", "montre", "ajoute", "rappelle", "ouvre", "ferme", "cherche",
+               "lis", "lance", "mets", "envoie", "explique", "resume", "repete", "continue",
+               "fais", "trouve", "note", "annule", "vas", "oublie", "compte", "traduis"}
+
+
+def follow_up_verdict(text: str, last: str) -> tuple:
+    """(addressed to the companion?, reason without the words). ``last`` is the end of
+    the previous exchange: a word of 4+ letters said again counts as a follow-up."""
+    from loquivox.services.talk import _normalize, user_said_stop
+    words = _normalize(text).split()
+    if user_said_stop(text):
+        return False, "phrase d'arrêt"
+    if len(words) < 2:
+        return False, "trop court"
+    if _ADDRESSED & set(words):
+        return True, "2e personne"
+    if "?" in text or words[0] in _QUESTION:
+        return True, "question"
+    if words[0] in _IMPERATIVE:
+        return True, "impératif"
+    if {w for w in words if len(w) >= 4} & set(_normalize(last).split()):
+        return True, "mot repris"
+    return False, "rien ne s'adresse à nous"
+
+
+_whisper = None
+
+
+def _transcribe_locally(audio) -> str:
+    """whisper.cpp, whatever the dictation backend: a bystander's words never go to the cloud."""
+    global _whisper
+    try:
+        if _whisper is None:
+            from loquivox.transcription.factory import make_backend
+            _whisper = make_backend("whispercpp", config_module.CFG)
+        return _whisper.transcribe(audio, 16000, config_module.CFG.WHISPER_LANGUAGE) or ""
+    except Exception as e:
+        print(f"⚠️  Companion: local transcription unavailable ({e})")
+        return ""
+
+
 class Companion:
     def __init__(self, presence, bubble, *, look: Callable = _look,
-                 converse: Callable = _converse) -> None:
+                 converse: Callable = _converse, transcribe: Optional[Callable] = None,
+                 mic_busy: Callable = media.mic_busy) -> None:
         self.presence, self.bubble = presence, bubble
         self._look, self._converse = look, converse
+        self._transcribe, self._mic_busy = transcribe or _transcribe_locally, mic_busy
         self._out = 0.0      # last output level: the companion has the floor above this
         self._loud = float("-inf")   # monotonic time of the last audible output block
         # Mode changes (lock watcher, key, tray) and a session's end each decide to
@@ -357,8 +406,24 @@ class Companion:
             print("🫧 Companion: session closed")
             if opened:     # a restore rule must not replay a snapshot that was never taken
                 events.emit("companion.session_closed", cause=cause)
+            if config_module.CFG.COMPANION_FOLLOW_UP_SEC > 0 and self.presence_on():
+                self.presence.open_follow_up(config_module.CFG.COMPANION_FOLLOW_UP_SEC,
+                                             self._follow_up)
             self.ensure_mic()
             self._set_state(self._standby())
+
+    def _follow_up(self, blocks: list) -> None:
+        """An utterance heard just after a session: for us? The journal says why, never what."""
+        if self._mic_busy():
+            ok, why = False, "micro occupé"
+        else:
+            text = self._transcribe(np.concatenate(blocks)) or ""
+            ok, why = follow_up_verdict(text, " ".join(
+                t["content"] for t in self._last[0][-2:] if isinstance(t["content"], str)))
+        print(f"🫧 Companion: relance : {'oui' if ok else 'non'}, {why}")
+        if ok:
+            self.presence.keep_tail(blocks)
+            self.wake(cause="follow_up")
 
     def _resume_into(self, session) -> None:
         minutes = config_module.CFG.COMPANION_RESUME_MIN
