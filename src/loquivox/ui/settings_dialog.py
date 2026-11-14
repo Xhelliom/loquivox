@@ -4,6 +4,7 @@ GTK Settings dialog for voice and hotkey configuration.
 from __future__ import annotations
 
 import math
+import threading
 from typing import Optional
 
 import cairo
@@ -753,7 +754,11 @@ class SettingsDialog:
 
         cls._comp_voice = combo(cfg.TALK_LIVE_VOICES, cfg.COMPANION_LIVE_VOICE,
                                 lambda v: v.title())
-        cls._field(body, _("Companion's Live voice"), cls._comp_voice, labels)
+        comp_test = Gtk.Button(label=_("▶ Test"))
+        comp_test.set_tooltip_text(
+            _("Hear this voice: the first time, Live records it saying a line"))
+        comp_test.connect("clicked", cls._on_test_comp_voice)
+        cls._field(body, _("Companion's Live voice"), cls._comp_voice, labels, extra=comp_test)
 
         cls._comp_delegation = combo(
             cfg.TALK_LIVE_DELEGATIONS, cfg.COMPANION_LIVE_DELEGATION,
@@ -1331,7 +1336,7 @@ class SettingsDialog:
             in config_module.CFG.TALK_LIVE_VOICES else config_module.CFG.TALK_LIVE_VOICES[0])
         cls._live_test = Gtk.Button(label=_("▶ Test"))
         cls._live_test.set_tooltip_text(
-            _("Preview this voice (same voice, spoken by the TTS model)"))
+            _("Hear this voice: the first time, Live records it saying a line"))
         cls._live_test.connect("clicked", cls._on_test_live_voice)
         cls._field(body, _("Live voice"), cls._live_voice, labels, extra=cls._live_test)
 
@@ -1461,23 +1466,52 @@ class SettingsDialog:
         TTSService.preview(cls._sample_line(), model="gpt-4o-mini-tts", voice=voice)
 
     @classmethod
-    def _on_test_live_voice(cls, _btn: Gtk.Button) -> None:
-        """
-        Preview the Live voice through the TTS model, like the Realtime one.
+    def _on_test_live_voice(cls, btn: Gtk.Button) -> None:
+        """Hear the Live voice itself: gpt-live says a line, the recording is cached."""
+        cls._play_voice_sample(btn, cls._live_voice.get_active_id() or "", cls._engine_status)
 
-        Twelve of the twenty-two are new here and the TTS model does not speak
-        them, so those fall back to the default rather than failing silently:
-        no preview is a better answer than another voice's.
-        """
-        from loquivox.services.tts import TTSService
+    @classmethod
+    def _on_test_comp_voice(cls, btn: Gtk.Button) -> None:
+        # Empty = "like the conversation": that one is the voice to hear.
+        voice = (cls._comp_voice.get_active_id() or cls._live_voice.get_active_id()
+                 or config_module.CFG.TALK_LIVE_VOICE)
+        cls._play_voice_sample(btn, voice, cls._comp_status)
 
-        voice = cls._live_voice.get_active_id() if cls._live_voice else ""
-        if voice not in config_module.CFG.TALK_REALTIME_VOICES:
-            cls._engine_status.set_markup(
-                _("<small>⚠️  No preview for {voice} — it is a Live-only "
-                   "voice.</small>").format(voice=voice))
-            return
-        TTSService.preview(cls._sample_line(), model="gpt-4o-mini-tts", voice=voice)
+    @classmethod
+    def _play_voice_sample(cls, btn: Gtk.Button, voice: str, status: Gtk.Label) -> None:
+        """
+        Record (first time) and play one Live voice, off the GTK thread.
+
+        The recording is a short gpt-live session (``services/voice_sample``),
+        so the window must stay alive meanwhile: the worker only ever reaches
+        the widgets through ``GLib.idle_add``.
+        """
+        from loquivox.i18n import current_language
+        from loquivox.services import voice_sample
+
+        def say(markup: str) -> None:
+            GLib.idle_add(lambda: status.set_markup(markup) or False)
+
+        def work() -> None:
+            try:
+                import wave
+
+                import numpy as np
+                import sounddevice as sd
+                path, _cached = voice_sample.voice_sample(voice, current_language())
+                with wave.open(str(path)) as w:
+                    pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+                    rate = w.getframerate()
+                say("")
+                sd.play(pcm, rate)
+                sd.wait()
+            except Exception as e:
+                say("<small>❌ {}</small>".format(GLib.markup_escape_text(str(e))))
+
+        btn.set_sensitive(False)
+        status.set_markup(_("<small>⏳ Recording the voice…</small>"))
+        threading.Thread(target=lambda: (work(), GLib.idle_add(
+            lambda: btn.set_sensitive(True) or False)), daemon=True).start()
 
     @classmethod
     def _on_apply_engine(cls, _btn: Gtk.Button) -> None:

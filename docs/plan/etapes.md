@@ -239,9 +239,9 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Un flux muet alors que l'écoute est active est détecté et rouvert (ligne ⚠️)
   - [x] test_presence, test_companion, test_companion_resume, test_away passent
 
-### Lot — Lot 25 — Écouter les voix Live (planned, one at a time)
+### Lot — Lot 25 — Écouter les voix Live (launched, one at a time)
 
-- **Réglages : écouter n'importe quelle voix Live (extrait enregistré par gpt-live, gardé en cache)** — backlog
+- **Réglages : écouter n'importe quelle voix Live (extrait enregistré par gpt-live, gardé en cache)** — done
 
   Aujourd'hui `_on_test_live_voice` (ui/settings_dialog.py ~l.1464) fait lire une phrase par le modèle TTS (gpt-4o-mini-tts) : ce n'est pas la vraie voix Live, et 12 des 22 voix (bossa, tempo, beacon…, les seules non anglaises comprises) n'ont AUCUN aperçu (« ⚠️ No preview… Live-only voice »). Le champ « Companion's Live voice » (l.~756) n'a pas de bouton du tout.
   
@@ -249,11 +249,11 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   
   Réutiliser LiveTalk / la connexion existante de services/live_talk.py plutôt qu'un second client. Le bouton ▶ (à côté des DEUX champs de voix Live : Conversation › Moteur et Compagnon › Voix et réflexion) lance l'extraction sur un thread (jamais GTK), affiche « ⏳ Enregistrement de la voix… » puis joue le wav ; erreur (pas de clé OpenAI, réseau) = ❌ avec la cause dans la ligne d'état. Le journal note « 🔊 voice sample <voix> : cache / recorded in Xs », jamais de clé.
 
-  - [ ] ▶ à côté des deux champs de voix Live ; les 22 voix, bossa et tempo comprises, se font entendre avec leur vraie voix gpt-live
-  - [ ] Le deuxième clic sur la même voix joue le fichier en cache, sans session ni coût (journal)
-  - [ ] Pendant l'enregistrement la fenêtre reste réactive ; une erreur affiche ❌ avec la cause
-  - [ ] Le flux envoyé à gpt-live est continu (zéros), self-check qui l'épingle
-  - [ ] test_i18n et test_settings_layout passent
+  - [x] ▶ à côté des deux champs de voix Live ; les 22 voix, bossa et tempo comprises, se font entendre avec leur vraie voix gpt-live
+  - [x] Le deuxième clic sur la même voix joue le fichier en cache, sans session ni coût (journal)
+  - [x] Pendant l'enregistrement la fenêtre reste réactive ; une erreur affiche ❌ avec la cause
+  - [x] Le flux envoyé à gpt-live est continu (zéros), self-check qui l'épingle
+  - [x] test_i18n et test_settings_layout passent
 
 ### Lot — Lot 26 — Clic droit : parler et mot d'éveil (planned, one at a time)
 
