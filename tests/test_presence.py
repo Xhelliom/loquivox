@@ -68,6 +68,23 @@ def test_wake_fires_on_callback():
     p.stop()
 
 
+def test_near_misses_and_wakes_are_logged_with_their_score(capsys=None):
+    import io, contextlib
+    woken, m = [], _Model()
+    p = _make(woken, m); p.start()
+    s = _Stream.opened[-1]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        m.score = 0.1; s.push(0.01)           # under half: silent
+        m.score = 0.31; s.push(0.01); s.push(0.01)   # near: one line per 5 s
+        m.score = 0.9; s.push(0.01)
+        time.sleep(0.1)
+    lines = out.getvalue().splitlines()
+    assert sum("near-miss hey_jarvis 0.31 < 0.5" in l for l in lines) == 1, lines
+    assert any("wake hey_jarvis 0.90" in l for l in lines), lines
+    p.stop()
+
+
 def test_level_follows_the_voice_only():
     seen = []
     p = _make([], _Model())

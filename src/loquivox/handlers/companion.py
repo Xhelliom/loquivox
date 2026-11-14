@@ -102,6 +102,11 @@ class Companion:
         self._look, self._converse = look, converse
         self._out = 0.0      # last output level: the companion has the floor above this
         self._loud = float("-inf")   # monotonic time of the last audible output block
+        # Mode changes (lock watcher, key, tray) and a session's end each decide to
+        # release or resume the mic: serialised, a release decided under "silent"
+        # can no longer land after a resume decided under "active".
+        self._mic_lock = threading.RLock()
+        self._mic_alerted = False   # one journal line per outage of the wake mic
         self._away: set = set()   # why the companion is silent without being asked: "lock", "idle"
         self._before = "active"   # the user's mode, to return to when the last reason is gone
         self._emitted = None  # last state published as an event
@@ -194,6 +199,10 @@ class Companion:
             TrayManager.update_menu()
 
     def _set_mode(self, mode: str, persist: bool) -> None:
+        with self._mic_lock:
+            self._set_mode_locked(mode, persist)
+
+    def _set_mode_locked(self, mode: str, persist: bool) -> None:
         if persist:
             self._away.clear()
         if mode not in dict(MODES) or mode == STATE.presence_mode:
@@ -343,9 +352,25 @@ class Companion:
             print("🫧 Companion: session closed")
             if opened:     # a restore rule must not replay a snapshot that was never taken
                 events.emit("companion.session_closed", cause=cause)
-            if self.presence_on():
-                self.presence.resume()
+            self.ensure_mic()
             self._set_state(self._standby())
+
+    def ensure_mic(self) -> None:
+        """Reopen the wake mic if the mode says it should be open and nothing owns
+        it. Also the safety net of the announce loop: a failed reopen (device busy
+        after a dictation) is retried instead of leaving "listening" deaf."""
+        with self._mic_lock:
+            if (self.presence_on() and not self.presence.listening
+                    and not STATE.talk_active and not STATE.companion_session):
+                try:
+                    self.presence.resume()
+                except Exception as e:
+                    if not self._mic_alerted:
+                        self._mic_alerted = True
+                        print(f"⚠️  Companion: wake mic could not reopen ({e}) — retrying")
+                    return
+            if self.presence.listening:
+                self._mic_alerted = False
 
     def announce_if_due(self) -> bool:
         """A standing source has something and nobody is speaking: open a session
@@ -365,6 +390,7 @@ class Companion:
     def _announce_loop(self) -> None:
         while True:
             try:
+                self.ensure_mic()
                 self.announce_if_due()
             except Exception as e:
                 print(f"⚠️  Companion could not announce a source: {e}")
