@@ -210,36 +210,52 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - tests/test_settings_layout.py et tests/test_i18n.py passent.
 
 
+### Lot — Lot 23 — MCP : contrôle de vie (launched, one at a time)
+
+- **MCP : le contrôle de vie (#120) déclare Home Assistant mort toutes les 20 s** — done
+
+  Régression de #120. Depuis le redémarrage du 14/11 20:49, le journal montre en boucle « 🔌 MCP server homeassistant: 21 tool(s) » puis 20 s plus tard « ⚠️ MCP server homeassistant: lost: MCPError: Method not found », relancé avec le backoff (30 s doublé, plafond 5 min) : les outils Home Assistant sont indisponibles la plupart du temps. Cause (services/mcp_tools.py ~l.260) : la boucle de vie appelle `client.send_ping()`, que le SDK mcp marque obsolète (« MCPDeprecationWarning: ping is removed as of 2026-07-28 », imprimé à chaque ping, y compris pour le serveur board) et que le serveur HA ne connaît pas (Method not found).
+  
+  Corriger : un serveur qui RÉPOND, même par une erreur de protocole (MCPError), est vivant ; seuls un délai dépassé ou une connexion fermée le déclarent perdu. Remplacer le ping obsolète par une requête que tout serveur sert (par ex. `list_tools()` borné par PING_TIMEOUT), ou garder le ping en traitant MCPError comme vivant ; plus aucun MCPDeprecationWarning dans le journal. Test sans réseau avec tests/mcp_fixture_server.py : un serveur qui répond « Method not found » au ping reste up ; un serveur tué est déclaré perdu une fois puis relancé.
+
+  - [x] Avec Home Assistant déclaré, aucune ligne « lost » pendant 10 min de journal
+  - [x] Plus aucun MCPDeprecationWarning ping dans le journal
+  - [x] Un serveur tué est toujours détecté et relancé (test)
+  - [x] test_plugins, test_mcp_deferred et le test de relance de #120 passent
+
+### Lot — Lot 24 — Mot d'éveil : ne plus devenir sourd (planned, one at a time)
+
+- **Mot d'éveil sourd après une session : l'écoute s'arrête sans rien dire** — backlog
+
+  Constaté le 14/11 : après le redémarrage de 20:49 (main e78ce83), compagnon À l'écoute, deux sessions ouvertes par F8 (21:29, 21:35), puis « hey jarvis » dit de nombreuses fois sans effet, et AUCUNE ligne 👂 (ni détection ni quasi-détection) dans le journal. Une sonde indépendante (openwakeword sur le même micro Razer, même modèle) donnait au même moment 0,97-1,00 : micro et modèle sont bons. Le flux de Loquivox restait ouvert (pactl : source-output « Loquivox » RUNNING). Après un redémarrage (21:40), « hey jarvis » marche du premier coup (21:41:04, 0,95). Donc : le callback audio de services/presence.py `Presence._on_audio` cesse de traiter l'audio (exception dans le callback PortAudio qui le tue sans trace, ou flux remplacé/pas repris) après une session.
+  
+  Suspect n°1 : la fenêtre de relance (#123) — `_follow` / `turn_complete` appelés DANS le callback après chaque session (follow_up_sec valait 10). Elle est coupée chez l'opérateur depuis 21:40 (follow_up_sec = 0) : si le mot d'éveil tient après plusieurs sessions maintenant, c'est confirmé. Suspects 2 : resume()/pause autour d'une session, la reprise de contexte (#122), set_wake_model lors d'un Appliquer dans Réglages (#124 ; l'opérateur a cliqué Appliquer plusieurs fois à 21:35-21:36).
+  
+  À faire : 1) reproduire sans micro (stream_factory factice, comme tests/test_presence.py) : session → fin → fenêtre de relance → audio → le mot d'éveil doit toujours déclencher ; idem après Appliquer dans Réglages ; 2) corriger la cause ; 3) garde-fou : toute exception dans _on_audio est journalisée (une fois, avec la trace) et n'arrête jamais l'écoute ; 4) un battement : si l'écoute est censée être active mais qu'aucun bloc n'a été traité depuis 10 s, une ligne ⚠️ et une réouverture du flux.
+
+  - [ ] Test sans micro : après une session (follow_up_sec > 0) puis de l'audio, le mot d'éveil déclenche toujours
+  - [ ] Test : après un Appliquer dans Réglages, le mot d'éveil déclenche toujours
+  - [ ] Une exception dans le callback audio est journalisée avec sa trace et l'écoute continue
+  - [ ] Un flux muet alors que l'écoute est active est détecté et rouvert (ligne ⚠️)
+  - [ ] test_presence, test_companion, test_companion_resume, test_away passent
+
+### Lot — Lot 25 — Écouter les voix Live (planned, one at a time)
+
+- **Réglages : écouter n'importe quelle voix Live (extrait enregistré par gpt-live, gardé en cache)** — backlog
+
+  Aujourd'hui `_on_test_live_voice` (ui/settings_dialog.py ~l.1464) fait lire une phrase par le modèle TTS (gpt-4o-mini-tts) : ce n'est pas la vraie voix Live, et 12 des 22 voix (bossa, tempo, beacon…, les seules non anglaises comprises) n'ont AUCUN aperçu (« ⚠️ No preview… Live-only voice »). Le champ « Companion's Live voice » (l.~756) n'a pas de bouton du tout.
+  
+  Reprendre la méthode de ~/git/perso/full-duplex-meetings (core/src/assist.rs `voice_sample`, `question_audio`, `record_live`, `trim_silence`, `voice_path`) : les voix de gpt-live n'existent que dans gpt-live, donc on lui fait vraiment dire une phrase. Une courte session gpt-live (voix choisie, délégation client, consigne : « quand on te demande de te présenter, réponds exactement par cette phrase… puis tais-toi ») reçoit une question parlée (synthèse TTS « alloy », elle aussi gardée en cache), un flux continu de zéros autour (règle du module : jamais rien, toujours des zéros), et on enregistre sa réponse jusqu'à ~1 s de silence (délai max 30 s). Silence de début/fin coupé, wav écrit de façon atomique dans ~/.cache/loquivox/voices/<voix>-<langue>.wav : le premier clic coûte une session de quelques secondes, les suivants sont instantanés et gratuits. Phrase et question en français si la langue de l'interface est fr, sinon en anglais.
+  
+  Réutiliser LiveTalk / la connexion existante de services/live_talk.py plutôt qu'un second client. Le bouton ▶ (à côté des DEUX champs de voix Live : Conversation › Moteur et Compagnon › Voix et réflexion) lance l'extraction sur un thread (jamais GTK), affiche « ⏳ Enregistrement de la voix… » puis joue le wav ; erreur (pas de clé OpenAI, réseau) = ❌ avec la cause dans la ligne d'état. Le journal note « 🔊 voice sample <voix> : cache / recorded in Xs », jamais de clé.
+
+  - [ ] ▶ à côté des deux champs de voix Live ; les 22 voix, bossa et tempo comprises, se font entendre avec leur vraie voix gpt-live
+  - [ ] Le deuxième clic sur la même voix joue le fichier en cache, sans session ni coût (journal)
+  - [ ] Pendant l'enregistrement la fenêtre reste réactive ; une erreur affiche ❌ avec la cause
+  - [ ] Le flux envoyé à gpt-live est continu (zéros), self-check qui l'épingle
+  - [ ] test_i18n et test_settings_layout passent
+
 ### Not in a lot
-
-- **Compagnon : se réveiller sur son nom n'importe où dans la phrase (transcription locale, option)** — backlog
-
-  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 2. **Après** la carte « fenêtre de relance locale » (même chemin de transcription), et **seulement si l'opérateur accepte** une transcription locale permanente (question ouverte du rapport).
-  
-  Option `[companion] name_anywhere` (défaut off, Compagnon › Général) : tout énoncé retenu par la VAD + Smart Turn est transcrit en local (whisper.cpp, `initial_prompt` contenant le nom) et réveille le compagnon si le nom y figure, à n'importe quelle position, par comparaison tolérante (normalisation + distance phonétique). Le mot d'éveil openWakeWord reste le déclencheur instantané ; ceci couvre « …, Loquivox » en fin de phrase. Rien n'est gardé ni journalisé en clair.
-  
-  Coût mesuré dans le rapport : 0,68 s CPU par seconde de parole entendue (base, 4 threads), ~8 % d'un cœur sur une journée à 1 h de parole, +0,7 s de latence.
-  
-  Critères :
-  - « Rappelle-moi ça demain, Loquivox » réveille le compagnon avec la phrase en tête.
-  - ≤ 0,5 faux réveil par heure sur 8 h d'audio de bureau (mesuré, chiffre dans la PR).
-  - Option off : aucune transcription, CPU au repos inchangé.
-
-- **Mot d'éveil : entraîner « Hé Loquivox » (openWakeWord, voix TTS françaises) et le mesurer** — backlog
-
-  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md (question roadmap 6a2029b0). **Prérequis : l'opérateur a choisi la phrase** (« Hé Loquivox » proposé ; question ouverte du rapport).
-  
-  Entraîner un modèle openWakeWord pour la phrase retenue, sur Colab (pas de GPU CUDA sur la machine) :
-  - ~3 000 positifs synthétiques : voix Piper françaises + voix cloud (OpenAI/ElevenLabs, < 1 $) pour la diversité ;
-  - négatifs : traits pré-calculés openWakeWord + phrases françaises proches générées par le même TTS ;
-  - validation sur ~50 prises réelles de l'opérateur et ~8 h d'audio de bureau enregistré et mesuré en local.
-  
-  Livrables : le .onnx publié sur la carte, le notebook/script de génération (dans le dépôt, hors src/), et un court compte rendu chiffré.
-  
-  Critères :
-  - ≤ 0,5 faux réveil par heure sur l'audio de bureau, ≤ 10 % de ratés sur les prises réelles, au seuil retenu (justifié).
-  - CPU à l'inférence ≈ celui de hey_jarvis (~1,4 ms par trame de 80 ms).
-  - Si les critères ne sont pas atteints : le dire, garder hey_jarvis, et ne fusionner que le compte rendu.
 
 - **Passer le moteur Live à gpt-live-1.1 et ses voix françaises (Aube, Rivage)** — backlog
 
@@ -298,3 +314,50 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
   - [ ] Un self-check de `live_talk.py` l'épingle : audio reçu mais pas encore joué = pas de calibration
   - [ ] Test réel au casque USB, une dizaine de réponses en parlant jusqu'au début de chacune : plus de fausse note 🔇
   - [ ] Sur haut-parleurs, l'interruption marche toujours : `✋ Cut off` quand on parle, jamais sinon
+
+## Phase 10 — Détection d'adresse
+
+Plus besoin du mot d'éveil : il comprend seul qu'on s'adresse à lui, sans se déclencher en réunion ou au téléphone.
+
+### Cards
+
+- **Relance sans mot d'éveil : remplacer la liste de mots par un jugement du modèle** — backlog
+
+  La fenêtre de relance (#123, `follow_up_sec`) est une bonne idée mais son juge est une liste de mots codée en dur (`follow_up_verdict` dans handlers/companion.py : 2e personne, phrase qui commence par « et »/« est »/un mot interrogatif, un impératif d'une liste, ou un mot de 4+ lettres repris de l'échange). Trop large : « et du coup on mange quoi ? » dit à quelqu'un d'autre rouvre une session payante. Coupée chez l'opérateur le 14/11 (follow_up_sec = 0) en attendant.
+  
+  À faire : garder la transcription locale (whisper.cpp, rien ne part dans le cloud avant la décision) et le cadre (fenêtre, micro occupé, phrase d'arrêt), mais remplacer la liste par UN jugement du modèle, sur le slot du juge de mémoire (`AIService.judge_target()`, comme memory._ask) : on lui donne les 2-3 derniers échanges et la phrase, il répond oui/non + une raison courte. Inspiré de ~/git/perso/full-duplex-meetings (config.rs, section « Quand parler » : on lui parle quand on lui pose une question, qu'on le prend comme interlocuteur, qu'on poursuit l'échange qu'il a commencé ; quelqu'un se tourne vers une autre personne → non ; dans le doute, non). Erreur ou délai > 1,5 s = non. Le texte de la phrase ne part au modèle que si l'opérateur l'accepte : case dans Compagnon › Présence, qui explique que la phrase transcrite localement est envoyée au modèle du juge. Journal : décision + raison, jamais le texte. Banc : un jeu d'une vingtaine de phrases étiquetées (suites réelles vs phrases à un tiers, en français) dans tests/, avec un mode sans réseau (juge factice) pour le self-check et un mode réel pour mesurer précision / faux positifs du modèle ; la liste de mots reste en repli uniquement si le juge est indisponible, ou est supprimée si le banc montre qu'elle n'apporte rien.
+
+  - [ ] Le juge est le modèle (slot du juge), la liste de mots n'est plus la décision
+  - [ ] « et du coup on mange quoi ? » dit à un tiers après une session ne rouvre rien ; « et pour demain ? » en suite de la conversation rouvre (banc)
+  - [ ] Banc de phrases étiquetées : résultat réel chiffré dans le bilan (faux positifs ≤ 1/20)
+  - [ ] Consentement explicite dans Compagnon › Présence avant d'envoyer la phrase au modèle
+  - [ ] Journal sans texte ; test_presence, test_i18n, test_settings_layout passent
+- **Compagnon : se réveiller sur son nom n'importe où dans la phrase (transcription locale, option)** — backlog
+
+  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 2. **Après** la carte « fenêtre de relance locale » (même chemin de transcription), et **seulement si l'opérateur accepte** une transcription locale permanente (question ouverte du rapport).
+  
+  Option `[companion] name_anywhere` (défaut off, Compagnon › Général) : tout énoncé retenu par la VAD + Smart Turn est transcrit en local (whisper.cpp, `initial_prompt` contenant le nom) et réveille le compagnon si le nom y figure, à n'importe quelle position, par comparaison tolérante (normalisation + distance phonétique). Le mot d'éveil openWakeWord reste le déclencheur instantané ; ceci couvre « …, Loquivox » en fin de phrase. Rien n'est gardé ni journalisé en clair.
+  
+  Coût mesuré dans le rapport : 0,68 s CPU par seconde de parole entendue (base, 4 threads), ~8 % d'un cœur sur une journée à 1 h de parole, +0,7 s de latence.
+  
+  Critères :
+  - « Rappelle-moi ça demain, Loquivox » réveille le compagnon avec la phrase en tête.
+  - ≤ 0,5 faux réveil par heure sur 8 h d'audio de bureau (mesuré, chiffre dans la PR).
+  - Option off : aucune transcription, CPU au repos inchangé.
+
+- **Mot d'éveil : entraîner « Hé Loquivox » (openWakeWord, voix TTS françaises) et le mesurer** — backlog
+
+  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md (question roadmap 6a2029b0). **Prérequis : l'opérateur a choisi la phrase** (« Hé Loquivox » proposé ; question ouverte du rapport).
+  
+  Entraîner un modèle openWakeWord pour la phrase retenue, sur Colab (pas de GPU CUDA sur la machine) :
+  - ~3 000 positifs synthétiques : voix Piper françaises + voix cloud (OpenAI/ElevenLabs, < 1 $) pour la diversité ;
+  - négatifs : traits pré-calculés openWakeWord + phrases françaises proches générées par le même TTS ;
+  - validation sur ~50 prises réelles de l'opérateur et ~8 h d'audio de bureau enregistré et mesuré en local.
+  
+  Livrables : le .onnx publié sur la carte, le notebook/script de génération (dans le dépôt, hors src/), et un court compte rendu chiffré.
+  
+  Critères :
+  - ≤ 0,5 faux réveil par heure sur l'audio de bureau, ≤ 10 % de ratés sur les prises réelles, au seuil retenu (justifié).
+  - CPU à l'inférence ≈ celui de hey_jarvis (~1,4 ms par trame de 80 ms).
+  - Si les critères ne sont pas atteints : le dire, garder hey_jarvis, et ne fusionner que le compte rendu.
+
