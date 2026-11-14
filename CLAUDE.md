@@ -204,6 +204,13 @@ The cascade, step by step:
    took), and `LOQUIVOX_KEEP_SCREENSHOT=1` writes `<path>.sent.png` — the bytes
    actually uploaded, cropped and downscaled, which is the only artefact a
    legibility problem shows up in. The raw capture never does.
+   **What the user is working on** costs no capture and no model:
+   `_talk_look` (F4 and the companion's wake, not F6) also starts `_talk_work`,
+   which asks `ScreenshotBackend.focused_window_info()` (niri IPC / xdotool,
+   None elsewhere) and hands `services/workline.work_line` the `(title, app)`;
+   it adds the board repo (`/api/repos`) whose name appears in the title. The
+   one line lands in `TalkSession.work` → `context_clause()`. Unknown window or
+   board down: nothing, silently. `tests/test_work_context.py`.
 1. `GrabbedKeys` (keyboard.py) keeps the input devices open for the *entire*
    session — a key pressed while the model is thinking is still queued when the
    next wait starts — but takes the exclusive grab only inside

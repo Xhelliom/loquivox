@@ -517,6 +517,21 @@ class ModeHandler:
         """
         threading.Thread(target=ModeHandler._talk_screen_worker,
                          args=(session,), daemon=True).start()
+        if not session.write:
+            threading.Thread(target=ModeHandler._talk_work, args=(session,),
+                             daemon=True).start()
+
+    @staticmethod
+    def _talk_work(session) -> None:
+        """The focused window and its project, as one line. Silent when unknown."""
+        try:
+            from loquivox.platform import get_screenshot
+            from loquivox.services.workline import work_line
+            line = work_line(get_screenshot().focused_window_info())
+        except Exception:
+            return
+        if line and STATE.talk_active:
+            session.work = line
 
     @staticmethod
     def _talk_take_selection(session) -> None:

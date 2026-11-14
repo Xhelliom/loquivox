@@ -110,6 +110,17 @@ class X11Screenshot(ScreenshotBackend):
         except Exception:
             return None
 
+    def focused_window_info(self):
+        """``(title, class)`` of the active window via xdotool."""
+        try:
+            out = [subprocess.run(["xdotool", "getactivewindow", cmd], capture_output=True,
+                                  text=True, timeout=2) for cmd in ("getwindowname", "getwindowclassname")]
+            if all(r.returncode == 0 for r in out):
+                return out[0].stdout.strip(), out[1].stdout.strip()
+        except Exception:
+            pass
+        return None
+
     def pointer_position(self):
         """Pointer coordinates via ``xdotool getmouselocation`` (X11 globals)."""
         try:
