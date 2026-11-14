@@ -48,6 +48,7 @@ def _judge(rules, source, content):
 
 
 class _Presence:
+    listening = True     # read by Companion.ensure_mic
     def release(self): pass
     def resume(self): pass
     def start(self): pass

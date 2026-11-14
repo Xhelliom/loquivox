@@ -24,6 +24,7 @@ import time
 from typing import Callable, Optional
 
 import loquivox.config as config_module
+from loquivox.services.talk import resume_history
 from loquivox.i18n import N_
 from loquivox.services import events, media, memory, plugins
 from loquivox.state import STATE, SettingsManager
@@ -113,6 +114,7 @@ class Companion:
         self._voice = None   # "listening" / "speaking" last posted to the bubble
         self._heard = float("-inf")   # monotonic time of the last word heard in standby
         self._retry = float("-inf")   # no source wake before this
+        self._last: tuple = ([], 0.0)  # (turns, monotonic end) of the previous session, to resume
         self._ducking = False         # the music is down because someone speaks
         self._user_run = 0            # consecutive mic blocks above the speech bar
         self._user_last = float("-inf")   # monotonic time of the last confirmed user speech
@@ -320,6 +322,7 @@ class Companion:
         from loquivox.services.talk import TalkSession
         STATE.talk_active = STATE.companion_session = True
         session = TalkSession(write=False, instructions=instructions())
+        self._resume_into(session)
         STATE.talk_session = session
         previous_mode = STATE.current_mode
         STATE.current_mode, STATE.talk_engine = "ai", "live"
@@ -345,6 +348,8 @@ class Companion:
             STATE.current_mode = previous_mode
             session.desks.close()
             memory.remember_async(session)
+            if session.turns:
+                self._last = (resume_history(session.resumed + session.turns), time.monotonic())
             STATE.talk_active = STATE.companion_session = False
             while not STATE.talk_click.empty():     # a click meant for this session
                 STATE.talk_click.get_nowait()
@@ -354,6 +359,15 @@ class Companion:
                 events.emit("companion.session_closed", cause=cause)
             self.ensure_mic()
             self._set_state(self._standby())
+
+    def _resume_into(self, session) -> None:
+        minutes = config_module.CFG.COMPANION_RESUME_MIN
+        turns, ended = self._last
+        ago = time.monotonic() - ended
+        if minutes <= 0 or not turns or ago > minutes * 60:
+            return
+        session.resumed = list(turns)
+        print(f"🫧 Companion: resumed {len(turns)} turns from {ago:.0f}s ago")
 
     def ensure_mic(self) -> None:
         """Reopen the wake mic if the mode says it should be open and nothing owns

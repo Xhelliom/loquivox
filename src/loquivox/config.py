@@ -454,6 +454,9 @@ class Config:
     #: Seconds without a word heard before a source's message may wake the
     #: companion by itself (standby, active mode only).
     COMPANION_SOURCE_SILENCE_SEC: float = 2.0
+    #: A session opened less than this many minutes after the previous one
+    #: resumes its last turns. 0 = never.
+    COMPANION_RESUME_MIN: float = 10.0
     #: When a session opens on more than this many held messages (after a
     #: silence), it says how many there are and the three most important.
     COMPANION_DIGEST_MAX: int = 5
@@ -973,6 +976,8 @@ def _build_config() -> Config:
         overrides["COMPANION_IDLE_TIMEOUT"] = float(companion["idle_timeout"])
     if "source_silence" in companion:
         overrides["COMPANION_SOURCE_SILENCE_SEC"] = float(companion["source_silence"])
+    if "resume_min" in companion:
+        overrides["COMPANION_RESUME_MIN"] = max(0.0, float(companion["resume_min"]))
     if "digest_max" in companion:
         overrides["COMPANION_DIGEST_MAX"] = max(3, int(companion["digest_max"]))
     if "duck_on_assistant" in companion:

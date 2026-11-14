@@ -235,6 +235,26 @@ def _ends_on_user(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return messages
 
 
+#: What a resumed companion session is handed: the most recent turns that fit.
+#: (Live's ``input`` is limited to ~8k tokens; the cascade has no reason to carry more.)
+RESUME_CHARS = 6_000
+RESUME_ITEMS = 40
+
+
+def resume_history(turns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The last user/assistant turns within the budget, oldest first."""
+    out: List[Dict[str, Any]] = []
+    budget = RESUME_CHARS
+    for t in reversed(turns):
+        if t["role"] not in ("user", "assistant") or not t["content"].strip():
+            continue
+        if len(out) >= RESUME_ITEMS or len(t["content"]) > budget:
+            break
+        budget -= len(t["content"])
+        out.append(t)
+    return out[::-1]
+
+
 class TalkSession:
     """One spoken conversation, and the text it produces."""
 
@@ -257,6 +277,10 @@ class TalkSession:
         self.desks = Desks(chat=not write)
         #: the conversation so far, as API messages (user/assistant turns)
         self.turns: List[Dict[str, Any]] = []
+        #: turns of the previous companion session, handed over on opening. Kept
+        #: apart from ``turns`` so they are never counted as the user speaking
+        #: (the spoken yes) nor extracted again by the end-of-session memory.
+        self.resumed: List[Dict[str, Any]] = []
         #: called before the writing pass reads ``turns``: an engine whose last
         #: user turn is still being transcribed (Live) records it here first.
         self.settle: Optional[Callable[[], None]] = None
@@ -326,7 +350,7 @@ class TalkSession:
         something the user said; only the wire shape changes.
         """
         return [dict(turn, role="user") if turn["role"] == "system" else turn
-                for turn in self.turns]
+                for turn in self.resumed + self.turns]
 
     def _context_messages(self) -> List[Dict[str, Any]]:
         """The screen context as a system message, or nothing at all."""

@@ -699,6 +699,12 @@ class SettingsDialog:
         cls._comp_size_seen = cls._comp_size.get_value()
         cls._comp_size.set_tooltip_text(_("Also on the mouse wheel over the bubble"))
         cls._field(body, _("Bubble size (px)"), cls._comp_size, labels)
+        cls._comp_resume = Gtk.SpinButton.new_with_range(0, 120, 1)
+        cls._comp_resume.set_value(cfg.COMPANION_RESUME_MIN)
+        cls._comp_resume.set_tooltip_text(
+            _("A conversation opened within this many minutes of the previous one "
+              "picks up where it left off · 0 = always start empty"))
+        cls._field(body, _("Resume the conversation (min)"), cls._comp_resume, labels)
 
         cls._comp_status = Gtk.Label()
         cls._actions(body, cls._on_apply_companion, cls._comp_status)
@@ -1004,6 +1010,7 @@ class SettingsDialog:
                 "silence_idle_min": int(cls._comp_idle.get_value()),
                 "bubble_style": cls._comp_style.get_active_id(),
                 "source_silence": cls._comp_source_silence.get_value(),
+                "resume_min": cls._comp_resume.get_value(),
                 "live_voice": cls._comp_voice.get_active_id() or "",
                 "live_delegation": cls._comp_delegation.get_active_id() or "",
                 "live_backend_model": cls._comp_backend.get_text().strip(),
