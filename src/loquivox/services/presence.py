@@ -67,6 +67,9 @@ NEAR_MISS_EVERY: float = 5.0
 
 
 class Presence:
+    HEARTBEAT = 2.0
+    SILENT_AFTER = 10.0
+
     def __init__(self, on_wake: Callable[[], None], *, model=None,
                  wake_model: str = WAKE_MODEL, threshold: float = WAKE_THRESHOLD,
                  stream_factory=None) -> None:
@@ -92,6 +95,9 @@ class Presence:
         self._follow_until = float("-inf")
         self._follow_cb: Optional[Callable[[list], None]] = None
         self._utt: list = []
+        self._last_block = time.monotonic()
+        self._err_logged = False
+        self._dog_gen = 0
 
     @property
     def listening(self) -> bool:
@@ -145,6 +151,7 @@ class Presence:
         Turn closes (float32 blocks, on its own thread). Outside it nothing is kept."""
         self._utt = []
         self._follow_cb = callback
+        self._last_block = time.monotonic()
         self._follow_until = time.monotonic() + seconds
 
     def keep_tail(self, blocks: list) -> None:
@@ -155,15 +162,17 @@ class Presence:
         if time.monotonic() > self._follow_until:
             self._follow_cb, self._utt = None, []
             return
-        self._utt.append(block.copy())
+        # local refs: open_follow_up()/release() rebind these from another thread
+        utt, cb = self._utt, self._follow_cb
+        utt.append(block.copy())
         vad = self._vad
         if not vad.speech_started:
-            del self._utt[:-5]   # a little pre-roll, not the silence before the voice
+            del utt[:-5]   # a little pre-roll, not the silence before the voice
         # ponytail: Smart Turn runs in the audio callback (one ONNX pass per pause); move it to a thread if it ever overruns
-        elif vad.ended and turn_complete(
-                vad, lambda: np.concatenate(self._utt)[-8 * RATE:], RATE):
-            utt, self._utt = self._utt, []
-            threading.Thread(target=self._follow_cb, args=(utt,), daemon=True).start()
+        elif vad.ended and cb is not None and turn_complete(
+                vad, lambda: np.concatenate(utt)[-8 * RATE:], RATE):
+            self._utt = []
+            threading.Thread(target=cb, args=(utt,), daemon=True).start()
 
     def take_tail(self) -> list:
         """What was said since the wake word (float32 blocks); empties the buffer."""
@@ -180,9 +189,51 @@ class Presence:
             self._vad = VoiceActivityDetector(RATE)
             self._stream = self._stream_factory(self._on_audio)
             self._stream.start()
+            self._last_block = time.monotonic()
+            self._dog_gen += 1
+            threading.Thread(target=self._watch, args=(self._dog_gen,), daemon=True).start()
+
+    def _watch(self, gen: int) -> None:
+        """Heartbeat: listening but no block for SILENT_AFTER s → reopen the stream."""
+        while True:
+            time.sleep(self.HEARTBEAT)
+            if gen != self._dog_gen or self._stream is None:
+                return
+            if time.monotonic() - self._last_block > self.SILENT_AFTER:
+                print(f"⚠️  Presence: no audio for {self.SILENT_AFTER:.0f}s while listening — reopening the stream")
+                self.release()
+                try:
+                    self.resume()
+                except Exception as exc:
+                    print(f"⚠️  Presence: reopen failed ({exc})")
+                return
 
     def _on_audio(self, indata, frames, time_info, status) -> None:
+        # An exception here kills the PortAudio callback, and the wake word with it:
+        # the side work (VAD, tail, follow-up, level) and the score are guarded apart,
+        # so a broken side never deafens the wake word.
         block = np.asarray(indata, dtype=np.float32).reshape(-1)
+        try:
+            self._side(block)
+        except Exception:
+            self._report("side work")
+            # start over from a clean state, or the same error comes back each block
+            self._vad, self._follow_cb, self._utt = VoiceActivityDetector(RATE), None, []
+            self.speaking = False
+        try:
+            self._score(block)
+            self._last_block = time.monotonic()   # only a block scored without error counts for the heartbeat
+        except Exception:
+            self._report("wake scoring")
+
+    def _report(self, what: str) -> None:
+        if not self._err_logged:
+            self._err_logged = True
+            import traceback
+            print(f"⚠️  Presence: audio callback error in {what} (listening continues)\n"
+                  + traceback.format_exc())
+
+    def _side(self, block: np.ndarray) -> None:
         if self._vad.ended:   # one detector per utterance: start over
             self._vad = VoiceActivityDetector(RATE)
         self._vad.feed(block)
@@ -195,6 +246,8 @@ class Presence:
         if self.on_level:
             rms = float(np.sqrt(np.mean(block ** 2))) if block.size else 0.0
             self.on_level(min(1.0, rms * 6) if self.speaking else 0.0)
+
+    def _score(self, block: np.ndarray) -> None:
         if self._model is None:
             return
         pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)

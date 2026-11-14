@@ -223,9 +223,9 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Un serveur tué est toujours détecté et relancé (test)
   - [x] test_plugins, test_mcp_deferred et le test de relance de #120 passent
 
-### Lot — Lot 24 — Mot d'éveil : ne plus devenir sourd (planned, one at a time)
+### Lot — Lot 24 — Mot d'éveil : ne plus devenir sourd (launched, one at a time)
 
-- **Mot d'éveil sourd après une session : l'écoute s'arrête sans rien dire** — backlog
+- **Mot d'éveil sourd après une session : l'écoute s'arrête sans rien dire** — done
 
   Constaté le 14/11 : après le redémarrage de 20:49 (main e78ce83), compagnon À l'écoute, deux sessions ouvertes par F8 (21:29, 21:35), puis « hey jarvis » dit de nombreuses fois sans effet, et AUCUNE ligne 👂 (ni détection ni quasi-détection) dans le journal. Une sonde indépendante (openwakeword sur le même micro Razer, même modèle) donnait au même moment 0,97-1,00 : micro et modèle sont bons. Le flux de Loquivox restait ouvert (pactl : source-output « Loquivox » RUNNING). Après un redémarrage (21:40), « hey jarvis » marche du premier coup (21:41:04, 0,95). Donc : le callback audio de services/presence.py `Presence._on_audio` cesse de traiter l'audio (exception dans le callback PortAudio qui le tue sans trace, ou flux remplacé/pas repris) après une session.
   
@@ -233,11 +233,11 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   
   À faire : 1) reproduire sans micro (stream_factory factice, comme tests/test_presence.py) : session → fin → fenêtre de relance → audio → le mot d'éveil doit toujours déclencher ; idem après Appliquer dans Réglages ; 2) corriger la cause ; 3) garde-fou : toute exception dans _on_audio est journalisée (une fois, avec la trace) et n'arrête jamais l'écoute ; 4) un battement : si l'écoute est censée être active mais qu'aucun bloc n'a été traité depuis 10 s, une ligne ⚠️ et une réouverture du flux.
 
-  - [ ] Test sans micro : après une session (follow_up_sec > 0) puis de l'audio, le mot d'éveil déclenche toujours
-  - [ ] Test : après un Appliquer dans Réglages, le mot d'éveil déclenche toujours
-  - [ ] Une exception dans le callback audio est journalisée avec sa trace et l'écoute continue
-  - [ ] Un flux muet alors que l'écoute est active est détecté et rouvert (ligne ⚠️)
-  - [ ] test_presence, test_companion, test_companion_resume, test_away passent
+  - [x] Test sans micro : après une session (follow_up_sec > 0) puis de l'audio, le mot d'éveil déclenche toujours
+  - [x] Test : après un Appliquer dans Réglages, le mot d'éveil déclenche toujours
+  - [x] Une exception dans le callback audio est journalisée avec sa trace et l'écoute continue
+  - [x] Un flux muet alors que l'écoute est active est détecté et rouvert (ligne ⚠️)
+  - [x] test_presence, test_companion, test_companion_resume, test_away passent
 
 ### Lot — Lot 25 — Écouter les voix Live (planned, one at a time)
 
@@ -254,6 +254,21 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [ ] Pendant l'enregistrement la fenêtre reste réactive ; une erreur affiche ❌ avec la cause
   - [ ] Le flux envoyé à gpt-live est continu (zéros), self-check qui l'épingle
   - [ ] test_i18n et test_settings_layout passent
+
+### Lot — Lot 26 — Clic droit : parler et mot d'éveil (planned, one at a time)
+
+- **Clic droit sur la bulle : ouvrir une conversation (rouge) et choisir le mot d'éveil** — backlog
+
+  Demande de l'opérateur (14/11). Le menu du clic droit de la bulle (ui/companion_bubble.py `_popup_menu`, aussi sur la languette quand elle est rangée) gagne deux choses :
+  1. **« Parler maintenant »** en tête du menu : ouvre une session (bulle rouge) exactement comme F8 / `companion_wake` (même chemin, même cause « key »), y compris depuis Silence ; quand une session est ouverte, l'entrée devient « Terminer la conversation ».
+  2. **Un sous-menu « Mot d'éveil »** : les modèles openWakeWord livrés (hey_jarvis, alexa, hey_mycroft… — la liste que Réglages › Compagnon › Général propose déjà), plus le modèle .onnx personnalisé s'il y en a un (#124), le courant coché. Choisir écrit `[companion] wake_word` par le même écrivain que Réglages et applique à chaud (`Presence.set_wake_model`, sans fermer le micro) ; l'onglet Réglages affiche la même valeur. Une infobulle ou une ligne grisée en tête rappelle le mot actuel (« Dites « Hey Jarvis » »).
+  ATTENTION : ne pas réintroduire la surdité corrigée par le lot 24 (set_wake_model pendant que le callback tourne) — test : changer de mot par le menu puis le nouveau mot déclenche (stream_factory factice).
+  Libellés dans locale_fr.py ; une seule table pour les entrées (pas de liste en double avec Réglages).
+
+  - [ ] Clic droit → Parler maintenant : la bulle passe au rouge et la session s'ouvre, même en Silence ; l'entrée devient Terminer pendant la session
+  - [ ] Clic droit → Mot d'éveil → un autre mot : appliqué sans redémarrage, le nouveau mot réveille, l'ancien non ; Réglages montre le même
+  - [ ] Le menu marche aussi sur la languette (bulle rangée)
+  - [ ] Test sans micro du changement de mot à chaud ; test_i18n, test_presence, test_settings_layout passent
 
 ### Not in a lot
 
