@@ -204,6 +204,13 @@ The cascade, step by step:
    took), and `LOQUIVOX_KEEP_SCREENSHOT=1` writes `<path>.sent.png` — the bytes
    actually uploaded, cropped and downscaled, which is the only artefact a
    legibility problem shows up in. The raw capture never does.
+   **What the user is working on** costs no capture and no model:
+   `_talk_look` (F4 and the companion's wake, not F6) also starts `_talk_work`,
+   which asks `ScreenshotBackend.focused_window_info()` (niri IPC / xdotool,
+   None elsewhere) and hands `services/workline.work_line` the `(title, app)`;
+   it adds the board repo (`/api/repos`) whose name appears in the title. The
+   one line lands in `TalkSession.work` → `context_clause()`. Unknown window or
+   board down: nothing, silently. `tests/test_work_context.py`.
 1. `GrabbedKeys` (keyboard.py) keeps the input devices open for the *entire*
    session — a key pressed while the model is thinking is still queued when the
    next wait starts — but takes the exclusive grab only inside
@@ -722,9 +729,14 @@ and prints the tool-context size before/after. What a tool returns goes through 
 (data, never an instruction), like a source's text. Settings → Tools has its
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server; the state
 is re-read every 2 s while the window is open — servers come up after it opens;
-`config_io.update_section` takes dotted sections for the nested table). Not
-done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
-mid-session. `sync()` relaunches only a server whose config or `enabled` changed (a
+`config_io.update_section` takes dotted sections for the nested table). A server
+that is up is pinged every `PING_EVERY` (20 s): a dead stdio child (or an HTTP
+server that stops answering) is one alert in the journal, then relaunched by the
+same backoff as a failed start (30 s doubling to 5 min, one warning per outage,
+not per retry). A URL server takes `headers = { Authorization = "Bearer ${VAR}" }`:
+`${VAR}` is read from the environment (`secrets.py` fills it), a missing one is
+a config error naming the variable, and values are never printed (`redact`
+also masks an `Authorization:` header). Not done: resources/prompts. `sync()` relaunches only a server whose config or `enabled` changed (a
 failed one with the same config stays failed: switch it off and on), cancels one still
 `starting` when it stops it, and Settings runs it on a thread — Apply never freezes GTK.
 A pending yes is keyed (session, server, tool, arguments): it never crosses sessions.

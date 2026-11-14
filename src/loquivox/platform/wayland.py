@@ -234,6 +234,18 @@ class WaylandScreenshot(ScreenshotBackend):
             pass
         return None
 
+    def focused_window_info(self):
+        """``(title, app_id)`` of the focused window via niri's IPC (None elsewhere)."""
+        try:
+            result = subprocess.run(["niri", "msg", "-j", "focused-window"],
+                                    capture_output=True, text=True, timeout=1)
+            if result.returncode == 0 and result.stdout.strip():
+                info = json.loads(result.stdout)
+                return str(info.get("title") or ""), str(info.get("app_id") or "")
+        except Exception:
+            pass
+        return None
+
     def pointer_position(self):
         """
         Pointer coordinates, when the compositor is willing to say.

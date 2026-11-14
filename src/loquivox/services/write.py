@@ -47,14 +47,29 @@ from loquivox.services.plugins import Plugin, register
 _writing = threading.Lock()
 
 
+def mail_clause() -> str:
+    """The format instruction of a mail; the signature is the Settings one."""
+    sig = (config_module.CFG.TALK_MAIL_SIGNATURE or "").strip()
+    end = (f"Sign it with exactly this signature after the closing formula:\n{sig}"
+           if sig else
+           "End on the closing formula and sign with nothing: do not invent a name.")
+    return (
+        "FORMAT: this text is an e-mail reply, in plain text. Open with a "
+        "salutation on its own line, then short paragraphs separated by a blank "
+        "line, then a closing formula on its own line. " + end + " No subject "
+        "line, no markdown, no quotes around the text. The mail being answered "
+        "is the user's selection or what the screen shows; reply to it.")
+
+
 def _run(arguments: Dict[str, Any]) -> str:
     """The desk's background job. The session is the one holding the microphone."""
     from loquivox.state import STATE   # lazy: pulls the audio stack in
 
-    return _write(STATE.talk_session, str(arguments.get("instruction", "")))
+    return _write(STATE.talk_session, str(arguments.get("instruction", "")),
+                  mail=bool(arguments.get("mail")))
 
 
-def _write(session, instruction: str = "") -> str:
+def _write(session, instruction: str = "", mail: bool = False) -> str:
     """
     Write the text the conversation has worked out, and put it at the cursor.
 
@@ -73,6 +88,8 @@ def _write(session, instruction: str = "") -> str:
     if not _writing.acquire(blocking=False):
         return ""      # already writing this one — see _writing
     try:
+        if mail:
+            instruction = (instruction.strip() + "\n\n" + mail_clause()).strip()
         text = session.generate(instruction)
         if not text:
             return "The text could not be written — say so and ask whether to retry."
@@ -122,15 +139,20 @@ def _settings(dialog, vbox, labels) -> None:
     check.set_active(bool(cfg.TALK_WRITE_TOOL))
     dialog._field(body, _("Write on request"), check, labels)
 
+    sig = Gtk.Entry()
+    sig.set_text((cfg.TALK_MAIL_SIGNATURE or "").replace("\n", "\\n"))
+    dialog._field(body, _("Mail signature"), sig, labels)
+
     status = Gtk.Label()
 
     def _apply(_btn=None) -> None:
-        """Write [talk] write_tool."""
+        """Write [talk] write_tool and mail_signature."""
         from loquivox.config_io import ConfigWriteError, update_section
 
         enabled = check.get_active()
         try:
-            update_section("talk", {"write_tool": enabled})
+            update_section("talk", {"write_tool": enabled, "mail_signature":
+                                    sig.get_text().replace("\\n", "\n")})
         except ConfigWriteError as e:
             status.set_markup(f"<small>❌ {e}</small>")
             return
@@ -167,7 +189,15 @@ PLUGIN = Plugin(
                                "paragraphe\", \"plus direct\". Leave it out "
                                "when they just asked for the text: the "
                                "conversation is the brief either way.",
-            }
+            },
+            "mail": {
+                "type": "boolean",
+                "description": "True when the text is an e-mail or a reply to "
+                               "one (\"réponds à ce mail\"): it is then "
+                               "written as a mail — salutation, paragraphs, "
+                               "closing formula, signature. The mail answered "
+                               "is the selection or what the screen shows.",
+            },
         },
     },
     started=(

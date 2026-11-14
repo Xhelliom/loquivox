@@ -84,37 +84,6 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Le banc a un mode qui passe par consult() et un scénario de oui tardif
   - [x] Jamais d action sans oui (les checks existants passent)
 
-### Lot — Lot 20 — Mot d'éveil : modèle perso et relance (planned, one at a time)
-
-- **Compagnon : fenêtre de relance locale après une session (sans mot d'éveil)** — backlog
-
-  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 1 (l'équivalent local du Follow-Up Mode d'Alexa / Continued Conversation de Google).
-  
-  Quand une session compagnon se ferme et que Presence reprend le micro (`resume()`), ouvrir une fenêtre de N s (`[companion] follow_up_sec`, défaut 10, 0 = off, réglable dans Compagnon › Présence). Dans la fenêtre, un énoncé retenu par la VAD et clos par Smart Turn est transcrit **en local** (whisper.cpp, déjà là ; jamais le cloud). Une règle décide s'il s'adresse au compagnon : pas une phrase d'arrêt, aucune autre appli sur le micro, au moins 2 mots, et 2ᵉ personne / question / impératif ou un mot repris du dernier échange. Oui → `wake(cause="follow_up")` avec l'audio de l'énoncé en tête (`take_tail`). L'événement `companion.session_opened` porte la cause.
-  
-  Journal : une ligne par décision (« relance : oui/non, raison »), **sans le texte** (règles de diagnostics.redact) ; `log_companion_cut` compte toujours les faux déclenchements.
-  
-  Hors périmètre : raccourcir COMPANION_IDLE_TIMEOUT (question à l'opérateur dans le rapport), détection hors fenêtre.
-  
-  Critères :
-  - Après une réponse, « et pour demain ? » dit dans les 10 s rouvre une session qui y répond ; une phrase à un collègue dans la fenêtre n'en ouvre pas (test avec transcriptions simulées dans tests/test_presence.py).
-  - Hors fenêtre, rien n'est transcrit (CPU au repos inchangé).
-  - Aucun audio ni texte ne sort avant le `wake`.
-
-- **Mot d'éveil : choisir un modèle .onnx personnalisé dans Réglages** — backlog
-
-  Suite de l'exploration docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md (question roadmap 6a2029b0).
-  
-  Constat : `load_wake_model()` passe la valeur telle quelle à `openwakeword.Model(wakeword_models=[...])`, qui accepte déjà un chemin de fichier (vérifié). Un chemin dans `[companion] wake_word` fonctionne donc ; seul Réglages › Compagnon › Général ne propose que les modèles intégrés (`_WAKE_WORDS`).
-  
-  À faire : à côté de la liste, un bouton « Modèle personnalisé… » (Gtk.FileChooser filtré *.onnx) qui met le chemin dans le combo ; Apply l'écrit dans `[companion] wake_word` et `companion.set_wake_word()` le charge sans relancer. Le ✓/❌ affiché repose sur `wake_problem()`. Chaînes passées par `_()` + `locale_fr.py` ; README et `config.example.toml` mentionnent qu'un chemin .onnx est accepté.
-  
-  Critères :
-  - Choisir un .onnx dans Réglages puis Apply : le compagnon se réveille sur ce modèle sans redémarrage.
-  - Un fichier invalide affiche ❌ avec la cause, le compagnon reste sur la touche seule, rien ne plante.
-  - tests/test_settings_layout.py et tests/test_i18n.py passent.
-
-
 ### Lot — Lot 17 — Mémoire entre sessions (launched, one at a time)
 
 - **Banc : scénarios de mémoire (se souvenir, ne pas inventer, oublier)** — done
@@ -149,9 +118,9 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Le journal ne cite pas les faits
   - [x] Self-check sans réseau (juge factice)
 
-### Lot — Lot 18 — Le oui sûr, contexte, mails et MCP (planned, 2 at a time)
+### Lot — Lot 18 — Le oui sûr, contexte, mails et MCP (launched, 2 at a time)
 
-- **Le oui : une action ne part jamais sur un oui antérieur à la dernière question** — backlog
+- **Le oui : une action ne part jamais sur un oui antérieur à la dernière question** — done
 
   Régression de sécurité laissée par #111 (relecture et triage l'avaient signalée, fusionnée quand même). Dans `services/mcp_tools.py` `run`, `asked.setdefault(key, spoken)` garde le compte de la PREMIÈRE question. Scénario : l'agent demande (asked=3) ; l'utilisateur répond « non » (spoken=4) ; l'agent repose la même question sans confirmed ; puis rappelle avec confirmed=true sans que l'utilisateur ait reparlé → 4 > 3 → l'action PART sans oui. Règle à rétablir : une action ne part que si l'utilisateur a parlé APRÈS la dernière question posée pour cette clé.
   
@@ -161,33 +130,85 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   
   Tests sans réseau : question → non → re-question → confirmed=true sans nouveau tour → Held ; question → oui tardif (confirmed=true avant que le tour soit compté, puis après) → l'action part une fois ; awaiting faux après un refus suivi de 2 tours ; et un test de `SETTLE_FIRST_YES` (live_talk). test_bench_mcp, test_plugins, test_mcp_deferred passent.
 
-  - [ ] question → non → re-question → confirmed=true sans nouveau tour : rien ne part (Held), test à l'appui
-  - [ ] le oui tardif sous Live marche toujours (test)
-  - [ ] awaiting() redevient faux après un refus, l'attente de 8 s ne colle plus à toute la session
-  - [ ] SETTLE_FIRST_YES a un test
-  - [ ] test_bench_mcp, test_plugins, test_mcp_deferred, test_agent_loop passent
-- **Mails : « réponds à ce mail » écrit une réponse bien mise en forme dans le champ** — backlog
+  - [x] question → non → re-question → confirmed=true sans nouveau tour : rien ne part (Held), test à l'appui
+  - [x] le oui tardif sous Live marche toujours (test)
+  - [x] awaiting() redevient faux après un refus, l'attente de 8 s ne colle plus à toute la session
+  - [x] SETTLE_FIRST_YES a un test
+  - [x] test_bench_mcp, test_plugins, test_mcp_deferred, test_agent_loop passent
+- **Mails : « réponds à ce mail » écrit une réponse bien mise en forme dans le champ** — done
 
   Sous F4 et le compagnon : le mail est la sélection (T) ou ce que montre l écran ; write_text reçoit une consigne de format mail (salutation, paragraphes, formule de fin, signature réglable dans Réglages › Outils › Écriture et écran). Le texte tapé doit garder ses retours à la ligne et paragraphes dans les champs web (Gmail, Outlook web) : vérifier le collage par ClipboardService et corriger si les sauts de ligne sont perdus. Question ouverte 6410346f (texte brut structuré ou HTML riche) : partir du texte brut bien structuré, le HTML hors périmètre.
 
-  - [ ] « Réponds à ce mail en disant oui pour jeudi » écrit une réponse complète, signée
-  - [ ] Les paragraphes sont conservés dans un champ Gmail web
-  - [ ] La signature se règle dans les Réglages
-- **Contexte : le projet en cours connu au réveil** — backlog
+  - [x] « Réponds à ce mail en disant oui pour jeudi » écrit une réponse complète, signée
+  - [x] Les paragraphes sont conservés dans un champ Gmail web
+  - [x] La signature se règle dans les Réglages
+- **Contexte : le projet en cours connu au réveil** — done
 
   Au réveil du compagnon et à l ouverture de F4, savoir sur quel projet l utilisateur travaille : titre/app de la fenêtre active (niri IPC sur Wayland, xdotool sur X11, derrière platform/base.py) et, si le board répond, le projet dont le chemin correspond (list_projects). Une ligne courte ajoutée au contexte (context_clause / push_context), sans capture ni appel de modèle. Rien si inconnu.
 
-  - [ ] Sur une fenêtre du dépôt loquivox, « on en est où ? » parle de loquivox sans qu on le nomme
-  - [ ] Aucune capture ni appel de modèle supplémentaire
-  - [ ] Fallback silencieux hors niri/X11
-- **MCP : relancer un serveur qui tombe en pleine session, et authentification des serveurs HTTP** — backlog
+  - [x] Sur une fenêtre du dépôt loquivox, « on en est où ? » parle de loquivox sans qu on le nomme
+  - [x] Aucune capture ni appel de modèle supplémentaire
+  - [x] Fallback silencieux hors niri/X11
+- **MCP : relancer un serveur qui tombe en pleine session, et authentification des serveurs HTTP** — done
   - after: Le oui : une action ne part jamais sur un oui antérieur à la dernière question
 
   Limites connues de services/mcp_tools.py (CLAUDE.md, « Not done ») : un serveur qui meurt en pleine session reste mort jusqu à ce qu on l éteigne et le rallume dans Réglages ; les serveurs par URL n ont ni en-têtes ni authentification. À faire : relancer automatiquement un serveur stdio tombé (avec un délai croissant et un plafond, une seule alerte dans le journal), et accepter des en-têtes pour un serveur HTTP (headers = { … } dans [mcp.servers.<nom>], valeurs lues depuis l environnement ou secrets.py, jamais écrites dans le journal ni dans le rapport de diagnostic). Rien ne bloque aujourd hui (deux serveurs locaux) : à faire avant le premier serveur distant.
 
-  - [ ] Un serveur de test tué en cours de session est relancé, et ses outils marchent de nouveau
-  - [ ] Un serveur HTTP reçoit ses en-têtes ; diagnostics.redact les masque (test)
-  - [ ] CLAUDE.md : retirer ces deux points de « Not done »
+  - [x] Un serveur de test tué en cours de session est relancé, et ses outils marchent de nouveau
+  - [x] Un serveur HTTP reçoit ses en-têtes ; diagnostics.redact les masque (test)
+  - [x] CLAUDE.md : retirer ces deux points de « Not done »
+
+### Lot — Lot 22 — Reprendre le contexte, mot d'éveil tracé (planned, 2 at a time)
+
+- **Mot d'éveil : tracer les quasi-détections pour comprendre un « hey jarvis » ignoré** — backlog
+
+  Le 14/11 vers 15:41-15:47, compagnon À l'écoute (journal : « Companion: active »), l'opérateur a dit « hey jarvis » sans effet, et le journal ne permet pas de savoir pourquoi : services/presence.py ne trace rien du score openwakeword. Ajouter une ligne de journal, limitée (au plus une par 5 s), quand le meilleur score d'une trame dépasse la moitié du seuil sans l'atteindre (« 👂 wake near-miss hey_jarvis 0.31 < 0.5 »), et une ligne à chaque détection réelle avec son score. Vérifier aussi en lisant le code qu'aucun cas laisse le micro du mot d'éveil fermé alors que le mode affiché est À l'écoute (après une session fermée par inactivité, après une dictée Alt+Espace, après des bascules silence/actif rapides comme 15:40:17-15:41:02) ; corriger si oui, avec un test.
+
+  - [ ] Le journal montre les quasi-détections (bornées) et les détections avec leur score
+  - [ ] Aucun chemin connu ne laisse le mot d'éveil sourd en mode À l'écoute (lu, testé si un cas est trouvé)
+  - [ ] test_away / test_presence passent
+- **Compagnon : reprendre le contexte de la session précédente quand il se rouvre peu après** — backlog
+
+  Retour d'usage (14/11, compagnon comme aide sur Blender) : la session se ferme après 12 s de silence (COMPANION_IDLE_TIMEOUT, handlers/mode.py `_companion_idle`), ce qui est voulu, mais la session suivante repart de zéro. L'opérateur choisit de garder la coupure et de reprendre le contexte.
+  
+  À faire : quand une session compagnon s'ouvre moins de `[companion] resume_min` minutes (défaut 10, 0 = jamais ; Réglages › Compagnon › Général) après la fin de la précédente, elle reçoit les derniers tours de la précédente (bornés : nombre de tours et budget de caractères, les plus récents gardés). Tous moteurs : cascade/realtime via les tours initiaux de TalkSession ; Live via les items d'historique passés à l'ouverture de la session. Modèle qui marche déjà : ~/git/perso/full-duplex-meetings/core/src/live.rs `session_config` (`session["input"]` = messages user/assistant, input_text/output_text) et `Transcript::history` (budget HISTORY_CHARS / HISTORY_ITEMS) — vérifier dans la doc gpt-live que `input` est accepté à `session.update`/ouverture côté SDK Python, sinon thinking.append en chunks (QUIET_CONTEXT). Les tours repris ne recomptent pas comme tours utilisateur (la règle du oui lit user_turns : un oui de la session d'avant ne doit JAMAIS valoir pour une action de la nouvelle) et ne sont pas ré-extraits par la mémoire de fin de session. Journal : une ligne « resumed N turns from Xs ago ». F4 n'est pas concerné.
+
+  - [ ] Fin de session par les 12 s, mot d'éveil 1 min après : « et du coup ? » obtient une réponse qui suit la conversation d'avant (Live et cascade)
+  - [ ] Au-delà de resume_min, ou avec 0, la session repart à vide
+  - [ ] Un oui de la session précédente ne confirme rien dans la nouvelle (test sans réseau)
+  - [ ] Historique borné (test) ; les faits de fin de session ne sont pas extraits deux fois
+  - [ ] Réglage dans Compagnon › Général, test_i18n et test_settings_layout passent
+
+### Lot — Lot 20 — Mot d'éveil : modèle perso et relance (planned, one at a time)
+
+- **Compagnon : fenêtre de relance locale après une session (sans mot d'éveil)** — backlog
+
+  Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 1 (l'équivalent local du Follow-Up Mode d'Alexa / Continued Conversation de Google).
+  
+  Quand une session compagnon se ferme et que Presence reprend le micro (`resume()`), ouvrir une fenêtre de N s (`[companion] follow_up_sec`, défaut 10, 0 = off, réglable dans Compagnon › Présence). Dans la fenêtre, un énoncé retenu par la VAD et clos par Smart Turn est transcrit **en local** (whisper.cpp, déjà là ; jamais le cloud). Une règle décide s'il s'adresse au compagnon : pas une phrase d'arrêt, aucune autre appli sur le micro, au moins 2 mots, et 2ᵉ personne / question / impératif ou un mot repris du dernier échange. Oui → `wake(cause="follow_up")` avec l'audio de l'énoncé en tête (`take_tail`). L'événement `companion.session_opened` porte la cause.
+  
+  Journal : une ligne par décision (« relance : oui/non, raison »), **sans le texte** (règles de diagnostics.redact) ; `log_companion_cut` compte toujours les faux déclenchements.
+  
+  Hors périmètre : raccourcir COMPANION_IDLE_TIMEOUT (question à l'opérateur dans le rapport), détection hors fenêtre.
+  
+  Critères :
+  - Après une réponse, « et pour demain ? » dit dans les 10 s rouvre une session qui y répond ; une phrase à un collègue dans la fenêtre n'en ouvre pas (test avec transcriptions simulées dans tests/test_presence.py).
+  - Hors fenêtre, rien n'est transcrit (CPU au repos inchangé).
+  - Aucun audio ni texte ne sort avant le `wake`.
+
+- **Mot d'éveil : choisir un modèle .onnx personnalisé dans Réglages** — backlog
+
+  Suite de l'exploration docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md (question roadmap 6a2029b0).
+  
+  Constat : `load_wake_model()` passe la valeur telle quelle à `openwakeword.Model(wakeword_models=[...])`, qui accepte déjà un chemin de fichier (vérifié). Un chemin dans `[companion] wake_word` fonctionne donc ; seul Réglages › Compagnon › Général ne propose que les modèles intégrés (`_WAKE_WORDS`).
+  
+  À faire : à côté de la liste, un bouton « Modèle personnalisé… » (Gtk.FileChooser filtré *.onnx) qui met le chemin dans le combo ; Apply l'écrit dans `[companion] wake_word` et `companion.set_wake_word()` le charge sans relancer. Le ✓/❌ affiché repose sur `wake_problem()`. Chaînes passées par `_()` + `locale_fr.py` ; README et `config.example.toml` mentionnent qu'un chemin .onnx est accepté.
+  
+  Critères :
+  - Choisir un .onnx dans Réglages puis Apply : le compagnon se réveille sur ce modèle sans redémarrage.
+  - Un fichier invalide affiche ❌ avec la cause, le compagnon reste sur la touche seule, rien ne plante.
+  - tests/test_settings_layout.py et tests/test_i18n.py passent.
+
 
 ### Not in a lot
 
@@ -263,7 +284,7 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
 
 Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notifications D-Bus et intégration Noctalia ; l'écho sur haut-parleurs est réglé.
 
-### Lot — Lot 21 — Live : écho calibré à la sortie du son (planned, one at a time)
+### Cards
 
 - **Live : calibrer le filtre anti-écho quand le son sort, pas à la réception** — backlog
 

@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import tempfile
 import threading
@@ -60,6 +61,9 @@ CONNECT_TIMEOUT = 30.0
 #: a server that failed to start is tried again after RETRY_MIN, doubling up to
 #: RETRY_MAX — or at once when something calls it
 RETRY_MIN, RETRY_MAX = 30.0, 300.0
+#: a server that is up is pinged this often (a stdio child that died says nothing
+#: otherwise); a ping unanswered after PING_TIMEOUT means it is gone and it is relaunched
+PING_EVERY, PING_TIMEOUT = 20.0, 10.0
 #: lines of a server's stderr that explain a failure
 STDERR_TAIL = 15
 CALL_TIMEOUT = 60.0
@@ -104,6 +108,7 @@ class _Server:
     ready: threading.Event = field(default_factory=threading.Event)
     stop: Optional[asyncio.Event] = None
     kick: Optional[asyncio.Event] = None    # set: retry now instead of at the next backoff
+    alerted: bool = False                   # one warning per outage, not one per retry
     retry: bool = True                      # False: the config is wrong, trying again cannot help
     future: Any = None
 
@@ -129,8 +134,9 @@ def _norm(v: Any) -> Any:
 
 
 def awaiting(session: Any) -> bool:
-    """True while an acting call of this session waits for the user's yes."""
-    return bool(session is not None and _pending.get(session))
+    """True while an acting call waits for a yes the user has not yet been counted as saying."""
+    return bool(session is not None and any(
+        session.user_turns == n for n in _pending.get(session, {}).values()))
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -158,8 +164,23 @@ def connect_timeout(cfg: Dict[str, Any]) -> float:
 def _fail(s: _Server, why: str, retry: bool = True) -> None:
     s.retry = retry
     s.state, s.error = "failed", why
-    print(f"⚠️  MCP server {s.name}: {why}")
+    if not s.alerted:
+        print(f"⚠️  MCP server {s.name}: {why}")
+    s.alerted = True
     s.ready.set()
+
+
+def http_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """``headers`` of a URL server, each ``${VAR}`` read from the environment (secrets.py
+    fills it from the UI-managed keys). Raises ValueError naming the variable, never its value."""
+    out = {}
+    for k, v in dict(cfg.get("headers", {})).items():
+        def sub(m):
+            if m.group(1) not in os.environ:
+                raise ValueError(f"header {k}: environment variable {m.group(1)} is not set")
+            return os.environ[m.group(1)]
+        out[str(k)] = re.sub(r"\$\{(\w+)\}", sub, str(v))
+    return out
 
 
 def acts(tool: Any) -> bool:
@@ -176,6 +197,14 @@ async def _serve(s: _Server) -> None:
     errlog = None
     if cfg.get("url"):
         target: Any = str(cfg["url"])
+        if cfg.get("headers"):
+            from mcp.client.streamable_http import streamable_http_client
+            from mcp.shared._httpx_utils import create_mcp_http_client
+            try:
+                target = streamable_http_client(target, http_client=create_mcp_http_client(
+                    headers=http_headers(cfg)))
+            except ValueError as e:
+                return _fail(s, str(e), retry=False)
     elif cfg.get("command"):
         from mcp.client.stdio import stdio_client
         params = StdioServerParameters(
@@ -216,13 +245,24 @@ async def _serve(s: _Server) -> None:
     try:
         if s.state != "starting":           # stopped while connecting: leave no trace
             return
-        s.client, s.tools, s.state, s.error = client, tools, "up", ""
+        s.client, s.tools, s.state, s.error, s.alerted = client, tools, "up", "", False
         for tool in tools:
             register(_plugin(s, tool))
         _refresh_finder()
         print(f"🔌 MCP server {s.name}: {len(tools)} tool(s)")
         s.ready.set()
-        await s.stop.wait()
+        while True:
+            try:
+                await asyncio.wait_for(s.stop.wait(), PING_EVERY)
+                break
+            except asyncio.TimeoutError:
+                pass
+            try:
+                async with asyncio.timeout(PING_TIMEOUT):
+                    await client.send_ping()
+            except Exception as e:
+                _fail(s, "lost: " + _why(e))      # _guarded relaunches it
+                break
     finally:
         s.state = "off" if s.state == "up" else s.state
         try:
@@ -303,8 +343,10 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
             spoken = session.user_turns if session is not None else 0
             if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
                 fresh = key not in asked
-                # keep the first count: re-asking after the yes must not spend it
-                asked.setdefault(key, spoken)
+                # a new question (unconfirmed call) restarts the count: only a turn spoken
+                # after the LAST question is a yes. A too-early confirmed=true keeps it.
+                if not confirmed or fresh:
+                    asked[key] = spoken
                 print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes "
                       f"(confirmed={'yes' if confirmed else 'no'}, spoken={spoken}, "
                       f"asked={asked[key]}, key={'new' if fresh else 'same'})")

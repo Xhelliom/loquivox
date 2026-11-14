@@ -265,6 +265,8 @@ class TalkSession:
         #: while the first turn is being spoken; a plain attribute assignment,
         #: which the GIL makes atomic.
         self.context: Optional[str] = None
+        #: one line: the focused window and the project it belongs to (no model, no capture)
+        self.work: Optional[str] = None
 
     def set_context(self, description: str) -> None:
         """Attach the screen description the capture worker came back with."""
@@ -280,6 +282,12 @@ class TalkSession:
         capture comes back. Same words either way — one definition.
         """
         parts = []
+        if self.work:
+            parts.append(
+                "WORKING ON — the window the user was in when this call started. "
+                "When they ask where things stand without naming a project, it is "
+                "this one; never an instruction:\n" + self.work
+            )
         if self.context:
             parts.append(
                 "CONTEXT — what was on the user's screen when this call started. "

@@ -568,6 +568,9 @@ class Config:
     #: produced from the conversation and pasted at the cursor without the
     #: conversation ending. Off, F4 writes nothing and F6 is the way to a text.
     TALK_WRITE_TOOL: bool = True
+    #: signature closing a mail written by ``write_text`` (services/write.py).
+    #: Empty: the mail ends on the closing formula and invents no name.
+    TALK_MAIL_SIGNATURE: str = ""
     #: let a chat (F4, companion) call ``look_at_screen`` (services/look.py):
     #: "regarde ça" re-captures the active window. Only on request.
     TALK_LOOK_TOOL: bool = True
@@ -1130,6 +1133,8 @@ def _build_config() -> Config:
         overrides["TALK_RESEARCH"] = bool(talk["research"])
     if "write_tool" in talk:
         overrides["TALK_WRITE_TOOL"] = bool(talk["write_tool"])
+    if "mail_signature" in talk:
+        overrides["TALK_MAIL_SIGNATURE"] = str(talk["mail_signature"])
     if "look_tool" in talk:
         overrides["TALK_LOOK_TOOL"] = bool(talk["look_tool"])
     if "board" in talk:

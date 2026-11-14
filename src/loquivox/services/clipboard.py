@@ -32,7 +32,10 @@ class ClipboardService:
             original = None
 
         # Add leading space to prevent word merging
-        clean_text = f" {text.strip()}" if not text.startswith(" ") else text
+        # ...except for a multi-line text (a mail): it starts on its salutation.
+        multiline = "\n" in text.strip()
+        clean_text = (text.strip() if multiline
+                      else f" {text.strip()}" if not text.startswith(" ") else text)
 
         # Paste via clipboard — use correct shortcut for terminals
         clipboard.copy(clean_text)

@@ -317,6 +317,9 @@ board = false
 # the conversation carries on — so the next sentence can ask for another
 # version. Off = F4 writes nothing and F6 stays the way to get a text.
 write_tool = true
+# Signature closing a mail written by write_text ("réponds à ce mail…"). Empty =
+# the mail ends on the closing formula, no name invented. \n for a new line.
+mail_signature = ""
 # Let a chat (F4, companion) re-capture the active window when asked ("regarde
 # ça", "et là ?"). Never on its own: a capture uploads a window.
 look_tool = true
@@ -502,8 +505,9 @@ chat_auto_hide = 3
 #                                # The others load when the model calls find_tools
 #                                # (or, for "board", when a board notification is said).
 #
-# [mcp.servers.home]             # streamable HTTP (no custom headers yet)
+# [mcp.servers.home]             # streamable HTTP
 # url = "http://127.0.0.1:8123/mcp"
+# headers = { Authorization = "Bearer ${HOME_MCP_TOKEN}" }   # ${VAR}: environment / Settings keys, never written here
 
 # ---------------------------------------------------------------------------
 # Rules: an event of Loquivox → one or more actions on an MCP server above.

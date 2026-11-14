@@ -235,6 +235,8 @@ _SECRET_PATTERNS = [
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), REDACTED),
     (re.compile(r"\b[0-9a-f]{40}\b"), REDACTED),
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._\-]{8,}"), r"\1 " + REDACTED),
+    # An Authorization header (Basic, Bearer or anything else): the whole value.
+    (re.compile(r"(?i)(\bauthorization\"?\s*[=:]\s*)[\"']?[^\"'\r\n]+"), r"\1" + REDACTED),
     # KEY=value / "api_key": "value" / token: value — whatever the spelling.
     # The value must look like one: eight characters or more, not a bare
     # number, so "prompt tokens: 898" is left alone.
