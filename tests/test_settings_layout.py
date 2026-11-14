@@ -762,7 +762,16 @@ def test_a_custom_onnx_model_joins_the_wake_word_combo():
     cls._set_custom_wake("/tmp/mon_modele.onnx")  # twice: one entry, not two
     ids = [row[1] for row in cls._comp_wake.get_model()]
     assert ids.count("/tmp/mon_modele.onnx") == 1, ids
-    assert presence.wake_problem("/tmp/does-not-exist.onnx")  # ❌ with a cause, no crash
+    real = presence.load_wake_model
+
+    def boom(name):
+        raise ValueError("bad onnx file")
+    presence.load_wake_model = boom  # independent of openwakeword being installed
+    try:
+        problem = presence.wake_problem("/tmp/does-not-exist.onnx")
+    finally:
+        presence.load_wake_model = real
+    assert "bad onnx file" in problem, problem  # ❌ with the cause, no crash
     assert cls._comp_wake_file.get_label() == "Custom model…"
     cls._comp_wake.set_active_id("hey_jarvis")
 
