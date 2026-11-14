@@ -438,6 +438,10 @@ CATALOG = {
         "Moteur",
     "Realtime model":
         "Modèle Realtime",
+    "Hear this voice: the first time, Live records it saying a line":
+        "Écouter cette voix : la première fois, Live l'enregistre en train de dire une phrase",
+    "<small>⏳ Recording the voice…</small>":
+        "<small>⏳ Enregistrement de la voix…</small>",
     "Preview this voice (same voice, spoken by the TTS model)":
         "Écouter cette voix (la même voix, prononcée par le modèle TTS)",
     "Realtime voice":
@@ -784,8 +788,6 @@ CATALOG = {
         "<small>⚠️ Appliqué — {unhappy} réglage(s) à vérifier ; leur onglet dit lesquels.</small>",
     "<small>✓ openwakeword installed — Apply to load it.</small>":
         "<small>✓ openwakeword installé — Appliquer pour le charger.</small>",
-    "<small>⚠️  No preview for {voice} — it is a Live-only voice.</small>":
-        "<small>⚠️  Pas d'aperçu pour {voice} — c'est une voix réservée à Live.</small>",
     " · models: {doc}":
         " · modèles : {doc}",
     "whisper.cpp: ✅ model <b>{model}</b> downloaded (offline ready)":
