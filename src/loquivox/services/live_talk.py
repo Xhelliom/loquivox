@@ -953,6 +953,12 @@ class LiveTalk:
                 "output": {"voice": self._voice},
             },
         }
+        if self._session.resumed:
+            session["input"] = [
+                {"type": "message", "role": t["role"], "content": [{
+                    "type": "input_text" if t["role"] == "user" else "output_text",
+                    "text": t["content"]}]}
+                for t in self._session.resumed]
         if self._delegation == "responses":
             responses: Dict[str, Any] = {
                 "model": self._backend_model,

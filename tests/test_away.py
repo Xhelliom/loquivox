@@ -21,9 +21,9 @@ from loquivox.state import STATE, SettingsManager  # noqa: E402
 
 
 class _Presence:
-    def __init__(self, log): self.log = log
-    def release(self): self.log.append("release")
-    def resume(self): self.log.append("resume")
+    def __init__(self, log): self.log, self.listening = log, True
+    def release(self): self.log.append("release"); self.listening = False
+    def resume(self): self.log.append("resume"); self.listening = True
     def start(self): self.log.append("start")
 
 
@@ -217,6 +217,33 @@ def test_off_closes_the_mic_and_survives_a_restart():
     assert STATE.presence_mode == "off"
     c.toggle_silence()                        # F7 turns it back on rather than into silence
     assert STATE.presence_mode == "active"
+
+
+def test_a_deaf_wake_mic_is_reopened_in_listening_mode():
+    c, log = _make()
+    c.presence.listening = False              # a reopen that failed, a lost race…
+    c.ensure_mic()
+    assert c.presence.listening and "resume" in log
+    c.presence.listening = False
+    STATE.companion_session = True            # a session owns the mic: hands off
+    c.ensure_mic()
+    STATE.companion_session = False
+    assert not c.presence.listening
+    STATE.presence_mode = "silent"            # silence wants it closed
+    c.ensure_mic()
+    assert not c.presence.listening
+    STATE.presence_mode = "active"            # a busy device: one line per outage, then recovery
+    import contextlib, io
+    def boom(): raise OSError("device busy")
+    ok, c.presence.resume = c.presence.resume, boom
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        for _ in range(3):
+            c.ensure_mic()                    # never raises, never repeats the line
+    assert out.getvalue().count("could not reopen") == 1, out.getvalue()
+    c.presence.resume = ok
+    c.ensure_mic()
+    assert c.presence.listening and not c._mic_alerted
 
 
 def test_the_menu_lists_every_mode_and_checks_the_current_one():

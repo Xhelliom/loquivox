@@ -22,9 +22,9 @@ from loquivox.state import STATE  # noqa: E402
 
 
 class _Presence:
-    def __init__(self, log): self.log = log
-    def release(self): self.log.append("release")
-    def resume(self): self.log.append("resume")
+    def __init__(self, log): self.log, self.listening = log, True
+    def release(self): self.log.append("release"); self.listening = False
+    def resume(self): self.log.append("resume"); self.listening = True
     def start(self): self.log.append("start")
     def take_tail(self): return ["tail"]
 

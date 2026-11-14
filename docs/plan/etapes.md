@@ -158,26 +158,26 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Un serveur HTTP reçoit ses en-têtes ; diagnostics.redact les masque (test)
   - [x] CLAUDE.md : retirer ces deux points de « Not done »
 
-### Lot — Lot 22 — Reprendre le contexte, mot d'éveil tracé (planned, 2 at a time)
+### Lot — Lot 22 — Reprendre le contexte, mot d'éveil tracé (launched, 2 at a time)
 
-- **Mot d'éveil : tracer les quasi-détections pour comprendre un « hey jarvis » ignoré** — backlog
+- **Mot d'éveil : tracer les quasi-détections pour comprendre un « hey jarvis » ignoré** — done
 
   Le 14/11 vers 15:41-15:47, compagnon À l'écoute (journal : « Companion: active »), l'opérateur a dit « hey jarvis » sans effet, et le journal ne permet pas de savoir pourquoi : services/presence.py ne trace rien du score openwakeword. Ajouter une ligne de journal, limitée (au plus une par 5 s), quand le meilleur score d'une trame dépasse la moitié du seuil sans l'atteindre (« 👂 wake near-miss hey_jarvis 0.31 < 0.5 »), et une ligne à chaque détection réelle avec son score. Vérifier aussi en lisant le code qu'aucun cas laisse le micro du mot d'éveil fermé alors que le mode affiché est À l'écoute (après une session fermée par inactivité, après une dictée Alt+Espace, après des bascules silence/actif rapides comme 15:40:17-15:41:02) ; corriger si oui, avec un test.
 
-  - [ ] Le journal montre les quasi-détections (bornées) et les détections avec leur score
-  - [ ] Aucun chemin connu ne laisse le mot d'éveil sourd en mode À l'écoute (lu, testé si un cas est trouvé)
-  - [ ] test_away / test_presence passent
-- **Compagnon : reprendre le contexte de la session précédente quand il se rouvre peu après** — backlog
+  - [x] Le journal montre les quasi-détections (bornées) et les détections avec leur score
+  - [x] Aucun chemin connu ne laisse le mot d'éveil sourd en mode À l'écoute (lu, testé si un cas est trouvé)
+  - [x] test_away / test_presence passent
+- **Compagnon : reprendre le contexte de la session précédente quand il se rouvre peu après** — done
 
   Retour d'usage (14/11, compagnon comme aide sur Blender) : la session se ferme après 12 s de silence (COMPANION_IDLE_TIMEOUT, handlers/mode.py `_companion_idle`), ce qui est voulu, mais la session suivante repart de zéro. L'opérateur choisit de garder la coupure et de reprendre le contexte.
   
   À faire : quand une session compagnon s'ouvre moins de `[companion] resume_min` minutes (défaut 10, 0 = jamais ; Réglages › Compagnon › Général) après la fin de la précédente, elle reçoit les derniers tours de la précédente (bornés : nombre de tours et budget de caractères, les plus récents gardés). Tous moteurs : cascade/realtime via les tours initiaux de TalkSession ; Live via les items d'historique passés à l'ouverture de la session. Modèle qui marche déjà : ~/git/perso/full-duplex-meetings/core/src/live.rs `session_config` (`session["input"]` = messages user/assistant, input_text/output_text) et `Transcript::history` (budget HISTORY_CHARS / HISTORY_ITEMS) — vérifier dans la doc gpt-live que `input` est accepté à `session.update`/ouverture côté SDK Python, sinon thinking.append en chunks (QUIET_CONTEXT). Les tours repris ne recomptent pas comme tours utilisateur (la règle du oui lit user_turns : un oui de la session d'avant ne doit JAMAIS valoir pour une action de la nouvelle) et ne sont pas ré-extraits par la mémoire de fin de session. Journal : une ligne « resumed N turns from Xs ago ». F4 n'est pas concerné.
 
-  - [ ] Fin de session par les 12 s, mot d'éveil 1 min après : « et du coup ? » obtient une réponse qui suit la conversation d'avant (Live et cascade)
-  - [ ] Au-delà de resume_min, ou avec 0, la session repart à vide
-  - [ ] Un oui de la session précédente ne confirme rien dans la nouvelle (test sans réseau)
-  - [ ] Historique borné (test) ; les faits de fin de session ne sont pas extraits deux fois
-  - [ ] Réglage dans Compagnon › Général, test_i18n et test_settings_layout passent
+  - [x] Fin de session par les 12 s, mot d'éveil 1 min après : « et du coup ? » obtient une réponse qui suit la conversation d'avant (Live et cascade)
+  - [x] Au-delà de resume_min, ou avec 0, la session repart à vide
+  - [x] Un oui de la session précédente ne confirme rien dans la nouvelle (test sans réseau)
+  - [x] Historique borné (test) ; les faits de fin de session ne sont pas extraits deux fois
+  - [x] Réglage dans Compagnon › Général, test_i18n et test_settings_layout passent
 
 ### Lot — Lot 20 — Mot d'éveil : modèle perso et relance (planned, one at a time)
 
