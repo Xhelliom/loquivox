@@ -255,9 +255,9 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Le flux envoyé à gpt-live est continu (zéros), self-check qui l'épingle
   - [x] test_i18n et test_settings_layout passent
 
-### Lot — Lot 26 — Clic droit : parler et mot d'éveil (planned, one at a time)
+### Lot — Lot 26 — Clic droit : parler et mot d'éveil (launched, one at a time)
 
-- **Clic droit sur la bulle : ouvrir une conversation (rouge) et choisir le mot d'éveil** — backlog
+- **Clic droit sur la bulle : ouvrir une conversation (rouge) et choisir le mot d'éveil** — done
 
   Demande de l'opérateur (14/11). Le menu du clic droit de la bulle (ui/companion_bubble.py `_popup_menu`, aussi sur la languette quand elle est rangée) gagne deux choses :
   1. **« Parler maintenant »** en tête du menu : ouvre une session (bulle rouge) exactement comme F8 / `companion_wake` (même chemin, même cause « key »), y compris depuis Silence ; quand une session est ouverte, l'entrée devient « Terminer la conversation ».
@@ -265,10 +265,10 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   ATTENTION : ne pas réintroduire la surdité corrigée par le lot 24 (set_wake_model pendant que le callback tourne) — test : changer de mot par le menu puis le nouveau mot déclenche (stream_factory factice).
   Libellés dans locale_fr.py ; une seule table pour les entrées (pas de liste en double avec Réglages).
 
-  - [ ] Clic droit → Parler maintenant : la bulle passe au rouge et la session s'ouvre, même en Silence ; l'entrée devient Terminer pendant la session
-  - [ ] Clic droit → Mot d'éveil → un autre mot : appliqué sans redémarrage, le nouveau mot réveille, l'ancien non ; Réglages montre le même
-  - [ ] Le menu marche aussi sur la languette (bulle rangée)
-  - [ ] Test sans micro du changement de mot à chaud ; test_i18n, test_presence, test_settings_layout passent
+  - [x] Clic droit → Parler maintenant : la bulle passe au rouge et la session s'ouvre, même en Silence ; l'entrée devient Terminer pendant la session
+  - [x] Clic droit → Mot d'éveil → un autre mot : appliqué sans redémarrage, le nouveau mot réveille, l'ancien non ; Réglages montre le même
+  - [x] Le menu marche aussi sur la languette (bulle rangée)
+  - [x] Test sans micro du changement de mot à chaud ; test_i18n, test_presence, test_settings_layout passent
 
 ### Not in a lot
 

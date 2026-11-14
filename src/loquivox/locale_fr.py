@@ -382,6 +382,12 @@ CATALOG = {
         "Mettre le compagnon en silence",
     "Wake the companion":
         "Réveiller le compagnon",
+    "Talk now":
+        "Parler maintenant",
+    "End the conversation":
+        "Terminer la conversation",
+    "Say “{word}”":
+        "Dites « {word} »",
     "Companion":
         "Compagnon",
     "A small bubble that listens for its wake word on this machine and opens the cloud conversation only when spoken to.":

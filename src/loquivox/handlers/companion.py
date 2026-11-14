@@ -27,13 +27,27 @@ import numpy as np
 
 import loquivox.config as config_module
 from loquivox.services.talk import resume_history
-from loquivox.i18n import N_
+from loquivox.i18n import N_, _
 from loquivox.services import events, media, memory, plugins
 from loquivox.state import STATE, SettingsManager
 
 #: the one table of presence modes: the bubble menu, F7 and the tray read it; a mode
 #: added here shows up in the menu (it must also say what it does in ``_set_mode``)
 MODES = (("off", N_("Switched off")), ("silent", N_("Silent")), ("active", N_("Listening")))
+
+
+#: the one table of shipped wake words: Settings and the bubble menu both read it
+WAKE_WORDS = ("hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy", "timer", "weather")
+
+
+def wake_choices(current: str) -> list:
+    """The shipped words, plus the current one when it is a custom model (.onnx path or other)."""
+    return [*WAKE_WORDS, current] if current not in WAKE_WORDS else list(WAKE_WORDS)
+
+
+def wake_label(name: str) -> str:
+    """``hey_jarvis`` → ``Hey Jarvis``; a custom model shows its file name."""
+    return name.rsplit("/", 1)[-1].removesuffix(".onnx").replace("_", " ").title()
 
 
 class _NoKeys:
@@ -501,6 +515,39 @@ def set_wake_word(name: str) -> None:
         _companion.presence.set_wake_model(name)
         if _companion.presence.wake_error:  # the caller must not report a success
             raise RuntimeError(_companion.presence.wake_error)
+
+
+def choose_wake_word(name: str) -> None:
+    """The bubble menu picked a word: same writer as Settings, applied hot (blocks: run it on a thread)."""
+    from loquivox.config_io import update_section
+    update_section("companion", {"wake_word": name})
+    config_module.reload_config()
+    set_wake_word(name)
+    from gi.repository import GLib
+    from loquivox.ui.settings_dialog import SettingsDialog
+    GLib.idle_add(SettingsDialog.follow_wake, name)  # an open Settings keeps showing the old word otherwise
+
+
+def bubble_menu() -> list:
+    """Entries the bubble's right-click menu shows above the presence modes:
+    ``("item", label, cb)`` or ``("sub", label, [(label, active, cb)], hint)``."""
+    talk = _("End the conversation") if STATE.companion_session else _("Talk now")
+    current = config_module.CFG.COMPANION_WAKE_WORD
+
+    def pick(name):
+        threading.Thread(target=lambda: _safe_choose(name), daemon=True).start()
+
+    return [("item", talk, wake_key),
+            ("sub", _("Wake word"),
+             [(wake_label(w), w == current, lambda w=w: pick(w)) for w in wake_choices(current)],
+             _("Say “{word}”").format(word=wake_label(current)))]
+
+
+def _safe_choose(name: str) -> None:
+    try:
+        choose_wake_word(name)
+    except Exception as e:
+        print(f"⚠️  Wake word: {e}")
 
 
 def restyle() -> None:

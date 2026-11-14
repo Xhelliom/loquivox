@@ -415,7 +415,8 @@ class Drag:
 class CompanionBubble(Gtk.Window):
     def __init__(self, on_click: Optional[Callable[[], None]] = None,
                  modes: Sequence[Tuple[str, Callable[[], None]]] = (),
-                 current: Callable[[], int] = lambda: -1):
+                 current: Callable[[], int] = lambda: -1,
+                 extras: Callable[[], list] = lambda: []):
         """``modes``: ``(label, callback)`` pairs for the right-click menu;
         ``current``: index of the one to tick."""
         wl = HAS_LAYER_SHELL and SESSION_TYPE == "wayland"
@@ -424,6 +425,7 @@ class CompanionBubble(Gtk.Window):
         self._on_click = on_click
         self._modes = list(modes)
         self._current = current
+        self._extras = extras    # entries above the modes, asked at every popup (they change)
         self._state = "idle"
         self._pos = load_position()
         self._drop = load_size()                     # the drop's diameter, px
@@ -794,6 +796,24 @@ class CompanionBubble(Gtk.Window):
 
     def _build_menu(self) -> Gtk.Menu:
         menu, now = Gtk.Menu(), self._current()
+        for kind, label, *rest in self._extras():
+            item = Gtk.MenuItem(label=label)
+            if kind == "item":
+                item.connect("activate", lambda _i, cb=rest[0]: cb())
+            else:
+                sub = Gtk.Menu()
+                hint = Gtk.MenuItem(label=rest[1])
+                hint.set_sensitive(False)
+                sub.append(hint)
+                for text, active, cb in rest[0]:
+                    c = Gtk.CheckMenuItem(label=text, active=active)
+                    c.set_draw_as_radio(True)
+                    c.connect("activate", lambda w, cb=cb: w.get_active() and cb())
+                    sub.append(c)
+                item.set_submenu(sub)
+            menu.append(item)
+        if self._extras():
+            menu.append(Gtk.SeparatorMenuItem())
         for i, (label, cb) in enumerate(self._modes):
             item = Gtk.CheckMenuItem(label=label, active=i == now)
             item.set_draw_as_radio(True)
