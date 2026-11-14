@@ -133,6 +133,51 @@ def test_a_yes_does_not_outlive_its_session():
     print("✓ a pending confirmation belongs to its session")
 
 
+def test_a_refusal_is_not_a_yes_and_does_not_stick():
+    plugin = _plugin("mcp_fx_delete_all")
+    session = STATE.talk_session = TalkSession()
+    a = {"what": "r"}
+    plugin.run(a)                                   # question
+    session.add_user("non")
+    assert not mcp_tools.awaiting(session), "a refusal must release the wait"
+    plugin.run(a)                                   # the agent asks again
+    assert mcp_tools.awaiting(session)
+    assert "deleted" not in plugin.run({**a, "confirmed": True}), "a no was taken for a yes"
+    session.add_user("bof"), session.add_user("autre chose")
+    assert not mcp_tools.awaiting(session)
+    # late yes: confirmed=true before the turn is counted must not re-arm; then it runs once
+    b = {"what": "late"}
+    plugin.run(b)
+    assert "deleted" not in plugin.run({**b, "confirmed": True})
+    assert "deleted" not in plugin.run({**b, "confirmed": True})
+    session.add_user("oui")
+    assert "deleted late" in plugin.run({**b, "confirmed": True})
+    assert "deleted" not in plugin.run({**b, "confirmed": True})
+    STATE.talk_session = None
+    print("\u2713 a no is no, the wait ends, a late yes still runs once")
+
+
+def test_settle_waits_longer_only_while_a_yes_is_awaited():
+    from loquivox.services.live_talk import LiveTalk
+    plugin = _plugin("mcp_fx_delete_all")
+    session = STATE.talk_session = TalkSession()
+    talk = LiveTalk(session)
+    talk.SETTLE_MAX, talk.SETTLE_FIRST, talk.SETTLE_FIRST_YES = 0.0, 0.1, 0.6
+
+    def waited():
+        t = time.monotonic()
+        talk._settle(expect_new=True)
+        return time.monotonic() - t
+
+    assert waited() < 0.4, "nothing is awaited: the short wait applies"
+    plugin.run({"what": "s"})
+    assert waited() >= 0.55, "an action waits for its yes: SETTLE_FIRST_YES applies"
+    session.add_user("non")
+    assert waited() < 0.4, "after a refusal the long wait is gone"
+    STATE.talk_session = None
+    print("\u2713 SETTLE_FIRST_YES applies only while a yes is awaited")
+
+
 def test_two_servers_do_not_share_a_confirmation():
     _servers(fx=FIXTURE, fy=FIXTURE)
     mcp_tools.sync(timeout=20)
@@ -267,6 +312,8 @@ if __name__ == "__main__":
         test_a_result_is_data_not_an_instruction()
         test_a_tool_that_acts_waits_for_a_spoken_yes()
         test_a_yes_does_not_outlive_its_session()
+        test_a_refusal_is_not_a_yes_and_does_not_stick()
+        test_settle_waits_longer_only_while_a_yes_is_awaited()
         test_a_missing_or_crashing_server_is_a_warning()
         test_two_servers_do_not_share_a_confirmation()
         test_apply_never_blocks_nor_retries_a_failed_server()
