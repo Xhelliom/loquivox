@@ -258,8 +258,7 @@ async def _serve(s: _Server) -> None:
             except asyncio.TimeoutError:
                 pass
             try:
-                async with asyncio.timeout(PING_TIMEOUT):
-                    await client.send_ping()
+                await _alive(client)
             except Exception as e:
                 _fail(s, "lost: " + _why(e))      # _guarded relaunches it
                 break
@@ -269,6 +268,22 @@ async def _serve(s: _Server) -> None:
             await client.__aexit__(None, None, None)
         except BaseException:
             pass
+
+
+async def _alive(client: Any) -> None:
+    """Raise if the server does not answer in time or the connection is closed.
+
+    `ping` is deprecated in the SDK and some servers (Home Assistant) do not serve
+    it: ask for the tool list, which every server has, and count any protocol
+    error (MCPError) as an answer — a server that replies is alive."""
+    from mcp import MCPError
+    from mcp.types import CONNECTION_CLOSED
+    try:
+        async with asyncio.timeout(PING_TIMEOUT):
+            await client.list_tools()
+    except MCPError as e:
+        if e.code == CONNECTION_CLOSED:
+            raise
 
 
 def _call(s: _Server, tool: str, args: Dict[str, Any]) -> str:
