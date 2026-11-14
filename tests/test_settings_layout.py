@@ -366,9 +366,10 @@ def test_companion_settings_apply_without_editing_toml():
             cls._comp_wake.set_active_id("alexa")
             cls._comp_click.set_active_id("active")
             from loquivox.handlers import companion
-            import threading, time
-            seen, real_set = [], companion.set_wake_word
+            import threading, time, types
+            seen, real_set, real_comp = [], companion.set_wake_word, companion._companion
             companion.set_wake_word = seen.append
+            companion._companion = types.SimpleNamespace(bubble=types.SimpleNamespace(_kick=lambda: None, set_size=lambda px: None))  # "running": Apply reloads through set_wake_word
 
             def settle():  # the reload runs on a thread
                 time.sleep(0.2)
@@ -388,7 +389,7 @@ def test_companion_settings_apply_without_editing_toml():
                 assert seen == ["alexa", "alexa"], seen
                 assert not cls._wake_installed
             finally:
-                companion.set_wake_word = real_set
+                companion.set_wake_word, companion._companion = real_set, real_comp
             cfg = config_module.CFG
             assert (cfg.COMPANION_ENABLED, cfg.COMPANION_WAKE_WORD,
                     cfg.COMPANION_CLICK_MODE) == (False, "alexa", "active"), cfg
@@ -751,6 +752,67 @@ def test_f10_survives_an_apply_of_the_voice_page():
             config_module.CONFIG_FILE = config_io.CONFIG_FILE = real_file
             config_module.reload_config()
     print("✓ F10 survives an Apply of the voice page")
+
+
+def test_a_custom_onnx_model_joins_the_wake_word_combo():
+    """« Custom model… » puts the chosen path in the combo, so Apply writes it as wake_word."""
+    from loquivox.services import presence
+    cls = SettingsDialog
+    cls._set_custom_wake("/tmp/mon_modele.onnx")
+    assert cls._comp_wake.get_active_id() == "/tmp/mon_modele.onnx"
+    cls._set_custom_wake("/tmp/mon_modele.onnx")  # twice: one entry, not two
+    ids = [row[1] for row in cls._comp_wake.get_model()]
+    assert ids.count("/tmp/mon_modele.onnx") == 1, ids
+    real = presence.load_wake_model
+
+    def boom(name):
+        raise ValueError("bad onnx file")
+    presence.load_wake_model = boom  # independent of openwakeword being installed
+    try:
+        problem = presence.wake_problem("/tmp/does-not-exist.onnx")
+    finally:
+        presence.load_wake_model = real
+    assert "bad onnx file" in problem, problem  # ❌ with the cause, no crash
+    assert cls._comp_wake_file.get_label() == "Custom model…"
+    cls._comp_wake.set_active_id("hey_jarvis")
+
+
+def test_apply_reports_an_invalid_onnx_even_without_a_running_companion():
+    """No companion running: Apply's ✓/❌ still rests on wake_problem()."""
+    import tempfile, threading
+    from gi.repository import GLib
+    from pathlib import Path
+    from loquivox import config as config_module, config_io
+    from loquivox.handlers import companion
+    from loquivox.services import presence
+    cls = SettingsDialog
+    real = (presence.load_wake_model, companion._companion, threading.Thread,
+            GLib.idle_add, config_module.CONFIG_FILE, config_io.CONFIG_FILE)
+
+    class Sync:  # run the worker thread inline
+        def __init__(self, target, **kw):
+            self.target = target
+
+        def start(self):
+            self.target()
+
+    def boom(name):
+        raise ValueError("bad onnx file")
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            config_module.CONFIG_FILE = config_io.CONFIG_FILE = Path(d) / "config.toml"
+            presence.load_wake_model, companion._companion = boom, None
+            threading.Thread, GLib.idle_add = Sync, lambda f, *a: f(*a)
+            cls._set_custom_wake("/tmp/invalide.onnx")
+            cls._on_apply_companion(None)
+            text = cls._comp_status.get_label()
+            assert "❌" in text and "bad onnx file" in text, text
+        finally:
+            (presence.load_wake_model, companion._companion, threading.Thread,
+             GLib.idle_add, config_module.CONFIG_FILE, config_io.CONFIG_FILE) = real
+            config_module.reload_config()
+            cls._comp_wake.set_active_id("hey_jarvis")
+    print("✓ Apply shows ❌ for an invalid .onnx with no companion running")
 
 
 def test_no_stale_wording():
@@ -1179,6 +1241,8 @@ if __name__ == "__main__":
     test_the_role_table_applies()
     test_read_aloud_keeps_both_cases_on_the_sound_tab()
     test_f10_survives_an_apply_of_the_voice_page()
+    test_a_custom_onnx_model_joins_the_wake_word_combo()
+    test_apply_reports_an_invalid_onnx_even_without_a_running_companion()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     test_the_advanced_fold_exposes_what_only_config_had()
