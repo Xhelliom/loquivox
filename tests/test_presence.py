@@ -366,15 +366,21 @@ def test_wake_word_chosen_from_the_bubble_menu_applies_hot_and_is_written():
     config_io.update_section = lambda sec, vals: written.append((sec, vals))
     config_module.reload_config = lambda: None
     companion._companion = SimpleNamespace(presence=p)
+    from gi.repository import GLib
+    from loquivox.ui.settings_dialog import SettingsDialog
+    queued, idle = [], GLib.idle_add
+    GLib.idle_add = lambda fn, *a: queued.append((fn, a))
     try:
         companion.choose_wake_word("alexa")
         assert written == [("companion", {"wake_word": "alexa"})]
+        assert queued == [(SettingsDialog.follow_wake, ("alexa",))], "an open Settings is not told"
         s.push(0.01); time.sleep(0.1)
         assert not woken, "the old word still wakes"
         new.score = 0.97
         s.push(0.01); time.sleep(0.1)
         assert woken, "the new word does not wake after the swap"
     finally:
+        GLib.idle_add = idle
         presence.load_wake_model, config_io.update_section, config_module.reload_config = orig
         companion._companion = None
         p.stop()

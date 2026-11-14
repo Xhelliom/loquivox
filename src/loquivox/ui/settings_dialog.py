@@ -1013,6 +1013,13 @@ class SettingsDialog:
         cls._comp_wake.set_active_id(path)
 
     @classmethod
+    def follow_wake(cls, name: str) -> bool:
+        """The bubble menu changed the word: show it in an open dialog, or Apply would undo it (GTK thread)."""
+        if cls._instance is not None:
+            cls._set_custom_wake(name)
+        return False
+
+    @classmethod
     def _on_pick_wake_file(cls, _btn) -> None:
         chooser = Gtk.FileChooserDialog(
             title=_("Custom wake word model"), parent=cls._instance,

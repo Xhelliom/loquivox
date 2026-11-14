@@ -523,6 +523,9 @@ def choose_wake_word(name: str) -> None:
     update_section("companion", {"wake_word": name})
     config_module.reload_config()
     set_wake_word(name)
+    from gi.repository import GLib
+    from loquivox.ui.settings_dialog import SettingsDialog
+    GLib.idle_add(SettingsDialog.follow_wake, name)  # an open Settings keeps showing the old word otherwise
 
 
 def bubble_menu() -> list:
