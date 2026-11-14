@@ -81,6 +81,10 @@ class ScreenshotBackend(ABC):
         """
         return None
 
+    def focused_window_info(self) -> Optional[Tuple[str, str]]:
+        """``(title, app)`` of the focused window, or None when the session cannot tell."""
+        return None
+
     def pointer_position(self) -> Optional[Tuple[int, int]]:
         """
         Where the mouse pointer is, in the same coordinates as a full-screen
