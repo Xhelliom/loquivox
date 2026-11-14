@@ -594,7 +594,7 @@ def test_every_companion_setting_is_on_the_companion_tab():
         for w in _widgets(sw):
             where[id(w)] = (tab, sub)
     for name, sub in (("_comp_wake", "General"), ("_comp_click", "General"),
-                      ("_comp_style", "General"), ("_comp_size", "General"), ("_comp_voice", "Voice & thinking"),
+                      ("_comp_style", "General"), ("_comp_size", "General"), ("_comp_resume", "General"), ("_comp_voice", "Voice & thinking"),
                       ("_comp_delegation", "Voice & thinking"),
                       ("_comp_backend", "Voice & thinking"),
                       ("_comp_web", "Voice & thinking"),
@@ -623,12 +623,14 @@ def test_companion_live_settings_apply_and_are_documented():
             cls._comp_web.set_active_id("native")
             cls._comp_instructions.get_buffer().set_text("Sois bref.")
             cls._comp_source_silence.set_value(4.5)
+            cls._comp_resume.set_value(7)
             cls._on_apply_companion(None)
             cfg = config_module.CFG
             assert (cfg.COMPANION_LIVE_VOICE, cfg.COMPANION_LIVE_DELEGATION,
                     cfg.COMPANION_LIVE_BACKEND_MODEL, cfg.COMPANION_LIVE_WEB_SEARCH,
-                    cfg.COMPANION_INSTRUCTIONS, cfg.COMPANION_SOURCE_SILENCE_SEC) == (
-                "cedar", "responses", "m-x", "native", "Sois bref.", 4.5), cfg
+                    cfg.COMPANION_INSTRUCTIONS, cfg.COMPANION_SOURCE_SILENCE_SEC,
+                    cfg.COMPANION_RESUME_MIN) == (
+                "cedar", "responses", "m-x", "native", "Sois bref.", 4.5, 7.0), cfg
             cls._comp_voice.set_active_id("")      # back to "like the conversation"
             cls._on_apply_companion(None)
             assert config_module.CFG.COMPANION_LIVE_VOICE == ""
