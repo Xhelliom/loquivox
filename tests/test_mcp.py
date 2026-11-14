@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import _hermetic  # noqa: F401  (must precede any loquivox import)
 
+import asyncio
 import os
 import sys
 import time
@@ -299,6 +300,25 @@ def test_a_server_killed_mid_session_comes_back():
     print("✓ a server killed mid-session is relaunched")
 
 
+def test_a_server_answering_with_a_protocol_error_is_alive():
+    from mcp import MCPError
+
+    class Fake:
+        def __init__(self, exc): self.exc = exc
+        async def list_tools(self): raise self.exc
+        async def send_ping(self): raise AssertionError("deprecated ping must not be used")
+
+    run = lambda c: asyncio.run(mcp_tools._alive(c))
+    run(Fake(MCPError(-32601, "Method not found")))
+    for gone in (MCPError(-32000, "Connection closed"), ConnectionError("closed"), asyncio.TimeoutError()):
+        try:
+            run(Fake(gone))
+        except Exception:
+            continue
+        raise AssertionError("a closed connection must count as lost")
+    print("✓ a protocol error is alive, a closed connection is lost")
+
+
 def test_an_http_server_receives_its_headers_and_they_stay_out_of_the_log():
     import http.server, threading
     from loquivox.diagnostics import redact
@@ -383,6 +403,7 @@ if __name__ == "__main__":
         test_a_slow_server_gets_its_connect_timeout()
         test_a_failed_server_is_retried()
         test_a_server_killed_mid_session_comes_back()
+        test_a_server_answering_with_a_protocol_error_is_alive()
         test_an_http_server_receives_its_headers_and_they_stay_out_of_the_log()
         test_server_stderr_stays_out_of_our_output()
         test_the_toml_schema_is_read()
