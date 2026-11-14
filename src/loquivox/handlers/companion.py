@@ -106,6 +106,7 @@ class Companion:
         # release or resume the mic: serialised, a release decided under "silent"
         # can no longer land after a resume decided under "active".
         self._mic_lock = threading.RLock()
+        self._mic_alerted = False   # one journal line per outage of the wake mic
         self._away: set = set()   # why the companion is silent without being asked: "lock", "idle"
         self._before = "active"   # the user's mode, to return to when the last reason is gone
         self._emitted = None  # last state published as an event
@@ -361,7 +362,15 @@ class Companion:
         with self._mic_lock:
             if (self.presence_on() and not self.presence.listening
                     and not STATE.talk_active and not STATE.companion_session):
-                self.presence.resume()
+                try:
+                    self.presence.resume()
+                except Exception as e:
+                    if not self._mic_alerted:
+                        self._mic_alerted = True
+                        print(f"⚠️  Companion: wake mic could not reopen ({e}) — retrying")
+                    return
+            if self.presence.listening:
+                self._mic_alerted = False
 
     def announce_if_due(self) -> bool:
         """A standing source has something and nobody is speaking: open a session

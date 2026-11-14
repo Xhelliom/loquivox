@@ -232,6 +232,18 @@ def test_a_deaf_wake_mic_is_reopened_in_listening_mode():
     STATE.presence_mode = "silent"            # silence wants it closed
     c.ensure_mic()
     assert not c.presence.listening
+    STATE.presence_mode = "active"            # a busy device: one line per outage, then recovery
+    import contextlib, io
+    def boom(): raise OSError("device busy")
+    ok, c.presence.resume = c.presence.resume, boom
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        for _ in range(3):
+            c.ensure_mic()                    # never raises, never repeats the line
+    assert out.getvalue().count("could not reopen") == 1, out.getvalue()
+    c.presence.resume = ok
+    c.ensure_mic()
+    assert c.presence.listening and not c._mic_alerted
 
 
 def test_the_menu_lists_every_mode_and_checks_the_current_one():
