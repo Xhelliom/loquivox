@@ -787,6 +787,16 @@ fallback). `tests/test_away.py`. **Noctalia 5.2.1** is a native binary (not quic
 org.freedesktop.login1` through a lock then an unlock to see which signals
 Noctalia really emits; if it emits no Lock/Unlock, only the idle fallback works.
 
+**Follow-up window** (`[companion] follow_up_sec`, 10, 0 = off). `wake()`'s `finally`
+calls `Presence.open_follow_up`: for N s the one utterance the VAD keeps and Smart
+Turn closes goes to `Companion._follow_up`, which transcribes it with whisper.cpp
+whatever the dictation backend (never the cloud) and asks `follow_up_verdict`
+(not a stop phrase, mic not used by another app via `media.mic_busy`, 2+ words,
+2nd person / question / imperative / a word of the last exchange). Yes →
+`wake(cause="follow_up")` with the audio as `take_tail`. One journal line per
+decision, reason only, never the text. Outside the window nothing is buffered.
+`release()` closes the window. Tests: `tests/test_presence.py`.
+
 ### The talk bubble (`ui/chat_overlay.py`, `managers/chat.py`)
 
 The chat overlay IS the bubble — `ChatOverlay(talk=True)` / `set_talk_mode()`

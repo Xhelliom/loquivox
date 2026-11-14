@@ -892,6 +892,9 @@ CATALOG = {
         "Secondes sans parole entendue avant qu'une notification puisse ouvrir seule une conversation",
     "Delay before announcing (s)": "Délai avant d'annoncer (s)",
     "Resume the conversation (min)": "Reprendre la conversation (min)",
+    "Follow-up window (s)": "Fenêtre de relance (s)",
+    "After a conversation, what you say within this many seconds is judged on this computer; if it is for the companion, it listens again without the wake word · 0 = off":
+        "Après une conversation, ce que vous dites dans ce délai est jugé sur cet ordinateur ; si cela s'adresse au compagnon, il réécoute sans mot d'éveil · 0 = désactivé",
     "A conversation opened within this many minutes of the previous one picks up where it left off · 0 = always start empty":
         "Une conversation ouverte dans ce délai après la précédente reprend où elle s'était arrêtée · 0 = toujours repartir à vide",
     "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>, F7 by default); it applies right away.":

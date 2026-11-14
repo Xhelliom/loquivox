@@ -828,6 +828,13 @@ class SettingsDialog:
             _("Seconds without a word heard before a notification may open a "
               "conversation by itself"))
         cls._field(body, _("Delay before announcing (s)"), cls._comp_source_silence, labels)
+        cls._comp_follow = Gtk.SpinButton.new_with_range(0, 60, 1)
+        cls._comp_follow.set_value(cfg.COMPANION_FOLLOW_UP_SEC)
+        cls._comp_follow.set_tooltip_text(
+            _("After a conversation, what you say within this many seconds is "
+              "judged on this computer; if it is for the companion, it listens "
+              "again without the wake word · 0 = off"))
+        cls._field(body, _("Follow-up window (s)"), cls._comp_follow, labels)
 
         cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>, F7 by default); it applies right away."))
@@ -1011,6 +1018,7 @@ class SettingsDialog:
                 "bubble_style": cls._comp_style.get_active_id(),
                 "source_silence": cls._comp_source_silence.get_value(),
                 "resume_min": cls._comp_resume.get_value(),
+                "follow_up_sec": cls._comp_follow.get_value(),
                 "live_voice": cls._comp_voice.get_active_id() or "",
                 "live_delegation": cls._comp_delegation.get_active_id() or "",
                 "live_backend_model": cls._comp_backend.get_text().strip(),
