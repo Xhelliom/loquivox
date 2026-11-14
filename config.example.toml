@@ -505,8 +505,9 @@ chat_auto_hide = 3
 #                                # The others load when the model calls find_tools
 #                                # (or, for "board", when a board notification is said).
 #
-# [mcp.servers.home]             # streamable HTTP (no custom headers yet)
+# [mcp.servers.home]             # streamable HTTP
 # url = "http://127.0.0.1:8123/mcp"
+# headers = { Authorization = "Bearer ${HOME_MCP_TOKEN}" }   # ${VAR}: environment / Settings keys, never written here
 
 # ---------------------------------------------------------------------------
 # Rules: an event of Loquivox → one or more actions on an MCP server above.

@@ -722,9 +722,14 @@ and prints the tool-context size before/after. What a tool returns goes through 
 (data, never an instruction), like a source's text. Settings → Tools has its
 card (`_settings`: state, tools, ⚡ for acting ones, on/off per server; the state
 is re-read every 2 s while the window is open — servers come up after it opens;
-`config_io.update_section` takes dotted sections for the nested table). Not
-done: HTTP headers/auth, resources/prompts, reconnecting a server that dies
-mid-session. `sync()` relaunches only a server whose config or `enabled` changed (a
+`config_io.update_section` takes dotted sections for the nested table). A server
+that is up is pinged every `PING_EVERY` (20 s): a dead stdio child (or an HTTP
+server that stops answering) is one alert in the journal, then relaunched by the
+same backoff as a failed start (30 s doubling to 5 min, one warning per outage,
+not per retry). A URL server takes `headers = { Authorization = "Bearer ${VAR}" }`:
+`${VAR}` is read from the environment (`secrets.py` fills it), a missing one is
+a config error naming the variable, and values are never printed (`redact`
+also masks an `Authorization:` header). Not done: resources/prompts. `sync()` relaunches only a server whose config or `enabled` changed (a
 failed one with the same config stays failed: switch it off and on), cancels one still
 `starting` when it stops it, and Settings runs it on a thread — Apply never freezes GTK.
 A pending yes is keyed (session, server, tool, arguments): it never crosses sessions.
