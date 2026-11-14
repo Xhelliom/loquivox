@@ -260,6 +260,8 @@ Settings → Companion has an *Install openwakeword* button. It installs the ONN
 real dependencies, then openwakeword with `--no-deps` (its `tflite-runtime` requirement has
 no wheel for Python 3.12+), downloads the models and only then reports success — if the
 package or the configured wake word's model does not load, the cause is shown instead.
+*Custom model…* picks your own openwakeword `.onnx` file (a path is also accepted as
+`[companion] wake_word`); it loads on Apply without a restart, and an invalid file shows ❌ with the cause.
 By hand: `pip install -e '.[wake]'`, then `pip install --no-deps openwakeword` and
 `python -c "from openwakeword.utils import download_models; download_models()"` on 3.12+.
 

@@ -679,7 +679,12 @@ class SettingsDialog:
         cls._comp_install.connect("clicked", cls._on_install_wake)
         cls._comp_install.set_visible(not cls._module_installed("openwakeword"))
         cls._comp_install.set_no_show_all(True)
-        cls._field(body, _("Wake word"), cls._comp_wake, labels, extra=cls._comp_install)
+        cls._comp_wake_file = Gtk.Button(label=_("Custom model…"))
+        cls._comp_wake_file.connect("clicked", cls._on_pick_wake_file)
+        extra = Gtk.Box(spacing=6)
+        extra.pack_start(cls._comp_wake_file, False, False, 0)
+        extra.pack_start(cls._comp_install, False, False, 0)
+        cls._field(body, _("Wake word"), cls._comp_wake, labels, extra=extra)
 
         cls._comp_click = Gtk.ComboBoxText()
         for cid, label in cls._CLICK_MODES:
@@ -828,6 +833,13 @@ class SettingsDialog:
             _("Seconds without a word heard before a notification may open a "
               "conversation by itself"))
         cls._field(body, _("Delay before announcing (s)"), cls._comp_source_silence, labels)
+        cls._comp_follow = Gtk.SpinButton.new_with_range(0, 60, 1)
+        cls._comp_follow.set_value(cfg.COMPANION_FOLLOW_UP_SEC)
+        cls._comp_follow.set_tooltip_text(
+            _("After a conversation, what you say within this many seconds is "
+              "judged on this computer; if it is for the companion, it listens "
+              "again without the wake word · 0 = off"))
+        cls._field(body, _("Follow-up window (s)"), cls._comp_follow, labels)
 
         cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>, F7 by default); it applies right away."))
@@ -993,6 +1005,28 @@ class SettingsDialog:
         threading.Thread(target=work, daemon=True).start()
 
     @classmethod
+    def _set_custom_wake(cls, path: str) -> None:
+        """Put a .onnx path in the wake-word combo; Apply writes it and loads it."""
+        if path not in [row[1] for row in cls._comp_wake.get_model()]:
+            cls._comp_wake.append(path, path)
+        cls._comp_wake.set_active_id(path)
+
+    @classmethod
+    def _on_pick_wake_file(cls, _btn) -> None:
+        chooser = Gtk.FileChooserDialog(
+            title=_("Custom wake word model"), parent=cls._instance,
+            action=Gtk.FileChooserAction.OPEN)
+        chooser.add_buttons(_("Cancel"), Gtk.ResponseType.CANCEL,
+                            _("Open"), Gtk.ResponseType.OK)
+        onnx = Gtk.FileFilter()
+        onnx.set_name("*.onnx")
+        onnx.add_pattern("*.onnx")
+        chooser.add_filter(onnx)
+        if chooser.run() == Gtk.ResponseType.OK:
+            cls._set_custom_wake(chooser.get_filename())
+        chooser.destroy()
+
+    @classmethod
     def _on_apply_companion(cls, _btn) -> None:
         from loquivox.config_io import ConfigWriteError, update_section
 
@@ -1011,6 +1045,7 @@ class SettingsDialog:
                 "bubble_style": cls._comp_style.get_active_id(),
                 "source_silence": cls._comp_source_silence.get_value(),
                 "resume_min": cls._comp_resume.get_value(),
+                "follow_up_sec": cls._comp_follow.get_value(),
                 "live_voice": cls._comp_voice.get_active_id() or "",
                 "live_delegation": cls._comp_delegation.get_active_id() or "",
                 "live_backend_model": cls._comp_backend.get_text().strip(),
@@ -1038,8 +1073,14 @@ class SettingsDialog:
 
         def work():
             from loquivox.handlers import companion
+            from loquivox.services import presence
             try:
-                companion.set_wake_word(wake)
+                if companion._companion is None:  # nothing running to reload: still check the file
+                    problem = presence.wake_problem(wake)
+                    if problem:
+                        raise RuntimeError(problem)
+                else:
+                    companion.set_wake_word(wake)
                 text = saved
             except Exception as e:
                 text = _("<small>❌ wake word: {v0}</small>").format(v0=GLib.markup_escape_text(str(e)))

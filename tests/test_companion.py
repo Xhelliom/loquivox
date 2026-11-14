@@ -27,6 +27,7 @@ class _Presence:
     def resume(self): self.log.append("resume"); self.listening = True
     def start(self): self.log.append("start")
     def take_tail(self): return ["tail"]
+    def open_follow_up(self, sec, cb): pass
 
 
 class _Bubble:

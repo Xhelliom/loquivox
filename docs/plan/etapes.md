@@ -179,9 +179,9 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - [x] Historique borné (test) ; les faits de fin de session ne sont pas extraits deux fois
   - [x] Réglage dans Compagnon › Général, test_i18n et test_settings_layout passent
 
-### Lot — Lot 20 — Mot d'éveil : modèle perso et relance (planned, one at a time)
+### Lot — Lot 20 — Mot d'éveil : modèle perso et relance (launched, one at a time)
 
-- **Compagnon : fenêtre de relance locale après une session (sans mot d'éveil)** — backlog
+- **Compagnon : fenêtre de relance locale après une session (sans mot d'éveil)** — done
 
   Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 1 (l'équivalent local du Follow-Up Mode d'Alexa / Continued Conversation de Google).
   
@@ -196,7 +196,7 @@ Une mémoire d'une session à l'autre (projets, décisions, préférences) et un
   - Hors fenêtre, rien n'est transcrit (CPU au repos inchangé).
   - Aucun audio ni texte ne sort avant le `wake`.
 
-- **Mot d'éveil : choisir un modèle .onnx personnalisé dans Réglages** — backlog
+- **Mot d'éveil : choisir un modèle .onnx personnalisé dans Réglages** — done
 
   Suite de l'exploration docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md (question roadmap 6a2029b0).
   

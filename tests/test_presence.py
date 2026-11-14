@@ -162,6 +162,106 @@ def test_apply_raises_when_the_model_does_not_load():
         companion._companion = None
 
 
+def _speak(s, quiet_after=14):
+    for _ in range(5): s.push(0.0)             # the VAD calibrates on the room
+    for _ in range(6): s.push(0.3)             # ~0.5 s of voice
+    for _ in range(quiet_after): s.push(0.0)   # the pause that closes the turn
+
+
+def test_follow_up_window_hands_over_one_utterance_and_only_inside_it():
+    heard = []
+    p = _make([], _Model()); p.start()
+    s = _Stream.opened[-1]
+    _speak(s); time.sleep(0.1)
+    assert not heard and p._utt == []           # no window: nothing kept, nothing handed
+    p.open_follow_up(10, heard.append)
+    _speak(s); time.sleep(0.2)
+    assert len(heard) == 1 and len(heard[0]) >= 6, heard   # the audio, blocks of it
+    p.open_follow_up(0.01, heard.append)        # an expired window hands nothing
+    time.sleep(0.05)
+    _speak(s); time.sleep(0.1)
+    assert len(heard) == 1
+    p.open_follow_up(10, heard.append)
+    p.release()                                  # a session opening closes the window
+    p.resume(); _speak(_Stream.opened[-1]); time.sleep(0.1)
+    assert len(heard) == 1
+    p.keep_tail(["x"])
+    assert p.take_tail() == ["x"]
+    p.stop()
+
+
+class _FPresence:
+    listening = True
+    def __init__(self): self.window, self.kept = None, None
+    def release(self): pass
+    def resume(self): pass
+    def start(self): pass
+    def take_tail(self): return []
+    def open_follow_up(self, sec, cb): self.window = (sec, cb)
+    def keep_tail(self, blocks): self.kept = blocks
+
+
+class _FBubble:
+    def set_state(self, s): pass
+    def set_level(self, x): pass
+    def pulse(self): pass
+
+
+def _companion(said, busy=False):
+    import dataclasses
+    import loquivox.config as config_module
+    from loquivox.handlers import companion
+    from loquivox.state import STATE
+    config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_SEC=10.0,
+                                            COMPANION_STOP_PHRASES=("je ne te parlais pas",))
+    c = companion.Companion(_FPresence(), _FBubble(), look=lambda s: None,
+                            converse=lambda s, prefix=(): None,
+                            transcribe=lambda audio: said[0], mic_busy=lambda: busy)
+    c._last = ([{"role": "user", "content": "quel temps fait-il ?"},
+                {"role": "assistant", "content": "Demain, il pleuvra sur Lyon."}], 0.0)
+    STATE.presence_mode = "active"
+    woke = []
+    c.wake = lambda force=False, cause="wake_word": woke.append(cause)
+    return c, woke
+
+
+def _decide(text, **kw):
+    import io, contextlib
+    said = [text]
+    c, woke = _companion(said, **kw)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        c._follow_up([np.zeros(presence.BLOCK, "float32")])
+    return woke, out.getvalue(), c
+
+
+def test_follow_up_opens_a_session_for_a_question_not_for_a_colleague():
+    woke, log, c = _decide("Et pour demain ?")
+    assert woke == ["follow_up"] and c.presence.kept, (woke, log)
+    assert "relance : oui" in log and "demain" not in log.lower()   # the journal never quotes
+    for text in ("Je vais déjeuner avec Paul à midi.", "D'accord", "Je ne te parlais pas",
+                 "Ok merci Paul, on se voit plus tard"):
+        woke, log, c = _decide(text)
+        assert woke == [] and "relance : non" in log and c.presence.kept is None, (text, log)
+    for text in ("Peux-tu me le résumer", "Ajoute ça à ma liste", "Pluie sur Lyon, vraiment"):
+        assert _decide(text)[0] == ["follow_up"], text      # 2nd person, imperative, a word of the answer
+    woke, log, _c = _decide("Et pour demain ?", busy=True)  # a call is on the mic
+    assert woke == [] and "micro occupé" in log
+
+
+def test_a_closed_session_opens_the_window_unless_it_is_off():
+    import dataclasses
+    import loquivox.config as config_module
+    c, _ = _companion(["x"])
+    del c.wake                                   # the real one, with a fake converse
+    c.wake()
+    assert c.presence.window and c.presence.window[0] == 10.0
+    config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_SEC=0.0)
+    c.presence.window = None
+    c.wake()
+    assert c.presence.window is None
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

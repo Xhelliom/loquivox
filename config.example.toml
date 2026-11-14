@@ -164,6 +164,7 @@ enabled = true
 # "hey_mycroft", "hey_rhasspy", "timer", "weather"). Needs openwakeword and its
 # ONNX models (Settings → Companion installs both, also on Python 3.12+, and says
 # what is missing if the word cannot load); applied live from Settings.
+# A path to your own openwakeword .onnx model works too (Settings → "Custom model…").
 wake_word = "hey_jarvis"
 # Mode a single click on the bubble switches to ("silent" or "active").
 click_mode = "silent"
@@ -207,6 +208,12 @@ source_silence = 2.0
 # its last turns (bounded). 0 = every session starts empty.
 # (Settings → Companion → General.)
 resume_min = 10
+# After a session closes, for this many seconds the next thing you say is
+# transcribed LOCALLY (whisper.cpp, never the cloud) and, if it is addressed to
+# the companion (question, "you", imperative, a word of its last answer, no
+# other app on the mic), reopens a session. 0 = off.
+# (Settings → Companion → Presence.)
+follow_up_sec = 10
 # Back from silence (or after a burst), the messages that were held are
 # summarised in ONE session, the most urgent first. Above this many, it says
 # how many there are and the three most important. Minimum 3.
