@@ -108,8 +108,8 @@ try:
     a = {"project": "loquivox", "lot": 13, "note": "a b"}
     assert isinstance(plugin.run(dict(a)), mcp_tools.Held)
     assert mcp_tools.awaiting(session)
+    assert isinstance(plugin.run(dict(a, note="a\u00a0 b", confirmed=True)), mcp_tools.Held)  # too early
     session.add_user("oui")
-    assert isinstance(plugin.run(dict(a, note="a\u00a0 b")), mcp_tools.Held)   # re-asked: yes not spent
     res = plugin.run(dict(a, note="a\u00a0 b", confirmed=True))
     assert not isinstance(res, mcp_tools.Held), res
     assert not mcp_tools.awaiting(session)

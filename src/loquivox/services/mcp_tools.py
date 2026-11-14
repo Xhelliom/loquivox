@@ -129,8 +129,9 @@ def _norm(v: Any) -> Any:
 
 
 def awaiting(session: Any) -> bool:
-    """True while an acting call of this session waits for the user's yes."""
-    return bool(session is not None and _pending.get(session))
+    """True while an acting call waits for a yes the user has not yet been counted as saying."""
+    return bool(session is not None and any(
+        session.user_turns == n for n in _pending.get(session, {}).values()))
 
 
 def _ensure_loop() -> asyncio.AbstractEventLoop:
@@ -303,8 +304,10 @@ def _plugin(s: _Server, tool: Any) -> Plugin:
             spoken = session.user_turns if session is not None else 0
             if not (confirmed and session is not None and spoken > asked.get(key, spoken)):
                 fresh = key not in asked
-                # keep the first count: re-asking after the yes must not spend it
-                asked.setdefault(key, spoken)
+                # a new question (unconfirmed call) restarts the count: only a turn spoken
+                # after the LAST question is a yes. A too-early confirmed=true keeps it.
+                if not confirmed or fresh:
+                    asked[key] = spoken
                 print(f"🔧 MCP {s.name}.{tool.name}: not run, awaiting the user's yes "
                       f"(confirmed={'yes' if confirmed else 'no'}, spoken={spoken}, "
                       f"asked={asked[key]}, key={'new' if fresh else 'same'})")
