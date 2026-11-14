@@ -654,8 +654,6 @@ class SettingsDialog:
     # -----------------------------------------------------------------
     # Companion tab: the always-present bubble
     # -----------------------------------------------------------------
-    _WAKE_WORDS = ("hey_jarvis", "alexa", "hey_mycroft", "hey_rhasspy",
-                   "timer", "weather")
     _CLICK_MODES = (("silent", N_("Silence the companion")),
                     ("active", N_("Wake the companion")))
 
@@ -670,10 +668,8 @@ class SettingsDialog:
             "opens the cloud conversation only when spoken to."))
 
         cls._comp_wake = Gtk.ComboBoxText()
-        words = list(cls._WAKE_WORDS)
-        if cfg.COMPANION_WAKE_WORD not in words:
-            words.append(cfg.COMPANION_WAKE_WORD)
-        for w in words:
+        from loquivox.handlers.companion import wake_choices
+        for w in wake_choices(cfg.COMPANION_WAKE_WORD):
             cls._comp_wake.append(w, w)
         cls._comp_wake.set_active_id(cfg.COMPANION_WAKE_WORD)
         cls._comp_install = Gtk.Button(label=_("Install openwakeword"))

@@ -350,6 +350,47 @@ def test_a_closed_session_opens_the_window_unless_it_is_off():
     assert c.presence.window is None
 
 
+def test_wake_word_chosen_from_the_bubble_menu_applies_hot_and_is_written():
+    from types import SimpleNamespace
+    import loquivox.config as config_module
+    import loquivox.config_io as config_io
+    from loquivox.handlers import companion
+    from loquivox.state import STATE
+    woken, old = [], _Model()
+    old.score = 0.97                       # the old word would wake…
+    p = _make(woken, old); p.start()
+    s = _Stream.opened[-1]
+    new = _Model()
+    written, orig = [], (presence.load_wake_model, config_io.update_section, config_module.reload_config)
+    presence.load_wake_model = lambda name: new
+    config_io.update_section = lambda sec, vals: written.append((sec, vals))
+    config_module.reload_config = lambda: None
+    companion._companion = SimpleNamespace(presence=p)
+    try:
+        companion.choose_wake_word("alexa")
+        assert written == [("companion", {"wake_word": "alexa"})]
+        s.push(0.01); time.sleep(0.1)
+        assert not woken, "the old word still wakes"
+        new.score = 0.97
+        s.push(0.01); time.sleep(0.1)
+        assert woken, "the new word does not wake after the swap"
+    finally:
+        presence.load_wake_model, config_io.update_section, config_module.reload_config = orig
+        companion._companion = None
+        p.stop()
+    # one table: the menu offers the shipped words, plus a custom .onnx when that is the current one
+    assert companion.wake_choices("/x/mon.onnx") == [*companion.WAKE_WORDS, "/x/mon.onnx"]
+    assert companion.wake_choices("alexa") == list(companion.WAKE_WORDS)
+    STATE.companion_session = False
+    head = companion.bubble_menu()[0]
+    assert head[1] == "Talk now"
+    STATE.companion_session = True
+    try:
+        assert companion.bubble_menu()[0][1] == "End the conversation"
+    finally:
+        STATE.companion_session = False
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
