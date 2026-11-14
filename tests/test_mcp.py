@@ -274,6 +274,67 @@ def test_a_failed_server_is_retried(tmp_path="/tmp/loquivox_mcp_retry"):
     print("✓ a failed server comes back, by backoff or on first use")
 
 
+def test_a_server_killed_mid_session_comes_back():
+    import pathlib, signal
+    pid = pathlib.Path("/tmp/loquivox_mcp_pid")
+    pid.unlink(missing_ok=True)
+    body = _then_fixture(f"import os,pathlib; pathlib.Path({str(pid)!r}).write_text(str(os.getpid()))")
+    saved = (mcp_tools.RETRY_MIN, mcp_tools.PING_EVERY)
+    mcp_tools.RETRY_MIN, mcp_tools.PING_EVERY = 0.5, 0.5
+    try:
+        _servers(mortal=_script(body))
+        mcp_tools.sync(timeout=20)
+        assert mcp_tools.status()[0]["state"] == "up", mcp_tools.status()
+        first = int(pid.read_text())
+        os.kill(first, signal.SIGKILL)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not (
+                mcp_tools.status()[0]["state"] == "up" and int(pid.read_text()) != first):
+            time.sleep(0.1)
+        assert int(pid.read_text()) != first and mcp_tools.status()[0]["state"] == "up", mcp_tools.status()
+        assert "Nice" in mcp_tools.call_tool("mortal", "weather", {"city": "Nice"})
+    finally:
+        mcp_tools.RETRY_MIN, mcp_tools.PING_EVERY = saved
+        pid.unlink(missing_ok=True)
+    print("✓ a server killed mid-session is relaunched")
+
+
+def test_an_http_server_receives_its_headers_and_they_stay_out_of_the_log():
+    import http.server, threading
+    from loquivox.diagnostics import redact
+    seen = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.append(dict(self.headers))
+            self.send_response(500)
+            self.end_headers()
+        log_message = lambda *a: None
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    os.environ["LOQ_TEST_MCP_TOKEN"] = "s3cr3t-value-123456"
+    try:
+        _servers(remote={"url": f"http://127.0.0.1:{srv.server_port}/mcp",
+                         "headers": {"Authorization": "Bearer ${LOQ_TEST_MCP_TOKEN}", "X-Team": "loq"}})
+        mcp_tools.sync(timeout=10)
+        assert seen and seen[0].get("Authorization") == "Bearer s3cr3t-value-123456", seen
+        assert seen[0].get("X-Team") == "loq"
+    finally:
+        srv.shutdown()
+        os.environ.pop("LOQ_TEST_MCP_TOKEN")
+    row = mcp_tools.status()[0]
+    assert "s3cr3t" not in row["error"], row
+    # a variable that does not exist: a config error naming the variable, no retry
+    _servers(bad={"url": "http://127.0.0.1:1/mcp", "headers": {"Authorization": "${LOQ_NOPE}"}})
+    mcp_tools.sync(timeout=10)
+    s = mcp_tools._servers["bad"]
+    assert s.state == "failed" and "LOQ_NOPE" in s.error and not s.retry, s.error
+    for line in ("Authorization: Basic dXNlcjpwYXNzd29yZA==", "authorization: 'Bearer abc.def-ghijk'"):
+        assert "dXNlcjpw" not in redact(line) and "ghijk" not in redact(line), redact(line)
+    print("✓ HTTP headers are sent, resolved from the environment, and redacted")
+
+
 def test_server_stderr_stays_out_of_our_output():
     import tempfile
     noisy = _then_fixture("import sys; sys.stderr.write('NOISE-LINE\\n'); sys.stderr.flush()")
@@ -321,6 +382,8 @@ if __name__ == "__main__":
         test_switching_a_server_off_takes_its_tools_away()
         test_a_slow_server_gets_its_connect_timeout()
         test_a_failed_server_is_retried()
+        test_a_server_killed_mid_session_comes_back()
+        test_an_http_server_receives_its_headers_and_they_stay_out_of_the_log()
         test_server_stderr_stays_out_of_our_output()
         test_the_toml_schema_is_read()
     finally:
