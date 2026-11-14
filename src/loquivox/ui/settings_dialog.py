@@ -679,7 +679,12 @@ class SettingsDialog:
         cls._comp_install.connect("clicked", cls._on_install_wake)
         cls._comp_install.set_visible(not cls._module_installed("openwakeword"))
         cls._comp_install.set_no_show_all(True)
-        cls._field(body, _("Wake word"), cls._comp_wake, labels, extra=cls._comp_install)
+        cls._comp_wake_file = Gtk.Button(label=_("Custom model…"))
+        cls._comp_wake_file.connect("clicked", cls._on_pick_wake_file)
+        extra = Gtk.Box(spacing=6)
+        extra.pack_start(cls._comp_wake_file, False, False, 0)
+        extra.pack_start(cls._comp_install, False, False, 0)
+        cls._field(body, _("Wake word"), cls._comp_wake, labels, extra=extra)
 
         cls._comp_click = Gtk.ComboBoxText()
         for cid, label in cls._CLICK_MODES:
@@ -991,6 +996,28 @@ class SettingsDialog:
             GLib.idle_add(done)
 
         threading.Thread(target=work, daemon=True).start()
+
+    @classmethod
+    def _set_custom_wake(cls, path: str) -> None:
+        """Put a .onnx path in the wake-word combo; Apply writes it and loads it."""
+        if path not in [row[1] for row in cls._comp_wake.get_model()]:
+            cls._comp_wake.append(path, path)
+        cls._comp_wake.set_active_id(path)
+
+    @classmethod
+    def _on_pick_wake_file(cls, _btn) -> None:
+        chooser = Gtk.FileChooserDialog(
+            title=_("Custom wake word model"), parent=cls._instance,
+            action=Gtk.FileChooserAction.OPEN)
+        chooser.add_buttons(_("Cancel"), Gtk.ResponseType.CANCEL,
+                            _("Open"), Gtk.ResponseType.OK)
+        onnx = Gtk.FileFilter()
+        onnx.set_name("*.onnx")
+        onnx.add_pattern("*.onnx")
+        chooser.add_filter(onnx)
+        if chooser.run() == Gtk.ResponseType.OK:
+            cls._set_custom_wake(chooser.get_filename())
+        chooser.destroy()
 
     @classmethod
     def _on_apply_companion(cls, _btn) -> None:

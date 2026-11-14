@@ -753,6 +753,20 @@ def test_f10_survives_an_apply_of_the_voice_page():
     print("✓ F10 survives an Apply of the voice page")
 
 
+def test_a_custom_onnx_model_joins_the_wake_word_combo():
+    """« Custom model… » puts the chosen path in the combo, so Apply writes it as wake_word."""
+    from loquivox.services import presence
+    cls = SettingsDialog
+    cls._set_custom_wake("/tmp/mon_modele.onnx")
+    assert cls._comp_wake.get_active_id() == "/tmp/mon_modele.onnx"
+    cls._set_custom_wake("/tmp/mon_modele.onnx")  # twice: one entry, not two
+    ids = [row[1] for row in cls._comp_wake.get_model()]
+    assert ids.count("/tmp/mon_modele.onnx") == 1, ids
+    assert presence.wake_problem("/tmp/does-not-exist.onnx")  # ❌ with a cause, no crash
+    assert cls._comp_wake_file.get_label() == "Custom model…"
+    cls._comp_wake.set_active_id("hey_jarvis")
+
+
 def test_no_stale_wording():
     """Rewrite and vision modes are gone, and "hold" alone no longer describes recording."""
     import re
@@ -1179,6 +1193,7 @@ if __name__ == "__main__":
     test_the_role_table_applies()
     test_read_aloud_keeps_both_cases_on_the_sound_tab()
     test_f10_survives_an_apply_of_the_voice_page()
+    test_a_custom_onnx_model_joins_the_wake_word_combo()
     test_no_stale_wording()
     test_long_contents_keep_the_window_narrow()
     test_the_advanced_fold_exposes_what_only_config_had()

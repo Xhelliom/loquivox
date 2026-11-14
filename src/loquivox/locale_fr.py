@@ -388,6 +388,12 @@ CATALOG = {
         "Une petite bulle qui guette son mot de réveil sur cette machine et n'ouvre la conversation cloud que lorsqu'on lui parle.",
     "Wake word":
         "Mot de réveil",
+    "Open":
+        "Ouvrir",
+    "Custom model…":
+        "Modèle personnalisé…",
+    "Custom wake word model":
+        "Modèle de mot de réveil personnalisé",
     "0 = never · takes effect at next launch":
         "0 = jamais · effectif au prochain lancement",
     "Idle (min)":

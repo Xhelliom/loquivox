@@ -164,6 +164,7 @@ enabled = true
 # "hey_mycroft", "hey_rhasspy", "timer", "weather"). Needs openwakeword and its
 # ONNX models (Settings → Companion installs both, also on Python 3.12+, and says
 # what is missing if the word cannot load); applied live from Settings.
+# A path to your own openwakeword .onnx model works too (Settings → "Custom model…").
 wake_word = "hey_jarvis"
 # Mode a single click on the bubble switches to ("silent" or "active").
 click_mode = "silent"
