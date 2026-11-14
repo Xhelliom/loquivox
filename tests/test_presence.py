@@ -190,6 +190,66 @@ def test_follow_up_window_hands_over_one_utterance_and_only_inside_it():
     p.stop()
 
 
+def test_wake_still_fires_after_a_session_with_a_follow_up_window():
+    woken, m = [], _Model()
+    p = _make(woken, m); p.start()
+    p.release(); p.open_follow_up(10, lambda utt: None); p.resume()
+    s = _Stream.opened[-1]
+    _speak(s); time.sleep(0.1)
+    # the window is re-opened from another thread mid-utterance: _utt rebound under the callback
+    p.open_follow_up(10, lambda utt: None)
+    p._utt = []
+    for _ in range(6): s.push(0.3)
+    for _ in range(14): s.push(0.0)
+    m.score = 0.97; s.push(0.01); time.sleep(0.1)
+    assert woken, "wake word dead after the follow-up window"
+    p.stop()
+
+
+def test_wake_still_fires_after_apply_in_settings():
+    woken, m = [], _Model()
+    p = _make(woken, m); p.start()
+    s = _Stream.opened[-1]
+    new = _Model(); new.score = 0.97
+    orig = presence.load_wake_model
+    presence.load_wake_model = lambda name: new
+    try:
+        p.set_wake_model("hey_jarvis")
+    finally:
+        presence.load_wake_model = orig
+    s.push(0.01); time.sleep(0.1)
+    assert woken
+    p.stop()
+
+
+def test_callback_exception_is_logged_once_and_listening_continues(capsys=None):
+    import io, contextlib
+    woken, m = [], _Model()
+    p = _make(woken, m); p.start(); s = _Stream.opened[-1]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        p.on_level = lambda x: (_ for _ in ()).throw(RuntimeError("boom"))
+        s.push(0.3); s.push(0.3)
+        p.on_level = None
+        m.score = 0.97; s.push(0.01); time.sleep(0.1)
+    out = buf.getvalue()
+    assert out.count("audio callback error") == 1 and "RuntimeError: boom" in out
+    assert woken
+    p.stop()
+
+
+def test_a_silent_stream_is_detected_and_reopened():
+    import io, contextlib
+    p = _make([], _Model())
+    p.HEARTBEAT, p.SILENT_AFTER = 0.02, 0.05
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        p.start(); n = len(_Stream.opened)
+        time.sleep(0.3)
+    assert len(_Stream.opened) > n and "⚠️" in buf.getvalue() and p.listening
+    p.stop()
+
+
 class _FPresence:
     listening = True
     def __init__(self): self.window, self.kept = None, None
