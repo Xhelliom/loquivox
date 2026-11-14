@@ -238,6 +238,34 @@ def test_callback_exception_is_logged_once_and_listening_continues(capsys=None):
     p.stop()
 
 
+def test_wake_fires_even_if_the_side_work_raises_on_every_block():
+    import io, contextlib
+    woken, m = [], _Model()
+    p = _make(woken, m); p.start(); s = _Stream.opened[-1]
+    def boom(_): raise RuntimeError("boom")
+    p.on_level = boom
+    m.score = 0.97
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        for _ in range(4): s.push(0.3)
+        time.sleep(0.1)
+    assert woken and out.getvalue().count("audio callback error") == 1
+    p.stop()
+
+
+def test_a_scoring_error_on_every_block_gets_the_stream_reopened():
+    import io, contextlib
+    class _Bad(_Model):
+        def predict(self, frame): raise RuntimeError("bad")
+    p = _make([], _Bad()); p.HEARTBEAT, p.SILENT_AFTER = 0.02, 0.1
+    with contextlib.redirect_stdout(io.StringIO()):
+        p.start(); n = len(_Stream.opened)
+        for _ in range(30):
+            _Stream.opened[-1].push(0.1); time.sleep(0.01)
+        time.sleep(0.2)
+    assert len(_Stream.opened) > n
+    p.stop()
+
+
 def test_a_silent_stream_is_detected_and_reopened():
     import io, contextlib
     p = _make([], _Model())

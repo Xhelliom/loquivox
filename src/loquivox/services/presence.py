@@ -209,19 +209,31 @@ class Presence:
                 return
 
     def _on_audio(self, indata, frames, time_info, status) -> None:
-        # An exception here kills the PortAudio callback, and the wake word with it.
-        try:
-            self._process(indata)
-        except Exception:
-            if not self._err_logged:
-                self._err_logged = True
-                import traceback
-                print("⚠️  Presence: audio callback error (listening continues)\n"
-                      + traceback.format_exc())
-
-    def _process(self, indata) -> None:
-        self._last_block = time.monotonic()
+        # An exception here kills the PortAudio callback, and the wake word with it:
+        # the side work (VAD, tail, follow-up, level) and the score are guarded apart,
+        # so a broken side never deafens the wake word.
         block = np.asarray(indata, dtype=np.float32).reshape(-1)
+        try:
+            self._side(block)
+        except Exception:
+            self._report("side work")
+            # start over from a clean state, or the same error comes back each block
+            self._vad, self._follow_cb, self._utt = VoiceActivityDetector(RATE), None, []
+            self.speaking = False
+        try:
+            self._score(block)
+            self._last_block = time.monotonic()   # only a block scored without error counts for the heartbeat
+        except Exception:
+            self._report("wake scoring")
+
+    def _report(self, what: str) -> None:
+        if not self._err_logged:
+            self._err_logged = True
+            import traceback
+            print(f"⚠️  Presence: audio callback error in {what} (listening continues)\n"
+                  + traceback.format_exc())
+
+    def _side(self, block: np.ndarray) -> None:
         if self._vad.ended:   # one detector per utterance: start over
             self._vad = VoiceActivityDetector(RATE)
         self._vad.feed(block)
@@ -234,6 +246,8 @@ class Presence:
         if self.on_level:
             rms = float(np.sqrt(np.mean(block ** 2))) if block.size else 0.0
             self.on_level(min(1.0, rms * 6) if self.speaking else 0.0)
+
+    def _score(self, block: np.ndarray) -> None:
         if self._model is None:
             return
         pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)
