@@ -61,6 +61,8 @@ def wake_problem(name: str) -> str:
 REFRACTORY: float = 2.0
 #: longest stretch kept after a wake word (seconds)
 TAIL_MAX: int = 30
+#: at most one near-miss line per this many seconds
+NEAR_MISS_EVERY: float = 5.0
 
 
 class Presence:
@@ -77,6 +79,7 @@ class Presence:
         self._stream = None
         self._vad = VoiceActivityDetector(RATE)
         self._last_wake = -REFRACTORY
+        self._last_near = float("-inf")
         self._lock = threading.Lock()
         #: True while someone is talking (energy VAD), whatever the wake word says
         self.speaking = False
@@ -164,11 +167,16 @@ class Presence:
         pcm = (np.clip(block, -1.0, 1.0) * 32767).astype(np.int16)
         scores = self._model.predict(pcm)
         now = time.monotonic()
-        if (max(scores.values(), default=0.0) >= self.threshold
-                and now - self._last_wake >= REFRACTORY):
+        name, best = max(scores.items(), key=lambda kv: kv[1], default=(self.wake_model, 0.0))
+        if best >= self.threshold and now - self._last_wake >= REFRACTORY:
+            print(f"👂 wake {name} {best:.2f} >= {self.threshold}")
             self._last_wake = now
             self._tail = []
             threading.Thread(target=self.on_wake, daemon=True).start()
+        elif (self.threshold / 2 < best < self.threshold
+                and now - self._last_near >= NEAR_MISS_EVERY):
+            self._last_near = now
+            print(f"👂 wake near-miss {name} {best:.2f} < {self.threshold}")
 
 
 if __name__ == "__main__":
