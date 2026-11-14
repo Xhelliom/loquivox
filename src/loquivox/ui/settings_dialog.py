@@ -1065,8 +1065,14 @@ class SettingsDialog:
 
         def work():
             from loquivox.handlers import companion
+            from loquivox.services import presence
             try:
-                companion.set_wake_word(wake)
+                if companion._companion is None:  # nothing running to reload: still check the file
+                    problem = presence.wake_problem(wake)
+                    if problem:
+                        raise RuntimeError(problem)
+                else:
+                    companion.set_wake_word(wake)
                 text = saved
             except Exception as e:
                 text = _("<small>❌ wake word: {v0}</small>").format(v0=GLib.markup_escape_text(str(e)))
