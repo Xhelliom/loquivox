@@ -30,6 +30,7 @@ MANAGED_KEYS = {
     "OPENAI_API_KEY": "OpenAI",
     "ANTHROPIC_API_KEY": "Anthropic",
     "DEEPGRAM_API_KEY": "Deepgram",
+    "GEMINI_API_KEY": "Google Gemini",
 }
 
 

@@ -375,6 +375,23 @@ class Config:
         "shimmer", "verse")
     # Transcription model for the user's side — what lands in the brief.
     TALK_REALTIME_TRANSCRIBE: str = "gpt-4o-mini-transcribe"
+    #: Which company's Live server holds a ``live`` conversation. Not a fourth
+    #: engine: the same loop, a different class (``services/gemini_live.py``).
+    TALK_LIVE_PROVIDER: str = "openai"
+    TALK_LIVE_PROVIDERS: Tuple[str, ...] = ("openai", "google")
+    #: Google's side (needs ``.[gemini]`` and GEMINI_API_KEY). The extended
+    #: thinking model refuses to open without a ``thinking_level``, hence
+    #: TALK_GEMINI_THINKING.
+    TALK_GEMINI_MODEL: str = "gemini-3.8-live"
+    TALK_GEMINI_THINKING: str = "low"
+    TALK_GEMINI_VOICE: str = "Kore"
+    #: The 30 prebuilt voices (the TTS ones). The language is chosen by the model.
+    TALK_GEMINI_VOICES: Tuple[str, ...] = (
+        "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
+        "Callirrhoe", "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba",
+        "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+        "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi",
+        "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat")
     TALK_LIVE_MODEL: str = "gpt-live-1"
     TALK_LIVE_VOICE: str = "marin"
     #: The voices gpt-live-1 speaks with — the Realtime ten plus twelve of its
@@ -1074,6 +1091,15 @@ def _build_config() -> Config:
         overrides["TALK_REALTIME_VOICE"] = str(talk["realtime_voice"]).strip().lower()
     if str(talk.get("realtime_transcribe", "")).strip():
         overrides["TALK_REALTIME_TRANSCRIBE"] = str(talk["realtime_transcribe"]).strip()
+    if str(talk.get("live_provider", "")).strip().lower() in base.TALK_LIVE_PROVIDERS:
+        overrides["TALK_LIVE_PROVIDER"] = str(talk["live_provider"]).strip().lower()
+    if str(talk.get("gemini_model", "")).strip():
+        overrides["TALK_GEMINI_MODEL"] = str(talk["gemini_model"]).strip()
+    if str(talk.get("gemini_thinking", "")).strip().lower() in ("low", "medium", "high"):
+        overrides["TALK_GEMINI_THINKING"] = str(talk["gemini_thinking"]).strip().lower()
+    for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it
+        if v.lower() == str(talk.get("gemini_voice", "")).strip().lower():
+            overrides["TALK_GEMINI_VOICE"] = v
     if str(talk.get("live_model", "")).strip():
         overrides["TALK_LIVE_MODEL"] = str(talk["live_model"]).strip()
     if str(talk.get("live_voice", "")).strip():
