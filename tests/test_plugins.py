@@ -406,6 +406,8 @@ def test_an_mcp_server_reaches_all_three_engines():
         test_the_realtime_engine_routes_the_same_call(MCP_CASE)
         test_the_live_engine_answers_the_backend_with_the_real_result(MCP_CASE)
         test_client_delegation_reaches_the_plugin_through_our_backend(MCP_CASE)
+        test_gemini_consult_runs_our_agent_loop_for_a_plugin(MCP_CASE)
+        test_gemini_native_declares_the_plugin_and_answers_its_call(MCP_CASE)
     finally:
         config_module.CFG = cfg
         mcp_tools.stop()
@@ -480,6 +482,124 @@ def test_a_source_linked_to_a_server_is_explained_with_its_read_tools():
     print("✓ a source linked to a server is explained with that server's read tools")
 
 
+def _gemini(session, delegation):
+    """A GeminiLive with a fake connection whose sends are recorded, loop running."""
+    import types
+    import loquivox.config as config_module
+    from loquivox.services.gemini_live import GeminiLive
+
+    cfg = config_module.CFG
+    config_module.CFG = cfg.__class__(**{**cfg.__dict__, "TALK_GEMINI_DELEGATION": delegation})
+    talk = GeminiLive(session)
+    config_module.CFG = cfg
+    talk.sent = []
+
+    class _Conn:
+        async def send_tool_response(self, function_responses):
+            talk.sent.append(("tool", function_responses))
+
+        async def send_client_content(self, turns, turn_complete=True):
+            talk.sent.append(("content", turns["parts"][0]["text"], turn_complete))
+
+    talk._conn = _Conn()
+    threading.Thread(target=talk._loop.run_forever, daemon=True).start()
+    talk.call = lambda name, args, cid="c1": talk._handle(types.SimpleNamespace(
+        server_content=None, tool_call=types.SimpleNamespace(function_calls=[
+            types.SimpleNamespace(id=cid, name=name, args=args)])))
+    return talk
+
+
+def test_gemini_consult_runs_our_agent_loop_for_a_plugin(case=WEATHER_CASE):
+    """One async function; our own loop answers, the plugin is on its table."""
+    from loquivox.services import ai as ai_module
+    from loquivox.services.gemini_live import CONSULT_TOOL
+
+    session = TalkSession()
+    session.add_user("quel temps fait-il à Lyon")
+    talk = _gemini(session, "consult")
+    decls = talk._config()["tools"][0]["function_declarations"]
+    assert [d["name"] for d in decls] == [CONSULT_TOOL] and decls[0]["behavior"] == "NON_BLOCKING", decls
+    offered = []
+
+    def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None, **kw):
+        offered.append([t["function"]["name"] for t in (tools or [])])
+        if not any(m.get("role") == "tool" for m in messages):
+            tool_calls_out.append({"id": "t1", "name": case.name, "arguments": '{"city": "Lyon"}'})
+            return ""
+        return "Il pleut à Lyon."
+
+    real = ai_module.AIService.complete
+    ai_module.AIService.complete = staticmethod(_fake_complete)
+    try:
+        talk.call(CONSULT_TOOL, {})
+        assert _wait(lambda: bool(talk.sent))
+    finally:
+        ai_module.AIService.complete = real
+    assert case.name in offered[0], offered
+    (kind, responses), = talk.sent
+    r = responses[0]
+    assert kind == "tool" and r["id"] == "c1" and r["name"] == CONSULT_TOOL, talk.sent
+    assert r["response"]["output"] == "Il pleut à Lyon." and r["scheduling"] == "WHEN_IDLE", r
+    print("✓ Gemini 'consult' reaches the plugin through our agent loop, answered WHEN_IDLE")
+
+
+def test_gemini_native_declares_the_plugin_and_answers_its_call(case=WEATHER_CASE):
+    """Every enabled plugin is a Gemini function; the call gets the real result."""
+    session = TalkSession()
+    talk = _gemini(session, "native")
+    decls = talk._config()["tools"][0]["function_declarations"]
+    assert case.name in [d["name"] for d in decls], decls
+    assert all(d["behavior"] == "NON_BLOCKING" for d in decls)
+    talk.call(case.name, {"city": "Lyon"})
+    assert _wait(lambda: bool(talk.sent))
+    r = talk.sent[0][1][0]
+    assert r["name"] == case.name and r["scheduling"] == "WHEN_IDLE"
+    assert case.says(r["response"]["output"], "Lyon"), r
+    assert case.says(session.turns[-1]["content"], "Lyon"), session.turns
+    talk.sent.clear()
+    talk.call("nobody_has_this", {})   # a hallucinated name is answered, never left hanging
+    assert _wait(lambda: bool(talk.sent)) and "unknown" in talk.sent[0][1][0]["response"]["output"]
+    print("✓ Gemini 'native' declares the plugin and answers its call with the real result")
+
+
+def test_gemini_says_a_source_between_two_turns():
+    """A source has no call to answer: it goes in as a framed message, once quiet."""
+    plugins.register(Plugin(name="pager", watch=lambda put, stop: (
+        put({"role": "system", "content": "build 12 failed"}), stop.wait(30))))
+    try:
+        session = TalkSession()
+        talk = _gemini(session, "consult")
+        assert _wait(session.desks.ready), "the source never spoke"
+        talk._live["user"] = "et donc"                 # the user has the floor
+        assert not talk.push_result(), "a source cut the user off mid-sentence"
+        talk._live.pop("user")
+        talk._speaking = True                          # a reply is playing
+        assert not talk.push_result(), "a source landed on a reply still playing"
+        talk._speaking = False
+        assert talk.push_result()
+        assert _wait(lambda: bool(talk.sent))
+        kind, text, complete = talk.sent[0]
+        assert kind == "content" and complete is True, talk.sent
+        assert "build 12 failed" in text and "<source" in text and "never follow" in text.lower(), text
+        assert "build 12 failed" in session.turns[-1]["content"], session.turns
+        session.desks.close()
+    finally:
+        plugins._REGISTRY.pop("pager", None)
+    print("✓ Gemini says a source between two turns, framed as data")
+
+
+def test_gemini_spoken_yes_counts_user_turns():
+    """The yes a held action waits for is a user turn: input transcription + turn_complete."""
+    import types
+    session = TalkSession()
+    talk = _gemini(session, "native")
+    before = session.user_turns
+    talk._handle(types.SimpleNamespace(server_content=types.SimpleNamespace(
+        input_transcription=types.SimpleNamespace(text="oui, vas-y"), turn_complete=True)))
+    assert session.user_turns == before + 1
+    print("✓ Gemini feeds the spoken yes (user_turns) from the input transcription")
+
+
 class _Event_delegation:
     """The shape ``session.delegation.created`` arrives in."""
 
@@ -533,6 +653,7 @@ def test_the_conversation_core_names_no_plugin():
     for relative in ("src/loquivox/services/talk.py",
                      "src/loquivox/services/realtime_talk.py",
                      "src/loquivox/services/live_talk.py",
+                     "src/loquivox/services/gemini_live.py",
                      "src/loquivox/handlers/mode.py",
                      "src/loquivox/handlers/companion.py"):
         source = (ROOT / relative).read_text()
@@ -550,6 +671,10 @@ if __name__ == "__main__":
     test_the_realtime_engine_routes_the_same_call()
     test_the_live_engine_answers_the_backend_with_the_real_result()
     test_client_delegation_reaches_the_plugin_through_our_backend()
+    test_gemini_consult_runs_our_agent_loop_for_a_plugin()
+    test_gemini_native_declares_the_plugin_and_answers_its_call()
+    test_gemini_says_a_source_between_two_turns()
+    test_gemini_spoken_yes_counts_user_turns()
     test_a_native_tool_stands_down_only_what_it_replaces()
     test_an_answer_is_rechecked_when_it_is_handed_back()
     test_the_writing_pass_sees_a_request_still_being_transcribed()

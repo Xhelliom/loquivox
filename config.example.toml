@@ -375,6 +375,9 @@ live_provider = "openai"
 # "gemini-3.8-live-extended-thinking" also works, with gemini_thinking (low|medium|high).
 gemini_model = "gemini-3.8-live"
 gemini_thinking = "low"
+# Who thinks under Google: "consult" (one async function, our own agent loop and
+# MCP tools) or "native" (each plugin declared as a Gemini function, fixed at open).
+gemini_delegation = "consult"
 # One of the 30 prebuilt voices (Kore, Puck, Charon, Zephyr, Fenrir…). The language
 # is picked by the model; it cannot be forced.
 gemini_voice = "Kore"

@@ -25,8 +25,20 @@ What differs from gpt-live-1, and why this file is not a subclass of it:
   required here (silence and ``audio_stream_end`` both work) but the input is
   billed either way and the code is the shared one.
 
-No tools yet (a following card): the model talks and ``TalkSession`` records the
-turns; plugins, MCP, sources and the spoken yes come with ``push_result``.
+Tools: Google has no delegation, the model calls *functions*. Two modes, as
+``client`` / ``responses`` are for gpt-live-1 (``[talk] gemini_delegation``):
+
+- ``consult`` — ONE ``NON_BLOCKING`` function, ``CONSULT_TOOL``; a call runs
+  ``TalkSession.consult()`` (our agent loop, deferred MCP tools included) on a
+  thread and the answer goes back ``WHEN_IDLE``: the voice keeps the floor and
+  says it once it is quiet.
+- ``native`` — every enabled plugin declared as a function (``Desks.gemini_tools``,
+  derived from ``Plugin``, never written twice), the list fixed at open like
+  ``responses`` (so ``load_all``); a call runs ``Desk.run_now``.
+
+The spoken yes is ``TalkSession.user_turns`` growing: the input transcription
+closes into a user turn on ``turn_complete``. A *source* has no call to answer,
+so ``push_result`` hands its framed text over with ``send_client_content``.
 
 Threading is the other engines': the SDK is async, so the session runs an
 asyncio loop on its own thread, captured audio crosses with
@@ -35,6 +47,7 @@ asyncio loop on its own thread, captured audio crosses with
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import threading
 import time
@@ -43,6 +56,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 import loquivox.config as config_module
+from loquivox.i18n import _
 from loquivox.services import media
 from loquivox.services.live_audio import SPEECH_TAIL_TIMEOUT, LiveAudio  # noqa: F401
 from loquivox.state import STATE
@@ -64,6 +78,18 @@ CONTEXT_FRAME: str = (
     "mention it unprompted: wait for the user to speak, then use it to "
     "understand them.]\n"
 )
+#: the one function of ``consult`` mode — "ask Loquivox"
+CONSULT_TOOL: str = "ask_loquivox"
+CONSULT_DESCRIPTION: str = (
+    "Ask Loquivox, the assistant behind this conversation. Call it for anything "
+    "that needs a lookup, a tool, an action on the user's machine or services, or "
+    "careful reasoning. It reads the whole conversation, so no argument is needed. "
+    "It answers shortly: say that answer in your own words. If it asks for a "
+    "confirmation, ask the user and wait for their spoken yes.")
+CONSULT_CLAUSE: str = (
+    "\n\nFor anything beyond chatting — facts to look up, tools, actions, long "
+    "reasoning — call " + CONSULT_TOOL + " instead of guessing, and never say that "
+    "something is done unless its answer says so.")
 
 
 class GeminiLive(LiveAudio):
@@ -83,6 +109,7 @@ class GeminiLive(LiveAudio):
         self._model = model or cfg.TALK_GEMINI_MODEL
         self._voice = voice or cfg.TALK_GEMINI_VOICE
         self._instructions = instructions or session.system_prompt()
+        self._delegation = cfg.TALK_GEMINI_DELEGATION
         self._init_audio()
         self._init_turns()
         #: a reply is being produced: from its first audio to ``turn_complete``
@@ -194,8 +221,87 @@ class GeminiLive(LiveAudio):
         return True
 
     def push_result(self) -> bool:
-        """Plugins, sources and the spoken yes: the tools card. Nothing yet."""
-        return False
+        """
+        Hand a desk's message to the model between two turns — what a *source*
+        sends (nothing called it, so there is no call to answer; a tool's answer
+        goes back on its own call). ``take()`` has framed it as data.
+        """
+        if self._conn is None or self._stop or not self._session.desks.ready():
+            return False
+        if not self._quiet() or "user" in self._live:
+            return False
+        found = self._session.desks.take()
+        if found is None:
+            return False
+        plugin, message = found
+        self._session.turns.append(message)
+        if plugin.result_note:
+            from loquivox.managers.chat import ChatManager
+            ChatManager.add_message("note", _(plugin.result_note))
+        try:
+            asyncio.run_coroutine_threadsafe(self._conn.send_client_content(
+                turns={"role": "user", "parts": [{"text": message["content"]}]},
+                turn_complete=True), self._loop)
+        except Exception as e:
+            print(f"⚠️  {plugin.name} result not sent to the Gemini session: {e}")
+            return False
+        return True
+
+    # --- function calls ------------------------------------------------------
+
+    def _tools(self) -> list:
+        """The ``tools`` of the session, by delegation mode. Fixed at open."""
+        if self._delegation == "native":
+            self._session.desks.load_all()   # nothing can be added after the setup
+            return self._session.desks.gemini_tools
+        return [{"function_declarations": [{
+            "name": CONSULT_TOOL, "description": CONSULT_DESCRIPTION,
+            "behavior": "NON_BLOCKING"}]}]
+
+    def _call(self, call) -> None:
+        """One function call, on its own thread: nothing blocks the session's loop."""
+        name, args = getattr(call, "name", ""), dict(getattr(call, "args", None) or {})
+        try:
+            if self._delegation == "consult":
+                output = self._consult() if name == CONSULT_TOOL else "Error: unknown tool."
+            else:
+                desk = self._session.desks.get(name)
+                if desk is None:
+                    output = "Error: unknown tool."
+                else:
+                    message = desk.run_now(json.dumps(args))
+                    if message is not None:   # the writing pass has the facts too
+                        self._session.turns.append(message)
+                        if desk.plugin.result_note:
+                            from loquivox.managers.chat import ChatManager
+                            ChatManager.add_message("note", _(desk.plugin.result_note))
+                    output = message["content"] if message is not None else "No result."
+        except Exception as e:
+            print(f"⚠️  Function call {name} failed: {e}")
+            output = f"Error: {e}"
+        if self._stop:
+            return   # the session is closing: nobody is left to hear it
+        try:
+            asyncio.run_coroutine_threadsafe(self._conn.send_tool_response(
+                function_responses=[{"id": getattr(call, "id", None), "name": name,
+                                     "response": {"output": output},
+                                     "scheduling": "WHEN_IDLE"}]), self._loop)
+        except Exception as e:
+            print(f"⚠️  Call {name} result not sent to the Gemini session: {e}")
+
+    def _consult(self) -> str:
+        """Our agent loop over the conversation so far; its answer is the call's."""
+        from loquivox.managers.chat import ChatManager
+
+        # shortcut: no wait for a transcription still arriving (live_talk's
+        # _settle); turn_complete usually lands first. Upgrade if a request is lost.
+        self._close_turn("user")
+        ChatManager.add_message("note", _("🧠 Thinking…"))
+        started = time.time()
+        answer = self._session.consult()
+        print(f"🧠 Consult ({time.time() - started:.1f}s): '{answer}'")
+        return answer or ("The assistant could not answer that request. Say so "
+                          "plainly rather than guessing, and carry on.")
 
     # --- microphone → session ----------------------------------------------
 
@@ -245,12 +351,16 @@ class GeminiLive(LiveAudio):
         """The session to open — fixed for its whole life."""
         cfg: Dict[str, Any] = {
             "response_modalities": ["AUDIO"],
-            "system_instruction": self._instructions,
+            "system_instruction": self._instructions
+            + (CONSULT_CLAUSE if self._delegation == "consult" else ""),
             "speech_config": {"voice_config": {"prebuilt_voice_config": {
                 "voice_name": self._voice}}},
             "input_audio_transcription": {},
             "output_audio_transcription": {},
         }
+        tools = self._tools()
+        if tools:
+            cfg["tools"] = tools
         if THINKING_MODEL_MARK in self._model:
             cfg["thinking_config"] = {
                 "thinking_level": config_module.CFG.TALK_GEMINI_THINKING}
@@ -279,6 +389,8 @@ class GeminiLive(LiveAudio):
 
     def _handle(self, message) -> None:
         """Route one server message. Never raises — a session must not die on one."""
+        for call in getattr(getattr(message, "tool_call", None), "function_calls", None) or []:
+            threading.Thread(target=self._call, args=(call,), daemon=True).start()
         content = getattr(message, "server_content", None)
         if content is None:
             return

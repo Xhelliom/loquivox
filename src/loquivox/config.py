@@ -385,6 +385,11 @@ class Config:
     TALK_GEMINI_MODEL: str = "gemini-3.8-live"
     TALK_GEMINI_THINKING: str = "low"
     TALK_GEMINI_VOICE: str = "Kore"
+    #: Who thinks under Google, which has no delegation: ``consult`` = one async
+    #: function that runs our own agent loop (``TalkSession.consult``, MCP
+    #: deferred tools included); ``native`` = every plugin declared as a Gemini
+    #: function (list fixed at open). Default provisional, owner's call.
+    TALK_GEMINI_DELEGATION: str = "consult"
     #: The 30 prebuilt voices (the TTS ones). The language is chosen by the model.
     TALK_GEMINI_VOICES: Tuple[str, ...] = (
         "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
@@ -1095,6 +1100,8 @@ def _build_config() -> Config:
         overrides["TALK_LIVE_PROVIDER"] = str(talk["live_provider"]).strip().lower()
     if str(talk.get("gemini_model", "")).strip():
         overrides["TALK_GEMINI_MODEL"] = str(talk["gemini_model"]).strip()
+    if str(talk.get("gemini_delegation", "")).strip().lower() in ("consult", "native"):
+        overrides["TALK_GEMINI_DELEGATION"] = str(talk["gemini_delegation"]).strip().lower()
     if str(talk.get("gemini_thinking", "")).strip().lower() in ("low", "medium", "high"):
         overrides["TALK_GEMINI_THINKING"] = str(talk["gemini_thinking"]).strip().lower()
     for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it

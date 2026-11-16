@@ -491,9 +491,8 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 (`gemini-3.8-live`; the `-extended-thinking` model refuses to open without
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
-with a note in the bubble. **This card has no tools** (no `push_result`, no
-plugins/MCP/sources, no spoken yes), no session resumption and no companion:
-separate cards that depend on it.
+with a note in the bubble. Tools are in (below, and the Plugins section); still no
+session resumption and no companion: separate cards.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
@@ -527,6 +526,25 @@ What differs from gpt-live-1, each a reason it is not a subclass:
   acceptance — to be done by hand with a real key).
 
 ### Plugins (`services/plugins.py`)
+
+**Under Gemini Live** (`services/gemini_live.py`, `[talk] gemini_delegation`):
+Google has no delegation, the model calls *functions*, so the two Live routes
+are rebuilt as two modes — `consult` (default, **provisional: the owner's call**,
+one-line change in `TALK_GEMINI_DELEGATION`) and `native`. `consult` declares ONE
+`NON_BLOCKING` function (`ask_loquivox`); a call runs `TalkSession.consult()` on
+a thread — our agent loop, deferred MCP tools and `find_tools` included — and the
+answer goes back as a `FunctionResponse` with `scheduling="WHEN_IDLE"`, so the
+voice keeps the floor. `native` declares every enabled plugin
+(`Plugin.gemini_tool` → `Desks.gemini_tools`, derived, never written twice;
+`parameters_json_schema` carries the schema as is), the list fixed at open like
+`responses` (hence `load_all`, MCP deferral does not apply), and a call runs
+`Desk.run_now`. The spoken yes is the same `user_turns`, fed by the input
+transcription closed on `turn_complete`. A *source* has no call: `push_result`
+sweeps the desks (quiet reply, no open user turn) and `send_client_content`
+hands over the text `Desk.take()` already framed with `SOURCE_FRAME`, with
+`turn_complete=True` so it is said. `tests/test_plugins.py` drives a plugin the
+core has never heard of through both modes. Not verified by voice: a real
+session (the held MCP action waiting for a spoken yes, a board source said).
 
 **The agent loop (`TalkSession._with_tools`, shared by the cascade's `_answer` and
 the Live client delegation's `consult()`).** Tools are not "started and swept
