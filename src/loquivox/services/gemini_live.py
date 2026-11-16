@@ -25,6 +25,14 @@ What differs from gpt-live-1, and why this file is not a subclass of it:
   required here (silence and ``audio_stream_end`` both work) but the input is
   billed either way and the code is the shared one.
 
+Long sessions: one connection lasts ~10 min (a ``go_away`` announces the end), so
+the context is always compressed (``sliding_window``), the last
+``session_resumption_update`` handle is kept, and on ``go_away`` or a dropped
+socket the session reopens with it — the microphone stays open, the playback
+buffer is emptied, one line goes to the journal. Without a handle (or on a first
+open after a companion pause, #122) the turns so far go back in through
+``send_client_content`` with ``user``/``model`` roles and ``turn_complete=False``.
+
 No tools yet (a following card): the model talks and ``TalkSession`` records the
 turns; plugins, MCP, sources and the spoken yes come with ``push_result``.
 
@@ -89,6 +97,9 @@ class GeminiLive(LiveAudio):
         #: or ``interrupted``
         self._speaking = False
         self._context_pushed = ""
+        #: latest ``session_resumption_update.new_handle``; a go_away reopens with it
+        self._handle_token: Optional[str] = None
+        self._goaway = False
         self._loop = asyncio.new_event_loop()
         self._task: Optional["asyncio.Task"] = None
         self._conn = None
@@ -250,26 +261,69 @@ class GeminiLive(LiveAudio):
                 "voice_name": self._voice}}},
             "input_audio_transcription": {},
             "output_audio_transcription": {},
+            # the context is trimmed instead of ending the session (15 min → unlimited)
+            "context_window_compression": {"sliding_window": {}},
+            "session_resumption": ({"handle": self._handle_token}
+                                   if self._handle_token else {}),
         }
         if THINKING_MODEL_MARK in self._model:
             cfg["thinking_config"] = {
                 "thinking_level": config_module.CFG.TALK_GEMINI_THINKING}
         return cfg
 
-    async def _session_task(self) -> None:
+    def _open(self):
+        """The SDK's ``connect`` context manager (the self-check swaps it)."""
         from google import genai
 
+        client = genai.Client(**self._client_kwargs())
+        return client.aio.live.connect(model=self._model, config=self._config())
+
+    def _prior_turns(self) -> list:
+        """What a fresh server session must be told: nothing when a handle carries it."""
+        if self._handle_token:
+            return []
+        return [{"role": "user" if t["role"] == "user" else "model",
+                 "parts": [{"text": t["content"]}]}
+                for t in self._session.resumed + self._session.turns
+                if t["role"] in ("user", "assistant") and isinstance(t["content"], str)
+                and t["content"]]
+
+    async def _session_task(self) -> None:
+        failures = 0
         try:
-            client = genai.Client(**self._client_kwargs())
-            async with client.aio.live.connect(model=self._model,
-                                               config=self._config()) as conn:
-                self._conn = conn
-                self._started.set()   # connect() returns once the setup is acknowledged
-                self._ready.set()
-                while not self._stop:
-                    # receive() ends after each turn; ask again for the next one
-                    async for message in conn.receive():
-                        self._handle(message)
+            while not self._stop:
+                try:
+                    async with self._open() as conn:
+                        prior = self._prior_turns()
+                        if prior:   # roles user/model, "more to come": no answer to it
+                            await conn.send_client_content(turns=prior, turn_complete=False)
+                        self._conn = conn
+                        self._goaway = False
+                        self._started.set()   # connect() returns once the setup is acknowledged
+                        self._ready.set()
+                        failures = 0
+                        while not self._stop and not self._goaway:
+                            # receive() ends after each turn; ask again for the next one
+                            async for message in conn.receive():
+                                self._handle(message)
+                                if self._goaway:
+                                    break
+                    why = "go_away" if self._goaway else "connection closed"
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    why = f"{type(e).__name__}"
+                    failures += 1
+                    if self._stop or not self._started.is_set() or failures > 3:
+                        raise
+                if self._stop:
+                    break
+                self._conn = None   # the microphone callback idles until the new one
+                self._flush_audio()
+                self._flush_turns()
+                print(f"🔁 Gemini Live: reconnecting ({why}, "
+                      f"{'with handle' if self._handle_token else 'turns replayed'})")
+                await asyncio.sleep(0.5 * failures)
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -279,6 +333,12 @@ class GeminiLive(LiveAudio):
 
     def _handle(self, message) -> None:
         """Route one server message. Never raises — a session must not die on one."""
+        update = getattr(message, "session_resumption_update", None)
+        if update is not None and getattr(update, "new_handle", None) \
+                and getattr(update, "resumable", True) is not False:
+            self._handle_token = update.new_handle
+        if getattr(message, "go_away", None) is not None:
+            self._goaway = True
         content = getattr(message, "server_content", None)
         if content is None:
             return
@@ -393,6 +453,94 @@ if __name__ == "__main__":
     assert t._session.turns[-1]["content"] == "D'accord, voilà."
     t._handle(msg(input_transcription=types.SimpleNamespace(text="j'ai fini"), turn_complete=True))
     assert t.done, "the finish phrase was not heard"
+
+    # Long sessions: compression always on, the last handle kept, go_away reopens.
+    assert talk._config()["context_window_compression"] == {"sliding_window": {}}
+    assert talk._config()["session_resumption"] == {}
+    r = GeminiLive(TalkSession())
+    r._handle(types.SimpleNamespace(session_resumption_update=types.SimpleNamespace(
+        new_handle="h1", resumable=True)))
+    r._handle(types.SimpleNamespace(session_resumption_update=types.SimpleNamespace(
+        new_handle="h2", resumable=True)))
+    r._handle(types.SimpleNamespace(session_resumption_update=types.SimpleNamespace(
+        new_handle="no", resumable=False)))
+    assert r._handle_token == "h2" and r._config()["session_resumption"] == {"handle": "h2"}
+
+    class _Fake:
+        def __init__(self, script):
+            self.script, self.client_content, self.on_end = script, [], None
+
+        async def send_client_content(self, turns, turn_complete):
+            self.client_content.append((turns, turn_complete))
+
+        async def receive(self):
+            for m in self.script.pop(0) if self.script else []:
+                yield m
+            if self.on_end:   # the last scripted connection has said everything
+                self.on_end()
+            await asyncio.sleep(0.01)
+
+    opened: list = []
+
+    def run_session(g, scripts, first_turns=()):
+        g._session.resumed = list(first_turns)
+        conns = [_Fake([s]) for s in scripts]
+        conns[-1].on_end = lambda: setattr(g, "_stop", True)
+
+        class _CM:
+            async def __aenter__(self_):
+                opened.append(g._handle_token)
+                c = conns[min(len(opened) - 1, len(conns) - 1)]
+                return c
+
+            async def __aexit__(self_, *a):
+                return False
+        g._open = _CM
+        opened.clear()
+        asyncio.run(g._session_task())
+        return conns
+
+    upd = types.SimpleNamespace(session_resumption_update=types.SimpleNamespace(
+        new_handle="H", resumable=True))
+    bye = types.SimpleNamespace(go_away=types.SimpleNamespace(time_left="50s"))
+    g = GeminiLive(TalkSession())
+    g._chunks.append((b"\0\0", True)); g._audible = 1
+    conns = run_session(g, [[upd, bye], [audio(), msg(turn_complete=True)]])
+    assert opened[:2] == [None, "H"], f"go_away did not reopen with the handle: {opened}"
+    assert g.error is None and not conns[1].client_content, "a handle must not replay turns"
+    assert g._conn is None or g._stop
+
+    # No handle: the turns so far go back with user/model roles, turn_complete=False.
+    g2 = GeminiLive(TalkSession())
+    g2._session.turns.append({"role": "assistant", "content": "Salut"})
+    conns = run_session(g2, [[bye], []],
+                        first_turns=[{"role": "user", "content": "Bonjour"}])
+    assert conns[0].client_content == [([{"role": "user", "parts": [{"text": "Bonjour"}]},
+                                         {"role": "model", "parts": [{"text": "Salut"}]}], False)]
+
+    # A dropped socket with a handle also reopens; the first open failing raises.
+    g3 = GeminiLive(TalkSession())
+
+    class _Boom(_Fake):
+        async def receive(self):
+            raise ConnectionError("1011")
+            yield
+
+    seq = [_Boom([]), _Fake([[audio()]])]
+    seq[1].on_end = lambda: setattr(g3, "_stop", True)
+    n = {"i": 0}
+
+    class _CM3:
+        async def __aenter__(self_):
+            c = seq[min(n["i"], 1)]
+            n["i"] += 1
+            return c
+
+        async def __aexit__(self_, *a):
+            return False
+    g3._open, g3._handle_token = _CM3, "H"
+    asyncio.run(g3._session_task())
+    assert n["i"] >= 2 and g3.error is None, "a dropped connection was not resumed"
 
     # Without the SDK or the key, start() raises: the caller falls back to the cascade.
     saved = os.environ.pop("GEMINI_API_KEY", None)

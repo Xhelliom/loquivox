@@ -492,8 +492,8 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
 with a note in the bubble. **This card has no tools** (no `push_result`, no
-plugins/MCP/sources, no spoken yes), no session resumption and no companion:
-separate cards that depend on it.
+plugins/MCP/sources, no spoken yes) and no companion: separate cards that
+depend on it.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
@@ -521,6 +521,15 @@ What differs from gpt-live-1, each a reason it is not a subclass:
   description goes in through `send_client_content(turn_complete=False)` ("more
   to come": the model does not answer it), framed by `CONTEXT_FRAME`, the
   counterpart of `QUIET_CONTEXT`.
+- **Long sessions.** A connection lasts ~10 min (`go_away` first), so `_config()`
+  always asks `context_window_compression` (`sliding_window`) and
+  `session_resumption`; `_handle` keeps the last `new_handle`. On `go_away` or a
+  dropped socket `_session_task` reopens with it: microphone kept (`_conn` is
+  `None` meanwhile, blocks are skipped), playback emptied, turns flushed, one
+  `🔁 Gemini Live: reconnecting` line, at most 3 failed reopens in a row. With no
+  handle — or a #122 `session.resumed` — `_prior_turns()` replays the turns
+  through `send_client_content` (roles `user`/`model`, `turn_complete=False`).
+  Pinned by the self-check (simulated go_away, dropped socket, replay).
 - Closing is cancelling the session task (leaving the SDK's `async with` closes the
   socket): no `session.close` handshake.
 - Not verified here: an actual F4/F6 session by voice on a headset (the card's
