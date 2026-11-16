@@ -74,6 +74,12 @@ CONTEXT_FRAME: str = (
 )
 
 
+#: after a go_away, how long the current reply may finish on the old connection:
+#: ``time_left`` minus the margin, or the fallback when the server gives none
+GOAWAY_MARGIN = 3.0
+GOAWAY_FALLBACK = 8.0
+
+
 class GeminiLive(LiveAudio):
     """One spoken conversation, voiced and thought by Gemini Live."""
 
@@ -100,6 +106,7 @@ class GeminiLive(LiveAudio):
         #: latest ``session_resumption_update.new_handle``; a go_away reopens with it
         self._handle_token: Optional[str] = None
         self._goaway = False
+        self._goaway_deadline = 0.0
         self._loop = asyncio.new_event_loop()
         self._task: Optional["asyncio.Task"] = None
         self._conn = None
@@ -302,12 +309,7 @@ class GeminiLive(LiveAudio):
                         self._started.set()   # connect() returns once the setup is acknowledged
                         self._ready.set()
                         failures = 0
-                        while not self._stop and not self._goaway:
-                            # receive() ends after each turn; ask again for the next one
-                            async for message in conn.receive():
-                                self._handle(message)
-                                if self._goaway:
-                                    break
+                        await self._pump(conn)
                     why = "go_away" if self._goaway else "connection closed"
                 except asyncio.CancelledError:
                     raise
@@ -335,14 +337,48 @@ class GeminiLive(LiveAudio):
                 self.error = e
             self._ready.set()
 
+    async def _pump(self, conn) -> None:
+        """Receive until the socket ends, or — after a go_away — until the reply
+        in progress is finished and played (``_quiet``), bounded by the deadline."""
+        it = nxt = None
+        try:
+            while not self._stop:
+                if self._goaway and (self._quiet() or time.monotonic() >= self._goaway_deadline):
+                    return
+                if nxt is None:
+                    it = it or conn.receive().__aiter__()   # receive() ends after each turn
+                    nxt = asyncio.ensure_future(it.__anext__())
+                done, _ = await asyncio.wait({nxt}, timeout=0.1 if self._goaway else None)
+                if not done:
+                    continue
+                task, nxt = nxt, None
+                try:
+                    message = task.result()
+                except StopAsyncIteration:
+                    it = None
+                    continue
+                self._handle(message)
+        finally:
+            if nxt is not None:
+                nxt.cancel()
+
     def _handle(self, message) -> None:
         """Route one server message. Never raises — a session must not die on one."""
         update = getattr(message, "session_resumption_update", None)
         if update is not None and getattr(update, "new_handle", None) \
                 and getattr(update, "resumable", True) is not False:
             self._handle_token = update.new_handle
-        if getattr(message, "go_away", None) is not None:
+        away = getattr(message, "go_away", None)
+        if away is not None:
+            left = getattr(away, "time_left", None)
+            if hasattr(left, "total_seconds"):
+                left = left.total_seconds()
+            try:
+                left = float(str(left).rstrip("s")) if left is not None else GOAWAY_FALLBACK
+            except ValueError:
+                left = GOAWAY_FALLBACK
             self._goaway = True
+            self._goaway_deadline = time.monotonic() + max(left - GOAWAY_MARGIN, 0.0)
         content = getattr(message, "server_content", None)
         if content is None:
             return
@@ -486,9 +522,10 @@ if __name__ == "__main__":
 
     opened: list = []
 
-    def run_session(g, scripts, first_turns=()):
+    def run_session(g, scripts, first_turns=(), first_end=None):
         g._session.resumed = list(first_turns)
         conns = [_Fake([s]) for s in scripts]
+        conns[0].on_end = first_end
         conns[-1].on_end = lambda: setattr(g, "_stop", True)
 
         class _CM:
@@ -506,13 +543,28 @@ if __name__ == "__main__":
 
     upd = types.SimpleNamespace(session_resumption_update=types.SimpleNamespace(
         new_handle="H", resumable=True))
-    bye = types.SimpleNamespace(go_away=types.SimpleNamespace(time_left="50s"))
+    bye = types.SimpleNamespace(go_away=types.SimpleNamespace(time_left="3s"))   # deadline: now
     g = GeminiLive(TalkSession())
     g._chunks.append((b"\0\0", True)); g._audible = 1
     conns = run_session(g, [[upd, bye], [audio(), msg(turn_complete=True)]])
     assert opened[:2] == [None, "H"], f"go_away did not reopen with the handle: {opened}"
     assert g.error is None and not conns[1].client_content, "a handle must not replay turns"
     assert g._conn is None or g._stop
+
+    # go_away in the middle of a reply: the rest still lands in the buffer on the
+    # same connection, and the reopen waits for turn_complete and the playback.
+    slow = types.SimpleNamespace(go_away=types.SimpleNamespace(time_left="30s"))
+    g4 = GeminiLive(TalkSession())
+    seen: dict = {}
+
+    def _first_end():
+        seen["opened"], seen["chunks"] = len(opened), len(g4._chunks)
+        g4._chunks.clear(); g4._audible = 0   # the speakers played it all
+
+    conns = run_session(g4, [[upd, audio(), slow, audio(), msg(turn_complete=True)], []],
+                        first_end=_first_end)
+    assert seen == {"opened": 1, "chunks": 2}, f"reply cut at go_away: {seen}"
+    assert opened[:2] == [None, "H"] and g4.error is None
 
     # No handle: the turns so far go back with user/model roles, turn_complete=False.
     g2 = GeminiLive(TalkSession())
