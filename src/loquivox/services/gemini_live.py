@@ -28,8 +28,10 @@ What differs from gpt-live-1, and why this file is not a subclass of it:
 Long sessions: one connection lasts ~10 min (a ``go_away`` announces the end), so
 the context is always compressed (``sliding_window``), the last
 ``session_resumption_update`` handle is kept, and on ``go_away`` or a dropped
-socket the session reopens with it — the microphone stays open, the playback
-buffer is emptied, one line goes to the journal. Without a handle (or on a first
+socket the session reopens with it — the microphone stays open and one line goes
+to the journal. On ``go_away`` the reply in progress is finished and played on the
+old connection first (bounded by ``time_left``); the playback buffer is emptied only
+when the socket was cut. Without a handle (or on a first
 open after a companion pause, #122) the turns so far go back in through
 ``send_client_content`` with ``user``/``model`` roles and ``turn_complete=False``.
 

@@ -83,7 +83,7 @@ threading.Thread(target=play, daemon=True).start()
 threading.Thread(target=watch, daemon=True).start()
 
 BLK = 320
-queue = [(2, REMEMBER)]
+queue = [(10, REMEMBER)]   # at 2 s the server did not always hear it (no HEARD, nothing to recall)
 state = {"sig": None, "i": 0, "recalled": False, "chat_at": 60}
 def mic():
     t0 = time.monotonic(); n = 0
@@ -111,16 +111,25 @@ while t.error is None and time.monotonic() < hard:
             and time.monotonic() - ev["recalled_at"] > 25 and t._quiet():
         break
     if state["recalled"] and ev["recalled_at"] is None: ev["recalled_at"] = time.monotonic()
-    if FORCE_AT and not ev["go_away"] and time.monotonic() - T0 > FORCE_AT:
-        ev["go_away"] = time.monotonic(); ev["forced"] = True; log("FORCED go_away"); t._goaway = True
-    time.sleep(0.5)
+    # forced while the model is speaking (audio < 0.3 s old), through the real handler, with a
+    # real time_left: the "finish the reply, then reopen" path runs, not an instant reopen
+    if FORCE_AT and not ev["go_away"] and time.monotonic() - T0 > FORCE_AT \
+            and ev["audio"] and time.monotonic() - ev["audio"][-1] < 0.3 and t._audible >= 3:
+        import types
+        ev["forced"] = True; log("FORCED go_away while speaking, audible frames still queued:", t._audible)
+        real_handle(types.SimpleNamespace(go_away=types.SimpleNamespace(time_left=30), server_content=None))
+        ev["go_away"] = time.monotonic()
+    time.sleep(0.05)
 stop.set(); t.close(); time.sleep(0.5)
 
 turns = [(m["role"], m["content"]) for m in t._session.turns]
 for r, c in turns: log(r, c[:110])
 gap = ev["back"] - ev["gone"] if ev["gone"] and ev["back"] else None
 last_after = max((a for a in ev["audio"] if ev["back"] and a > ev["back"]), default=None)
-res = {"go_away_at_s": round(ev["go_away"] - T0, 1) if ev["go_away"] else None, "forced": ev.get("forced", False),
+cut = [a for a in ev["audio"] if ev["go_away"] and ev["gone"] and ev["go_away"] <= a <= ev["gone"]]
+res = {"audio_after_go_away_s": round(cut[-1] - ev["go_away"], 2) if cut else None,
+       "gone_after_go_away_s": round(ev["gone"] - ev["go_away"], 2) if ev["gone"] and ev["go_away"] else None,
+       "go_away_at_s": round(ev["go_away"] - T0, 1) if ev["go_away"] else None, "forced": ev.get("forced", False),
        "reconnect_s": round(gap, 2) if gap else None, "error": t.error,
        "recalled_cerisier": any("cerisier" in turns[i + 1][1].lower() for i, (r, c) in enumerate(turns[:-1])
                                if r == "user" and "mémoriser" in c and turns[i + 1][0] == "assistant"),
