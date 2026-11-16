@@ -492,8 +492,11 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
 with a note in the bubble. **This card has no tools** (no `push_result`, no
-plugins/MCP/sources, no spoken yes), no session resumption and no companion:
-separate cards that depend on it.
+plugins/MCP/sources, no spoken yes). The companion does open it under
+`live_provider = "google"` (`companion._converse` picks the class like
+`mode.py`; its OpenAI-only Live options — voice, delegation… — are not passed),
+so its #122 resume goes through `_prior_turns()`; its sources and plugins still
+need that card's tools.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
@@ -521,10 +524,39 @@ What differs from gpt-live-1, each a reason it is not a subclass:
   description goes in through `send_client_content(turn_complete=False)` ("more
   to come": the model does not answer it), framed by `CONTEXT_FRAME`, the
   counterpart of `QUIET_CONTEXT`.
+- **Long sessions.** A connection lasts ~10 min (`go_away` first), so `_config()`
+  always asks `context_window_compression` (`sliding_window`) and
+  `session_resumption`; `_handle` keeps the last `new_handle`. On `go_away` or a
+  dropped socket `_session_task` reopens with it: microphone kept (`_conn` is
+  `None` meanwhile, blocks are skipped), turns flushed, one
+  `🔁 Gemini Live: reconnecting` line. On `go_away` `_pump` first lets the reply in
+  progress finish and play on the old connection (`_quiet()`, bounded by
+  `_goaway_deadline` = `time_left` − `GOAWAY_MARGIN`); the playback buffer is
+  emptied only when the socket was cut (`_flush_audio`), at most 3 failed reopens in a row. With no
+  handle — or a #122 `session.resumed` — `_prior_turns()` replays the turns
+  through `send_client_content` (roles `user`/`model`, `turn_complete=False`).
+  Pinned by the self-check (simulated go_away, dropped socket, replay).
 - Closing is cancelling the session task (leaving the SDK's `async with` closes the
   socket): no `session.close` handshake.
-- Not verified here: an actual F4/F6 session by voice on a headset (the card's
-  acceptance — to be done by hand with a real key).
+- Verified for real, 2026-11-16, on the code with the finish-the-reply `go_away`
+  (a90375b and after): `python tests/bench_gemini_long.py 16 --force-at 600` (real
+  `GeminiLive`, French TTS fed as the microphone, 961 s, exit 0). Google sent **no**
+  `go_away` in 600 s with compression on, so the bench **forced** it at 605.4 s through
+  the real `_handle` (`time_left` 30 s) *while the model was speaking* (6 audible frames
+  still queued): the reconnection path, the real handle and the real server are real;
+  Google's own signal is not proven. Journal: `🔁 Gemini Live: reconnecting (go_away,
+  with handle)`. `audio_after_go_away_s` 0.05 (last audio frame received), then the 6
+  queued frames were played out on the old connection: connection gone 1.64 s after the
+  `go_away` (`gone_after_go_away_s`), back 1.45 s later (`reconnect_s`, 607.0 → 608.5 s).
+  The reply in progress was not cut (every assistant turn in the transcript is a whole
+  sentence). The first reopen was refused once (`APIError: 1008 … session is already
+  connected to an existing client`, old socket not yet released) and the retry, 1 s
+  later, went through — one failed reopen of the 3 allowed. `error` None;
+  `recalled_cerisier` True ("Tu m'as demandé de mémoriser le mot cerisier", asked at
+  638 s, the word memorised at 10 s). A first pass of the same bench had memorised at
+  2 s, which the server did not hear (no transcript, so nothing to recall): the bench
+  now says it at 10 s. Not verified: a session by voice on a headset (by hand, with a
+  real key).
 
 ### Plugins (`services/plugins.py`)
 
