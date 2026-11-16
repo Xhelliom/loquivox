@@ -532,8 +532,17 @@ What differs from gpt-live-1, each a reason it is not a subclass:
   Pinned by the self-check (simulated go_away, dropped socket, replay).
 - Closing is cancelling the session task (leaving the SDK's `async with` closes the
   socket): no `session.close` handshake.
-- Not verified here: an actual F4/F6 session by voice on a headset (the card's
-  acceptance — to be done by hand with a real key).
+- Verified for real, 2026-11-16: `python tests/bench_gemini_long.py 16 --force-at 600`
+  (real `GeminiLive`, French TTS fed as the microphone, 961 s). Google sent **no**
+  `go_away` in 600 s with compression on, so it was **forced** at 600.3 s (the real
+  reconnection path, real handle, real server; Google's own signal is not proven).
+  Reopen took 1.51 s (600.4 → 601.9 s). The journal line:
+  `🔁 Gemini Live: reconnecting (go_away, with handle)`. The first reopen was refused
+  once (`APIError: 1008 … session is already connected to an existing client`, the old
+  socket not yet released) and the retry, a second later, went through — one failed
+  reopen of the 3 allowed. After it: `error` None, and "cerisier" (memorised at 10 s) was
+  recalled correctly at 637 s. Not verified: a session by voice on a headset (by hand,
+  with a real key).
 
 ### Plugins (`services/plugins.py`)
 
