@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 2/2 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Tenir le curseur des notifications sur ts, pas sur id
 
 done · https://github.com/Xhelliom/loquivox/pull/65

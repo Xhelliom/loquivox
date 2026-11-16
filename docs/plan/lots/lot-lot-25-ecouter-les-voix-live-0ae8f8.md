@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Réglages : écouter n'importe quelle voix Live (extrait enregistré par gpt-live, gardé en cache)
 
 done · codé · https://github.com/Xhelliom/loquivox/pull/127

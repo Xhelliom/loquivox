@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Mot d'éveil sourd après une session : l'écoute s'arrête sans rien dire
 
 done · partiel · https://github.com/Xhelliom/loquivox/pull/126

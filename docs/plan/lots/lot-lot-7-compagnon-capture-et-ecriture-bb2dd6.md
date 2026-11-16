@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 2/2 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Faire écrire au compagnon le texte demandé, pas un texte générique
 
 done · https://github.com/Xhelliom/loquivox/pull/78

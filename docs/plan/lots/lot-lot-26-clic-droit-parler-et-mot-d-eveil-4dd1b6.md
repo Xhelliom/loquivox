@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Clic droit sur la bulle : ouvrir une conversation (rouge) et choisir le mot d'éveil
 
 done · codé · https://github.com/Xhelliom/loquivox/pull/128

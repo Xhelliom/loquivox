@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-13 · 5/5 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Bulle du compagnon : le clic droit propose tous les modes
 
 done · partiel · https://github.com/Xhelliom/loquivox/pull/114

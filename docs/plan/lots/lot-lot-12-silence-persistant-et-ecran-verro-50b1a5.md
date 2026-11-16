@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-15 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Garder le mode silence après un redémarrage, et passer en silence quand l ordinateur est verrouillé
 
 done · https://github.com/Xhelliom/loquivox/pull/82

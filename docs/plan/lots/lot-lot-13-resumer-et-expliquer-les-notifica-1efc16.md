@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-20 · 7/7 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Un agent backend pour les outils : il enchaîne les appels MCP, complète les arguments et relit l action avant le oui
 
 done · https://github.com/Xhelliom/loquivox/pull/88

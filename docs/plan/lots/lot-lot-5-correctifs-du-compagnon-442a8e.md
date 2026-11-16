@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 5/5 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Empêcher un bloc audio tardif de remettre la bulle en écoute
 
 done · https://github.com/Xhelliom/loquivox/pull/56

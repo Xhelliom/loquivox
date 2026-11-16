@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Baisser tous les sons sauf Loquivox quand le compagnon parle
 
 done · https://github.com/Xhelliom/loquivox/pull/73

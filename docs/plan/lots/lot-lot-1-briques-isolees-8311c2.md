@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-13 · 3/3 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Montrer ce qui a été capturé : halo bleu ou vignette
 
 done · https://github.com/Xhelliom/loquivox/pull/47

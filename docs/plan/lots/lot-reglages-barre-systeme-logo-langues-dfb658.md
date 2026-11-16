@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-15 · 4/4 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Ranger les Réglages par usage : Dictation, Conversation, Companion, Tools, Models & keys, Appearance
 
 done · https://github.com/Xhelliom/loquivox/pull/83

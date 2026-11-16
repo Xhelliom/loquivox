@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-20 · 5/5 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Réglages v2, étape 1 : corriger les six bugs de l audit, sans changer la mise en page
 
 done · https://github.com/Xhelliom/loquivox/pull/98

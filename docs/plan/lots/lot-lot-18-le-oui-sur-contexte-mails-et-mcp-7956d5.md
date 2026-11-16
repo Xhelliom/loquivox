@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 4/4 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Le oui : une action ne part jamais sur un oui antérieur à la dernière question
 
 done · codé · https://github.com/Xhelliom/loquivox/pull/117

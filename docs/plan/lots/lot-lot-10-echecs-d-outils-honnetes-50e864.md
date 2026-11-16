@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Dire honnêtement l échec d un outil, et réparer le rattrapage tool_use_failed qui refuse find_tools
 
 done · https://github.com/Xhelliom/loquivox/pull/79

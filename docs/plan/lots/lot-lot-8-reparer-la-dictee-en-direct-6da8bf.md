@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-14 · 1/1 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Réparer la dictée en direct OpenAI Realtime qui ne reçoit plus de son après la première dictée
 
 done · https://github.com/Xhelliom/loquivox/pull/75

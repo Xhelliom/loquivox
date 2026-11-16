@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 2/2 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Compagnon : fenêtre de relance locale après une session (sans mot d'éveil)
 
 done · codé · https://github.com/Xhelliom/loquivox/pull/123

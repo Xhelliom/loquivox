@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-22 · 4/4 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Compagnon : ne pas couper la conversation à 30 tours (TALK_MAX_TURNS)
 
 done · https://github.com/Xhelliom/loquivox/pull/104

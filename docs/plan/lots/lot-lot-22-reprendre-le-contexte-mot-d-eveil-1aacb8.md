@@ -6,6 +6,8 @@
 
 Terminé le 2026-11-14 · 2/2 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Mot d'éveil : tracer les quasi-détections pour comprendre un « hey jarvis » ignoré
 
 done · codé · https://github.com/Xhelliom/loquivox/pull/121

@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-22 · 4/4 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Mémoire : retenir 1 à 3 faits à la fin de chaque session
 
 done · https://github.com/Xhelliom/loquivox/pull/107

@@ -6,6 +6,8 @@
 
 Terminé le 2026-10-20 · 4/4 carte(s) faites.
 
+Consommé : tokens inconnus ; jauge de la semaine inconnu → inconnu (tout le compte, d'autres sessions comprises, pendant le lot)
+
 ## Agent : appeler l outil qui agit au lieu de demander le oui lui-même (banc à 53/67 avec Sonnet 5.5)
 
 done · https://github.com/Xhelliom/loquivox/pull/95
