@@ -116,6 +116,9 @@ class SettingsDialog:
     _realtime_model: Optional[Gtk.Entry] = None
     _realtime_voice: Optional[Gtk.ComboBoxText] = None
     _live_voice: Optional[Gtk.ComboBoxText] = None
+    _live_provider: Optional[Gtk.ComboBoxText] = None
+    _gemini_model: Optional[Gtk.Entry] = None
+    _gemini_voice: Optional[Gtk.ComboBoxText] = None
     _live_test: Optional[Gtk.Button] = None
     _live_delegation: Optional[Gtk.ComboBoxText] = None
     _live_backend: Optional[Gtk.Entry] = None
@@ -1307,7 +1310,7 @@ class SettingsDialog:
             cls._engine_combo.append(eid, _({
                 "cascade": N_("Cascade — transcribe, answer, speak"),
                 "realtime": N_("Realtime — speech to speech (OpenAI)"),
-                "live": N_("Live — OpenAI voice, delegated thinking"),
+                "live": N_("Live — server voice (OpenAI or Google)"),
             }.get(eid, eid.title())))
         cls._engine_combo.set_active_id(
             config_module.CFG.TALK_ENGINE if config_module.CFG.TALK_ENGINE in config_module.CFG.TALK_ENGINES else "cascade")
@@ -1330,6 +1333,34 @@ class SettingsDialog:
             _("Preview this voice (same voice, spoken by the TTS model)"))
         cls._realtime_test.connect("clicked", cls._on_test_realtime_voice)
         cls._field(body, _("Realtime voice"), cls._realtime_voice, labels, extra=cls._realtime_test)
+
+        # Who holds a Live conversation: the same engine, two servers.
+        cls._live_provider = Gtk.ComboBoxText()
+        for pid in config_module.CFG.TALK_LIVE_PROVIDERS:
+            cls._live_provider.append(pid, {"openai": "OpenAI (gpt-live)",
+                                            "google": "Google (Gemini Live)"}.get(pid, pid))
+        cls._live_provider.set_active_id(
+            config_module.CFG.TALK_LIVE_PROVIDER
+            if config_module.CFG.TALK_LIVE_PROVIDER in config_module.CFG.TALK_LIVE_PROVIDERS
+            else "openai")
+        cls._live_provider.set_tooltip_text(
+            _("Google needs the gemini extra (pip install 'loquivox[gemini]') and a "
+              "Gemini key (Models & keys → Keys). Without them the conversation "
+              "falls back to the standard one."))
+        cls._field(body, _("Live provider"), cls._live_provider, labels)
+
+        cls._gemini_model = Gtk.Entry()     # ids change often — free text
+        cls._gemini_model.set_text(config_module.CFG.TALK_GEMINI_MODEL)
+        cls._field(body, _("Google model"), cls._gemini_model, labels)
+
+        cls._gemini_voice = Gtk.ComboBoxText()
+        for vid in config_module.CFG.TALK_GEMINI_VOICES:
+            cls._gemini_voice.append(vid, vid)
+        cls._gemini_voice.set_active_id(
+            config_module.CFG.TALK_GEMINI_VOICE
+            if config_module.CFG.TALK_GEMINI_VOICE in config_module.CFG.TALK_GEMINI_VOICES
+            else config_module.CFG.TALK_GEMINI_VOICES[0])
+        cls._field(body, _("Google voice"), cls._gemini_voice, labels)
 
         cls._live_voice = Gtk.ComboBoxText()
         for vid in config_module.CFG.TALK_LIVE_VOICES:
@@ -1386,6 +1417,7 @@ class SettingsDialog:
         # this tab too, so it follows the same combo (see _build_talk_section).
         cls._engine_combo.connect("changed", cls._on_talk_engine_changed)
         cls._live_delegation.connect("changed", cls._on_talk_engine_changed)
+        cls._live_provider.connect("changed", cls._on_talk_engine_changed)
         cls._on_talk_engine_changed(cls._engine_combo)
 
         engine_status = Gtk.Label()
@@ -1412,7 +1444,10 @@ class SettingsDialog:
                   if cls._engine_combo is not None else "cascade")
         # The companion has its own Live fields (Companion tab): these are F4/F6's.
         live = engine == "live"
-        to_openai = (cls._live_delegation is not None
+        google = (cls._live_provider is not None
+                  and cls._live_provider.get_active_id() == "google")
+        openai_live = live and not google
+        to_openai = (openai_live and cls._live_delegation is not None
                      and resolve_delegation(cls._live_delegation.get_active_id())
                      == "responses")
         for widget, on in (
@@ -1421,9 +1456,12 @@ class SettingsDialog:
                 (cls._realtime_model, engine == "realtime"),
                 (cls._realtime_voice, engine == "realtime"),
                 (cls._realtime_test, engine == "realtime"),
-                (cls._live_voice, live),
-                (cls._live_test, live),
-                (cls._live_delegation, live),
+                (cls._live_provider, live),
+                (cls._gemini_model, live and google),
+                (cls._gemini_voice, live and google),
+                (cls._live_voice, openai_live),
+                (cls._live_test, openai_live),
+                (cls._live_delegation, openai_live),
                 (cls._live_backend, live and to_openai),
                 (cls._live_web_search, live and to_openai),
         ):
@@ -1528,6 +1566,9 @@ class SettingsDialog:
                 "realtime_model": cls._realtime_model.get_text().strip(),
                 "realtime_voice": cls._realtime_voice.get_active_id() or "marin",
                 "live_voice": cls._live_voice.get_active_id() or "marin",
+                "live_provider": cls._live_provider.get_active_id() or "openai",
+                "gemini_model": cls._gemini_model.get_text().strip(),
+                "gemini_voice": cls._gemini_voice.get_active_id() or "Kore",
                 "live_delegation": cls._live_delegation.get_active_id() or "auto",
                 "live_backend_model": cls._live_backend.get_text().strip(),
                 "live_web_search": cls._live_web_search.get_active_id() or "plugin",

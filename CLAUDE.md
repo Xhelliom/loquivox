@@ -92,6 +92,8 @@ services/         audio (record+transcribe), ai (chat+vision), tts (engine per
                   Piper local via tts_piper.py), mcp_tools (MCP client: servers → plugins), realtime_talk (speech-to-speech
                   talk mode), live_talk (gpt-live-1: speech in/out, thinking
                   delegated back to our own model),
+                  gemini_live (Gemini Live, same surface, no delegation) +
+                  live_audio (mic gate / jitter buffer / turns they share),
                   clipboard, image, postprocess (LLM refinement of dictation),
                   talk (conversation → one text), vad (energy trigger),
                   turn_detector (Smart Turn v3 semantic end-of-turn)
@@ -477,6 +479,52 @@ Cost is two meters, not one: $0.05/min of voice **plus** whatever the backend
 spends. Sessions have a duration limit (`session.closed` with
 `reason: "expired"`) and there is no resumption — a replacement session must be
 given its context back.
+
+### The Gemini provider of the Live engine (`services/gemini_live.py`)
+
+`[talk] live_provider = "google"` (Settings → Conversation → Engine) swaps the
+class `_talk_conversation` hands to `_talk_converse_server`: `GeminiLive` instead
+of `LiveTalk`, same public surface, same loop. It is **not** a fourth engine and
+the core has no `if google` beyond that choice. Optional extra `.[gemini]`
+(`google-genai`, imported lazily), key `GEMINI_API_KEY` (Settings → Models &
+keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
+(`gemini-3.8-live`; the `-extended-thinking` model refuses to open without
+`gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
+refused connection: `start()` raises and the loop falls back to the cascade,
+with a note in the bubble. **This card has no tools** (no `push_result`, no
+plugins/MCP/sources, no spoken yes), no session resumption and no companion:
+separate cards that depend on it.
+
+`services/live_audio.py` is what the two Live engines share, as a mixin
+(`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
+their tests pin): the microphone gate (`_mic_chunks`: **zeros, never nothing**),
+the jitter buffer (`_on_play`, `PREBUFFER`), and how a turn lands in `TalkSession`
+(`_on_delta`, `_close_turn`, `_on_user_said`…). `IN_RATE` / `OUT_RATE` differ
+(Gemini: 16 kHz in, 24 kHz out). The mic is opened before the speakers
+(`await_headset_mic`), as everywhere.
+
+What differs from gpt-live-1, each a reason it is not a subclass:
+
+- **The server says what OpenAI's never does.** `turn_complete` closes both
+  turns (so `tick()` is empty — no `TALK_LIVE_TURN_GAP`, no `SILENT_PEAK`, no
+  `AUDIO_IDLE`); `interrupted` empties the playback buffer (no `EchoGate` guess
+  — the gate is still in front of the microphone on speakers, or the server
+  hears its own voice); a reply is over when its turn is complete **and** the
+  buffer is empty (`_quiet()`), bounded by `SPEECH_TAIL_TIMEOUT`. The user's
+  turn is recorded the moment the first audio or output transcript of the reply
+  arrives, so `turns` stays in order.
+- **`HttpOptions(api_version="v1beta")`, always.** The SDK opens `v1` by default
+  and the Live endpoint answers 404 there. Pinned by the module's self-check
+  (`python src/loquivox/services/gemini_live.py`, which also pins zeros on a held
+  microphone and `interrupted` emptying the buffer).
+- **Context is a message.** `system_instruction` is fixed at open; the screen
+  description goes in through `send_client_content(turn_complete=False)` ("more
+  to come": the model does not answer it), framed by `CONTEXT_FRAME`, the
+  counterpart of `QUIET_CONTEXT`.
+- Closing is cancelling the session task (leaving the SDK's `async with` closes the
+  socket): no `session.close` handshake.
+- Not verified here: an actual F4/F6 session by voice on a headset (the card's
+  acceptance — to be done by hand with a real key).
 
 ### Plugins (`services/plugins.py`)
 
