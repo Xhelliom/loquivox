@@ -492,8 +492,11 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
 with a note in the bubble. **This card has no tools** (no `push_result`, no
-plugins/MCP/sources, no spoken yes) and no companion: separate cards that
-depend on it.
+plugins/MCP/sources, no spoken yes). The companion does open it under
+`live_provider = "google"` (`companion._converse` picks the class like
+`mode.py`; its OpenAI-only Live options — voice, delegation… — are not passed),
+so its #122 resume goes through `_prior_turns()`; its sources and plugins still
+need that card's tools.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
