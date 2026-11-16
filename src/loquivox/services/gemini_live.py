@@ -312,10 +312,14 @@ class GeminiLive(LiveAudio):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    why = f"{type(e).__name__}"
+                    why = f"{type(e).__name__}: {e}"[:120]
                     failures += 1
                     if self._stop or not self._started.is_set() or failures > 3:
                         raise
+                    if failures > 1 and self._handle_token:
+                        # a handle the server refuses (1007…): fall back to replaying the turns
+                        print("⚠️  Gemini Live: handle refused, replaying the turns instead")
+                        self._handle_token = None
                 if self._stop:
                     break
                 self._conn = None   # the microphone callback idles until the new one
