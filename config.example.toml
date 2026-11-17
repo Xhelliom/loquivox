@@ -191,6 +191,9 @@ bubble_style = "goutte"
 # [talk] value of the same name (live_voice, live_delegation, live_backend_model,
 # live_web_search, instructions) applies. Uncomment one to give the companion a
 # value of its own. Settings → Companion → Voice & thinking.
+# live_provider = "google"            # openai | google (Gemini Live)
+# gemini_model = "gemini-3.8-live"    # only with provider "google"
+# gemini_voice = "Kore"
 # live_voice = "marin"
 # live_delegation = "auto"            # auto | client | responses
 # live_backend_model = "gpt-5.6-luna" # only with delegation "responses"
@@ -378,6 +381,11 @@ gemini_thinking = "low"
 # Who thinks under Google: "consult" (one async function, our own agent loop and
 # MCP tools) or "native" (each plugin declared as a Gemini function, fixed at open).
 gemini_delegation = "consult"
+# Under Google, S / "regarde ça" send this many JPEG frames of the active window
+# (1 per second) instead of a description; never a standing stream. 0 = describe.
+gemini_look_sec = 3
+# Tokens per frame, fixed at open: "low" (70), "medium", "high" (280, dense text).
+gemini_resolution = "low"
 # One of the 30 prebuilt voices (Kore, Puck, Charon, Zephyr, Fenrir…). The language
 # is picked by the model; it cannot be forced.
 gemini_voice = "Kore"

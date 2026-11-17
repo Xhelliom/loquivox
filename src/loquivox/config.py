@@ -384,6 +384,12 @@ class Config:
     #: TALK_GEMINI_THINKING.
     TALK_GEMINI_MODEL: str = "gemini-3.8-live"
     TALK_GEMINI_THINKING: str = "low"
+    #: Google only: S / "regarde ça" send this many JPEG frames of the active
+    #: window, one per second, instead of a description. Never a standing stream
+    #: (on 3.8 every frame enters the context). 0 = fall back to the description.
+    TALK_GEMINI_LOOK_SEC: int = 3
+    #: tokens per frame: "low" 70, "medium", "high" 280 (dense text). Fixed at open.
+    TALK_GEMINI_RESOLUTION: str = "low"
     TALK_GEMINI_VOICE: str = "Kore"
     #: Who thinks under Google, which has no delegation: ``consult`` = one async
     #: function that runs our own agent loop (``TalkSession.consult``, MCP
@@ -494,6 +500,9 @@ class Config:
     #: (``TALK_LIVE_*`` / ``TALK_INSTRUCTIONS``); a value here wins for the
     #: companion only. Read by ``handlers/companion.py`` when a session opens.
     COMPANION_LIVE_VOICE: str = ""
+    COMPANION_LIVE_PROVIDER: str = ""      # "" = like [talk] live_provider
+    COMPANION_GEMINI_MODEL: str = ""
+    COMPANION_GEMINI_VOICE: str = ""
     COMPANION_LIVE_DELEGATION: str = ""
     COMPANION_LIVE_BACKEND_MODEL: str = ""
     COMPANION_LIVE_WEB_SEARCH: str = ""
@@ -985,6 +994,13 @@ def _build_config() -> Config:
         overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
     if str(companion.get("live_voice", "")).strip():
         overrides["COMPANION_LIVE_VOICE"] = str(companion["live_voice"]).strip().lower()
+    if str(companion.get("live_provider", "")).strip().lower() in base.TALK_LIVE_PROVIDERS:
+        overrides["COMPANION_LIVE_PROVIDER"] = str(companion["live_provider"]).strip().lower()
+    if str(companion.get("gemini_model", "")).strip():
+        overrides["COMPANION_GEMINI_MODEL"] = str(companion["gemini_model"]).strip()
+    for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it
+        if v.lower() == str(companion.get("gemini_voice", "")).strip().lower():
+            overrides["COMPANION_GEMINI_VOICE"] = v
     if str(companion.get("live_delegation", "")).strip().lower() in base.TALK_LIVE_DELEGATIONS:
         overrides["COMPANION_LIVE_DELEGATION"] = str(companion["live_delegation"]).strip().lower()
     if str(companion.get("live_backend_model", "")).strip():
@@ -1104,6 +1120,10 @@ def _build_config() -> Config:
         overrides["TALK_GEMINI_DELEGATION"] = str(talk["gemini_delegation"]).strip().lower()
     if str(talk.get("gemini_thinking", "")).strip().lower() in ("low", "medium", "high"):
         overrides["TALK_GEMINI_THINKING"] = str(talk["gemini_thinking"]).strip().lower()
+    if isinstance(talk.get("gemini_look_sec"), int) and 0 <= talk["gemini_look_sec"] <= 30:
+        overrides["TALK_GEMINI_LOOK_SEC"] = talk["gemini_look_sec"]
+    if str(talk.get("gemini_resolution", "")).strip().lower() in ("low", "medium", "high"):
+        overrides["TALK_GEMINI_RESOLUTION"] = str(talk["gemini_resolution"]).strip().lower()
     for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it
         if v.lower() == str(talk.get("gemini_voice", "")).strip().lower():
             overrides["TALK_GEMINI_VOICE"] = v

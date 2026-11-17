@@ -350,34 +350,40 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
   - [x] Self-check du module (python src/loquivox/services/gemini_live.py) : zéros envoyés micro retenu, v1beta, interrupted vide le tampon
   - [x] CLAUDE.md (section du moteur Gemini, différences avec gpt-live-1) et config.example.toml à jour
 
-### Lot — Lot 29 — Gemini Live : compagnon et écran (planned, one at a time)
+### Lot — Lot 29 — Gemini Live : compagnon et écran (launched, one at a time)
 
-- **Réglages : écouter les 30 voix Gemini avant de choisir (▶, comme pour gpt-live)** — backlog
+- **Réglages : écouter les 30 voix Gemini avant de choisir (▶, comme pour gpt-live)** — done
 
   L'opérateur trouve les voix Gemini un peu moins naturelles que celles d'OpenAI et veut les écouter avant de choisir. Reprendre le mécanisme de #127 (settings_dialog._on_test_live_voice : une courte session qui dit une phrase, gardée en cache wav) pour le fournisseur Google : une courte session gemini-3.8-live avec la voix choisie dit une phrase en français, mise en cache par voix et par modèle, rejouée ensuite sans appel. Même bouton ▶ à côté du champ voix Google (Conversation et Compagnon). Sans clé ou sans bibliothèque : message clair, pas de plantage.
 
-  - [ ] ▶ à côté de la voix Google fait entendre la voix choisie en français
-  - [ ] Le deuxième ▶ sur la même voix rejoue le cache sans appel réseau
-  - [ ] Sans GEMINI_API_KEY, un message le dit
-- **Gemini Live : l'écran à la demande (images à 1/s au lieu de la description)** — backlog
+  - [x] ▶ à côté de la voix Google fait entendre la voix choisie en français
+  - [x] Le deuxième ▶ sur la même voix rejoue le cache sans appel réseau
+  - [x] Sans GEMINI_API_KEY, un message le dit
+- **Gemini Live : l'écran à la demande (images à 1/s au lieu de la description)** — done
   - after: Gemini Live : sessions longues (GoAway, reprise transparente, compression, reprise #122)
 
   Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Sous Google seulement : S / « regarde ça » / look_at_screen envoient quelques images JPEG de la fenêtre active (take_window_screenshot) par send_realtime_input(video=…), 1 image/s pendant [talk] gemini_look_sec (défaut 3), media_resolution réglable (basse 70 jetons, haute 280 pour du texte), au lieu d'une description par le modèle de vision. Jamais de flux permanent : sur 3.8 chaque image entre dans le contexte. Dépend des sessions longues : audio+vidéo sans compression = 2 min. Mesurer et noter le coût d'une session de 5 min avec et sans regard.
 
-  - [ ] « regarde ça » sous Google : la réponse décrit correctement la fenêtre (essai réel)
-  - [ ] Aucune image envoyée hors de ces moments (journal)
-  - [ ] Coût mesuré d'une session de 5 min avec et sans regard, noté dans CLAUDE.md
-- **Le compagnon sur Gemini Live** — backlog
+  - [x] « regarde ça » sous Google : la réponse décrit correctement la fenêtre (essai réel)
+  - [x] Aucune image envoyée hors de ces moments (journal)
+  - [x] Coût mesuré d'une session de 5 min avec et sans regard, noté dans CLAUDE.md
+- **Le compagnon sur Gemini Live** — done
   - after: Gemini Live : outils, délégation « consult » et plugins/MCP/sources
 
   Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Dépend aussi de la carte « sessions longues » (le compagnon tient des sessions longues). [companion] live_provider (vide = celui de la conversation, comme live_options()), modèle et voix Google propres au compagnon dans Réglages › Compagnon › Voix et réflexion. companion._converse choisit GeminiLive ; prefix (fin du mot d'éveil), on_level (niveaux de la bulle), fenêtre de relance, sources en veille et digest marchent sans branche propre. Vérifier que l'audio proactif de 3.8 (le modèle peut se taire face à un bruit) ne casse pas l'ouverture par une source, où personne n'a parlé.
 
-  - [ ] Mot d'éveil → session compagnon sous Google, interruption au casque, fin par la phrase d'arrêt (essai réel)
-  - [ ] Une notification du board ouvre une session et est dite sous Google
-  - [ ] Réglages › Compagnon : fournisseur, modèle, voix Google ; vide = valeur de la conversation
+  - [x] Mot d'éveil → session compagnon sous Google, interruption au casque, fin par la phrase d'arrêt (essai réel)
+  - [x] Une notification du board ouvre une session et est dite sous Google
+  - [x] Réglages › Compagnon : fournisseur, modèle, voix Google ; vide = valeur de la conversation
 
 ### Not in a lot
 
+- **Gemini Live : fermer l'ancienne connexion avant de rouvrir (erreur 1008 à la reconnexion)** — backlog
+
+  Banc réel du 16/11 (tests/bench_gemini_long.py 16 --force-at 600) : la reconnexion a réussi en 1,43 s, mais le premier essai a été refusé par Google « APIError 1008 BidiGenerateContent session is already connected to an existing client » : services/gemini_live.py rouvre avec le handle avant que l'ancienne WebSocket soit fermée. Fermer (et attendre) l'ancienne connexion avant d'ouvrir la nouvelle, sans allonger le blanc audible.
+
+  - [ ] Le banc bench_gemini_long.py --force-at 600 ne montre qu'une ligne « reconnecting » par reconnexion, sans 1008
+  - [ ] reconnect_s ne dépasse pas celui d'avant (≈1,4 s)
 - **Live : calibrer le filtre anti-écho quand le son sort, pas à la réception** — backlog
 
   Sous le moteur Live, `EchoGate` lance sa calibration (600 ms) dès que `_quiet()` passe à faux, c'est-à-dire à la RÉCEPTION de la première trame audible (`LiveTalk._mic_chunks`). Depuis la PR #43, le tampon anti-gigue (`PREBUFFER` = 200 ms) ne joue cette trame qu'environ 200 ms plus tard. La fenêtre mesure donc en partie autre chose que l'écho : la fin de phrase de l'utilisateur, un bruit.

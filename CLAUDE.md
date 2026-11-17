@@ -492,9 +492,12 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
 with a note in the bubble. Tools are in (below, and the Plugins section). The
-companion does open it under `live_provider = "google"` (`companion._converse`
-picks the class like `mode.py`; its OpenAI-only Live options — voice, delegation… —
-are not passed), so its #122 resume goes through `_prior_turns()`.
+companion does open it under Google: `companion._converse` picks the class
+through `companion.live_provider()` (`[companion] live_provider`, empty = `[talk]`)
+and hands `GeminiLive` its model and voice through `gemini_options()`
+(`[companion] gemini_model` / `gemini_voice`, empty = `[talk]`); its OpenAI-only
+Live options — voice, delegation… — are not passed, so its #122 resume goes
+through `_prior_turns()`.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
@@ -555,6 +558,31 @@ What differs from gpt-live-1, each a reason it is not a subclass:
   2 s, which the server did not hear (no transcript, so nothing to recall): the bench
   now says it at 10 s. Not verified: a session by voice on a headset (by hand, with a
   real key).
+- **The screen on request (frames, not a description).** Under Google, S and the
+  look tool (`services/look.py`) no longer capture → describe: `GeminiLive.look()`
+  sends `[talk] gemini_look_sec` (3) JPEG frames of the active window, one a
+  second (the API's ceiling), through `send_realtime_input(video=…)`, then stops.
+  `TalkSession.live_look` is how both callers reach it (set at `start()`, cleared
+  at `close()`); with it unset, or `gemini_look_sec = 0`, the description path is
+  unchanged. Never a standing stream — on 3.8 every frame enters the context —
+  and no image leaves outside those two moments (the journal prints each
+  `👁️  Frame i/n sent`). `[talk] gemini_resolution` (`low` 70 tokens / `medium` /
+  `high` 280, for dense text) is the session's `media_resolution`, fixed at open.
+  The initial capture at the session's opening (`TALK_SCREENSHOT`) is still a
+  description. Settings has no field for the two keys yet (config.toml).
+  `tests/test_gemini_look.py` (offline); `tests/bench_gemini_look.py [--look]` is
+  the real one. **Real trial 17/11/2026**: « regarde ça » (3 frames of the real
+  window, 190 KB JPEG each, framed by `take_window_screenshot`) then « décris-moi ce
+  que tu vois » — the reply named the Collie Board CrewDesign project page, which
+  is what the frame shows. **Cost, two 5 min sessions, same cadence** (one spoken
+  sentence a minute, `gemini-3.8-live`, `low`): without a look the last turn's
+  prompt was 1971 tokens (942 text, 929 audio, no image); with one look it was 2847
+  (1085 text, 1329 audio, **272 image** ≈ 90 a frame at `low`), the difference of text and
+  audio being the extra question and answer. At the published prices, 3 s of video is
+  ≈ $0.0001 and 272 tokens of context ≈ $0.0002 per look, against ≈ $0.025 of audio
+  input for 5 min of listening (`proactive audio` always on): a look is noise in the
+  bill, a *standing* stream is what would not be (1 image/s = 70–280 tokens/s in the
+  context). Not measured: `high`, and a look repeated every minute.
 
 ### Plugins (`services/plugins.py`)
 
@@ -1250,8 +1278,9 @@ through the same `redact()`.
   **Everything that sets the companion is on the Companion tab** (the silence key
   aside, which is cited): *General* (wake word, click, style), *Voice & thinking*
   (its own Live voice, delegation, backend model, web search and instructions,
-  `[companion] live_voice` / `live_delegation` / `live_backend_model` /
-  `live_web_search` / `instructions`, empty = "like the conversation", i.e. the
+  `[companion] live_provider` / `gemini_model` / `gemini_voice` (the last two
+  greyed unless the provider is Google) / `live_voice` / `live_delegation` /
+  `live_backend_model` / `live_web_search` / `instructions`, empty = "like the conversation", i.e. the
   `[talk]` value; resolved when the session opens by `companion.live_options()` /
   `companion.instructions()`, passed to `LiveTalk(...)` and
   `TalkSession(instructions=)`), *Presence* (enabled, lock, idle, delay before

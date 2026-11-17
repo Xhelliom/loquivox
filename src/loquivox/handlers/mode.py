@@ -721,7 +721,9 @@ class ModeHandler:
                     getattr(talk, "push_tools", lambda: False)()   # Realtime only
                     talk.push_result()
                     if pressed == "screen":
-                        ModeHandler._talk_look(session)
+                        # Google: frames of the window; else (or no frames) a description
+                        if not (getattr(session, "live_look", None) and session.live_look()):
+                            ModeHandler._talk_look(session)
                         continue  # not a turn boundary — keep listening
                     if pressed == "select":
                         ModeHandler._talk_take_selection(session)

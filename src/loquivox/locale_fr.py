@@ -446,6 +446,8 @@ CATALOG = {
         "Modèle Realtime",
     "Hear this voice: the first time, Live records it saying a line":
         "Écouter cette voix : la première fois, Live l'enregistre en train de dire une phrase",
+    "Hear this voice: the first time, Gemini Live records it saying a line":
+        "Écouter cette voix : la première fois, Gemini Live l'enregistre en train de dire une phrase",
     "<small>⏳ Recording the voice…</small>":
         "<small>⏳ Enregistrement de la voix…</small>",
     "Preview this voice (same voice, spoken by the TTS model)":
@@ -831,6 +833,9 @@ CATALOG = {
     "Live provider": "Fournisseur Live",
     "Google model": "Modèle Google",
     "Google voice": "Voix Google",
+    "Companion's Live provider": "Fournisseur Live du compagnon",
+    "Companion's Google model": "Modèle Google du compagnon",
+    "Companion's Google voice": "Voix Google du compagnon",
     "Google needs the gemini extra (pip install 'loquivox[gemini]') and a "
     "Gemini key (Models & keys → Keys). Without them the conversation "
     "falls back to the standard one.":

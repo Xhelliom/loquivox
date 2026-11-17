@@ -88,7 +88,61 @@ def test_keys_load_from_toml():
     print("✓ [companion] live_* and instructions are read from config.toml")
 
 
+def test_google_provider_follows_the_conversation_unless_its_own():
+    base = _cfg(TALK_LIVE_PROVIDER="google", TALK_GEMINI_MODEL="talk-m", TALK_GEMINI_VOICE="Puck")
+    assert comp.live_provider(base) == "google"
+    assert comp.gemini_options(base) == {"model": "talk-m", "voice": "Puck"}
+    own = _cfg(TALK_LIVE_PROVIDER="google", COMPANION_LIVE_PROVIDER="openai")
+    assert comp.live_provider(own) == "openai"
+    own = _cfg(COMPANION_LIVE_PROVIDER="google", COMPANION_GEMINI_MODEL="comp-m",
+               COMPANION_GEMINI_VOICE="Kore", TALK_GEMINI_VOICE="Puck")
+    assert comp.live_provider(own) == "google"
+    assert comp.gemini_options(own) == {"model": "comp-m", "voice": "Kore"}
+    print("✓ companion provider/model/voice: empty follows [talk], its own wins")
+
+
+def test_converse_opens_the_provider_the_companion_chose():
+    from loquivox.handlers.mode import ModeHandler
+    seen = {}
+
+    def fake(session, keys, engine, name):
+        t = engine(session)
+        seen.update(cls=type(t).__name__, name=name, model=getattr(t, "_model", None),
+                    voice=t._voice, prefix=t.prefix)
+    real_cfg, real_fn = config_module.CFG, ModeHandler._talk_converse_server
+    config_module.CFG = _cfg(TALK_LIVE_PROVIDER="openai", COMPANION_LIVE_PROVIDER="google",
+                             COMPANION_GEMINI_MODEL="comp-m", COMPANION_GEMINI_VOICE="Kore")
+    ModeHandler._talk_converse_server = staticmethod(fake)
+    try:
+        comp._converse(TalkSession(write=False), prefix=[1, 2])
+    finally:
+        config_module.CFG, ModeHandler._talk_converse_server = real_cfg, real_fn
+    assert seen == {"cls": "GeminiLive", "name": "Gemini Live", "model": "comp-m",
+                    "voice": "Kore", "prefix": [1, 2]}, seen
+    print("✓ _converse opens GeminiLive with the companion's model and voice")
+
+
+def test_google_keys_load_from_toml():
+    toml = ('[companion]\nlive_provider = "Google"\ngemini_model = "m"\n'
+            'gemini_voice = "puck"\n')
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / "config.toml"
+        p.write_text(toml)
+        real = config_module.CONFIG_FILE
+        config_module.CONFIG_FILE = p
+        try:
+            cfg = config_module._build_config()
+        finally:
+            config_module.CONFIG_FILE = real
+    assert (cfg.COMPANION_LIVE_PROVIDER, cfg.COMPANION_GEMINI_MODEL,
+            cfg.COMPANION_GEMINI_VOICE) == ("google", "m", "Puck")
+    print("✓ [companion] live_provider/gemini_model/gemini_voice are read")
+
+
 if __name__ == "__main__":
+    test_google_provider_follows_the_conversation_unless_its_own()
+    test_converse_opens_the_provider_the_companion_chose()
+    test_google_keys_load_from_toml()
     test_unset_follows_the_conversation()
     test_its_own_value_wins()
     test_keys_load_from_toml()

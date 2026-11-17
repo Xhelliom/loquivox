@@ -29,11 +29,22 @@ def _run(arguments: Dict[str, Any]) -> str:
     session = STATE.talk_session
     if session is None:
         return ""
+    # Google sees the window itself, a few frames: no vision-model description.
+    if getattr(session, "live_look", None) and session.live_look():
+        return FRAMES
     return ModeHandler._talk_screen_worker(session) or ""
+
+
+FRAMES = "FRAMES"   # Gemini Live: the window arrives as video, not as text
 
 
 def result_message(arguments: Dict[str, Any], result: str) -> Dict[str, str]:
     """What the new capture shows, as a system message for either engine."""
+    if result == FRAMES:
+        return {"role": "system", "content": (
+            "The user's active window is being streamed to you now as a few video "
+            "frames, one per second. Look at them, then answer what they asked "
+            "about THIS window in a sentence or two.")}
     return {"role": "system", "content": (
         "SCREEN RE-CAPTURED just now at the user's request. This replaces any "
         f"earlier description of their screen:\n---\n{result}\n---\n"

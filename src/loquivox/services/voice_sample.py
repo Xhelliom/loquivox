@@ -187,3 +187,63 @@ def voice_sample(voice: str, lang: str) -> Tuple[Path, bool]:
     _write_atomic(path, wav_bytes(trim_silence(_record(voice, lang))))
     print(f"🔊 voice sample {voice}: recorded in {time.monotonic() - started:.1f}s")
     return path, False
+
+
+def gemini_line() -> str:
+    return SAMPLES["fr"][1]
+
+
+async def gemini_converse(session) -> np.ndarray:
+    """Ask an open Gemini Live session to say the French line; return its 24 kHz PCM."""
+    await session.send_client_content(
+        turns={"role": "user", "parts": [{"text": "Bonjour ! Peux-tu te présenter en une phrase ?"}]},
+        turn_complete=True)
+    out = []
+    async for m in session.receive():
+        content = getattr(m, "server_content", None)
+        for part in (getattr(getattr(content, "model_turn", None), "parts", None) or []):
+            data = getattr(getattr(part, "inline_data", None), "data", None)
+            if data:
+                out.append(bytes(data))
+        if getattr(content, "turn_complete", False):
+            break
+    if not out:
+        raise RuntimeError("Gemini Live said nothing with this voice")
+    return np.frombuffer(b"".join(out), dtype=np.int16)
+
+
+def _record_gemini(voice: str, model: str) -> np.ndarray:
+    from loquivox.services.gemini_live import GeminiLive
+
+    try:
+        from google import genai
+    except ImportError as e:
+        raise RuntimeError("google-genai is not installed — pip install 'loquivox[gemini]'") from e
+    if not os.environ.get("GEMINI_API_KEY"):
+        raise RuntimeError("GEMINI_API_KEY is not set — add it in Settings → Models & keys → Keys")
+
+    async def go() -> np.ndarray:
+        client = genai.Client(**GeminiLive._client_kwargs())
+        config = {
+            "response_modalities": ["AUDIO"],
+            "system_instruction": (
+                "You are letting the user hear your voice. When asked to introduce "
+                "yourself, answer with exactly this line, in French, adding nothing, "
+                "in a natural and warm tone: " + gemini_line()),
+            "speech_config": {"voice_config": {"prebuilt_voice_config": {"voice_name": voice}}},
+        }
+        async with client.aio.live.connect(model=model, config=config) as session:
+            return await asyncio.wait_for(gemini_converse(session), DEADLINE_SECONDS)
+
+    return asyncio.run(go())
+
+
+def gemini_voice_sample(voice: str, model: str) -> Tuple[Path, bool]:
+    """Like ``voice_sample`` for Google: cached per voice AND model, French. Blocking."""
+    path = sample_path("gemini-{}-{}".format(model.replace(".", "_"), voice), "fr")
+    if path.exists():
+        print(f"🔊 gemini voice sample {voice}: cache")
+        return path, True
+    _write_atomic(path, wav_bytes(trim_silence(_record_gemini(voice, model))))
+    print(f"🔊 gemini voice sample {voice}: recorded")
+    return path, False
