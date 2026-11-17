@@ -583,6 +583,12 @@ def test_live_fields_are_the_engines_and_the_companion_has_its_own():
     cls._comp_delegation.set_active_id("responses")
     assert cls._comp_backend.get_sensitive() and cls._comp_web.get_sensitive()
     cls._comp_delegation.set_active_id("")
+    # Google's model and voice are live only when the effective provider is Google
+    cls._comp_provider.set_active_id("openai")
+    assert not cls._comp_gemini_model.get_sensitive()
+    cls._comp_provider.set_active_id("google")
+    assert cls._comp_gemini_model.get_sensitive() and cls._comp_gemini_voice.get_sensitive()
+    cls._comp_provider.set_active_id("")
     print("✓ Live fields: the conversation's follow its engine, the companion's are its own")
 
 
@@ -596,6 +602,9 @@ def test_every_companion_setting_is_on_the_companion_tab():
             where[id(w)] = (tab, sub)
     for name, sub in (("_comp_wake", "General"), ("_comp_click", "General"),
                       ("_comp_style", "General"), ("_comp_size", "General"), ("_comp_resume", "General"), ("_comp_voice", "Voice & thinking"),
+                      ("_comp_provider", "Voice & thinking"),
+                      ("_comp_gemini_model", "Voice & thinking"),
+                      ("_comp_gemini_voice", "Voice & thinking"),
                       ("_comp_delegation", "Voice & thinking"),
                       ("_comp_backend", "Voice & thinking"),
                       ("_comp_web", "Voice & thinking"),

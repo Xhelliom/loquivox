@@ -494,6 +494,9 @@ class Config:
     #: (``TALK_LIVE_*`` / ``TALK_INSTRUCTIONS``); a value here wins for the
     #: companion only. Read by ``handlers/companion.py`` when a session opens.
     COMPANION_LIVE_VOICE: str = ""
+    COMPANION_LIVE_PROVIDER: str = ""      # "" = like [talk] live_provider
+    COMPANION_GEMINI_MODEL: str = ""
+    COMPANION_GEMINI_VOICE: str = ""
     COMPANION_LIVE_DELEGATION: str = ""
     COMPANION_LIVE_BACKEND_MODEL: str = ""
     COMPANION_LIVE_WEB_SEARCH: str = ""
@@ -985,6 +988,13 @@ def _build_config() -> Config:
         overrides["COMPANION_BUBBLE_STYLE"] = companion["bubble_style"]
     if str(companion.get("live_voice", "")).strip():
         overrides["COMPANION_LIVE_VOICE"] = str(companion["live_voice"]).strip().lower()
+    if str(companion.get("live_provider", "")).strip().lower() in base.TALK_LIVE_PROVIDERS:
+        overrides["COMPANION_LIVE_PROVIDER"] = str(companion["live_provider"]).strip().lower()
+    if str(companion.get("gemini_model", "")).strip():
+        overrides["COMPANION_GEMINI_MODEL"] = str(companion["gemini_model"]).strip()
+    for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it
+        if v.lower() == str(companion.get("gemini_voice", "")).strip().lower():
+            overrides["COMPANION_GEMINI_VOICE"] = v
     if str(companion.get("live_delegation", "")).strip().lower() in base.TALK_LIVE_DELEGATIONS:
         overrides["COMPANION_LIVE_DELEGATION"] = str(companion["live_delegation"]).strip().lower()
     if str(companion.get("live_backend_model", "")).strip():

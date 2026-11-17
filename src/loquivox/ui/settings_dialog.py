@@ -119,6 +119,9 @@ class SettingsDialog:
     _live_provider: Optional[Gtk.ComboBoxText] = None
     _gemini_model: Optional[Gtk.Entry] = None
     _gemini_voice: Optional[Gtk.ComboBoxText] = None
+    _comp_provider: Optional[Gtk.ComboBoxText] = None
+    _comp_gemini_model: Optional[Gtk.Entry] = None
+    _comp_gemini_voice: Optional[Gtk.ComboBoxText] = None
     _live_test: Optional[Gtk.Button] = None
     _live_delegation: Optional[Gtk.ComboBoxText] = None
     _live_backend: Optional[Gtk.Entry] = None
@@ -751,6 +754,20 @@ class SettingsDialog:
             box.set_active_id(current if current in options else "")
             return box
 
+        cls._comp_provider = combo(
+            cfg.TALK_LIVE_PROVIDERS, cfg.COMPANION_LIVE_PROVIDER,
+            lambda p: {"openai": "OpenAI (gpt-live)", "google": "Google (Gemini Live)"}.get(p, p))
+        cls._field(body, _("Companion's Live provider"), cls._comp_provider, labels)
+
+        cls._comp_gemini_model = Gtk.Entry()     # ids change often — free text
+        cls._comp_gemini_model.set_text(cfg.COMPANION_GEMINI_MODEL)
+        cls._comp_gemini_model.set_placeholder_text(_(cls._LIKE_TALK))
+        cls._field(body, _("Companion's Google model"), cls._comp_gemini_model, labels)
+
+        cls._comp_gemini_voice = combo(cfg.TALK_GEMINI_VOICES, cfg.COMPANION_GEMINI_VOICE,
+                                       lambda v: v)
+        cls._field(body, _("Companion's Google voice"), cls._comp_gemini_voice, labels)
+
         cls._comp_voice = combo(cfg.TALK_LIVE_VOICES, cfg.COMPANION_LIVE_VOICE,
                                 lambda v: v.title())
         comp_test = Gtk.Button(label=_("▶ Test"))
@@ -778,6 +795,9 @@ class SettingsDialog:
 
         # The backend fields mean something only when the thinking goes to OpenAI.
         cls._comp_delegation.connect("changed", lambda _w: cls._update_companion_live())
+        cls._comp_provider.connect("changed", lambda _w: cls._update_companion_live())
+        if cls._live_provider is not None:
+            cls._live_provider.connect("changed", lambda _w: cls._update_companion_live())
         if cls._live_delegation is not None:
             cls._live_delegation.connect("changed", lambda _w: cls._update_companion_live())
         cls._update_companion_live()
@@ -810,6 +830,12 @@ class SettingsDialog:
         on = resolve_delegation(own or shared) == "responses"
         for w in (cls._comp_backend, cls._comp_web):
             w.set_sensitive(on)
+        provider = (cls._comp_provider.get_active_id()
+                    or (cls._live_provider.get_active_id() if cls._live_provider is not None
+                        else config_module.CFG.TALK_LIVE_PROVIDER))
+        for w in (cls._comp_gemini_model, cls._comp_gemini_voice):
+            w.set_sensitive(provider == "google")
+        # ponytail: OpenAI's voice/delegation fields stay editable under Google, harmless
 
     @classmethod
     def _build_companion_presence(cls, vbox: Gtk.Box, labels: Gtk.SizeGroup) -> None:
@@ -1057,6 +1083,9 @@ class SettingsDialog:
                 "source_silence": cls._comp_source_silence.get_value(),
                 "resume_min": cls._comp_resume.get_value(),
                 "follow_up_sec": cls._comp_follow.get_value(),
+                "live_provider": cls._comp_provider.get_active_id() or "",
+                "gemini_model": cls._comp_gemini_model.get_text().strip(),
+                "gemini_voice": cls._comp_gemini_voice.get_active_id() or "",
                 "live_voice": cls._comp_voice.get_active_id() or "",
                 "live_delegation": cls._comp_delegation.get_active_id() or "",
                 "live_backend_model": cls._comp_backend.get_text().strip(),
