@@ -136,6 +136,9 @@ html, body {{
   opacity: 0;
   transform: translate3d(0, 15px, 0);
 }}
+/* Already on screen before this reload: the page is replaced at every message,
+   and replaying the fade-in for the whole conversation made it blink. */
+.message-wrapper.seen {{ animation: none; opacity: 1; transform: none; }}
 .message-wrapper.user {{ justify-content: flex-end; }}
 .message-wrapper.assistant {{ justify-content: flex-start; }}
 
@@ -562,6 +565,7 @@ class ChatOverlay(Gtk.Window):
         self._height = TALK_MIN_HEIGHT
         self._wanted_height = TALK_MIN_HEIGHT
         self._resize_timer: Optional[int] = None
+        self._shown = 0            # messages already on the page (see update_content)
         self._ready = False        # the page is loaded and can run JS
         self._pending_js: Optional[str] = None
         self._setup_window()
@@ -880,8 +884,13 @@ class ChatOverlay(Gtk.Window):
         """Update chat content with markdown rendering."""
         html_messages = []
 
+        # The page is replaced at every message: only what is new since the last
+        # render may fade in, or the whole conversation blinks at each turn.
+        shown = self._shown if len(messages) >= self._shown else 0
+        self._shown = len(messages)
+
         for idx, msg in enumerate(messages):
-            role = msg["role"]
+            role = msg["role"] + (" seen" if idx < shown else "")
             rendered = self._render_markdown(msg["text"])
             # Pass index, not ID, for robust handling
             copy_btn = f'<button class="copy-btn" onclick="copyText(this, {idx})">{SVG_COPY_ICON}</button>'
