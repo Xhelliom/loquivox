@@ -291,6 +291,8 @@ class TalkSession:
         self.context: Optional[str] = None
         #: one line: the focused window and the project it belongs to (no model, no capture)
         self.work: Optional[str] = None
+        #: set by GeminiLive while open: sends the window as frames (S, the look tool)
+        self.live_look = None
 
     def set_context(self, description: str) -> None:
         """Attach the screen description the capture worker came back with."""

@@ -384,6 +384,12 @@ class Config:
     #: TALK_GEMINI_THINKING.
     TALK_GEMINI_MODEL: str = "gemini-3.8-live"
     TALK_GEMINI_THINKING: str = "low"
+    #: Google only: S / "regarde ça" send this many JPEG frames of the active
+    #: window, one per second, instead of a description. Never a standing stream
+    #: (on 3.8 every frame enters the context). 0 = fall back to the description.
+    TALK_GEMINI_LOOK_SEC: int = 3
+    #: tokens per frame: "low" 70, "medium", "high" 280 (dense text). Fixed at open.
+    TALK_GEMINI_RESOLUTION: str = "low"
     TALK_GEMINI_VOICE: str = "Kore"
     #: Who thinks under Google, which has no delegation: ``consult`` = one async
     #: function that runs our own agent loop (``TalkSession.consult``, MCP
@@ -1104,6 +1110,10 @@ def _build_config() -> Config:
         overrides["TALK_GEMINI_DELEGATION"] = str(talk["gemini_delegation"]).strip().lower()
     if str(talk.get("gemini_thinking", "")).strip().lower() in ("low", "medium", "high"):
         overrides["TALK_GEMINI_THINKING"] = str(talk["gemini_thinking"]).strip().lower()
+    if isinstance(talk.get("gemini_look_sec"), int) and 0 <= talk["gemini_look_sec"] <= 30:
+        overrides["TALK_GEMINI_LOOK_SEC"] = talk["gemini_look_sec"]
+    if str(talk.get("gemini_resolution", "")).strip().lower() in ("low", "medium", "high"):
+        overrides["TALK_GEMINI_RESOLUTION"] = str(talk["gemini_resolution"]).strip().lower()
     for v in base.TALK_GEMINI_VOICES:   # case-insensitive, stored as Google spells it
         if v.lower() == str(talk.get("gemini_voice", "")).strip().lower():
             overrides["TALK_GEMINI_VOICE"] = v
