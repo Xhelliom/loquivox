@@ -142,6 +142,9 @@ class GeminiLive(LiveAudio):
         #: latest ``session_resumption_update.new_handle``; a go_away reopens with it
         self._handle_token: Optional[str] = None
         self._goaway = False
+        #: seconds between two frames of a look (1 s: the API's ceiling)
+        self._look_gap = 1.0
+        self._looking = 0   # generation: a newer look stops the older one
         self._goaway_deadline = 0.0
         self._loop = asyncio.new_event_loop()
         self._task: Optional["asyncio.Task"] = None
@@ -178,6 +181,7 @@ class GeminiLive(LiveAudio):
             raise self.error
         if self._conn is None or not self._started.is_set():
             raise RuntimeError("Gemini Live session did not start in time")
+        self._session.live_look = self.look   # S and the look tool send frames here
         media.mic_opened(duck=not STATE.companion_session)
         self._mic = sd.InputStream(samplerate=IN_RATE, channels=1, dtype="float32",
                                    device=resolve_input_device(), callback=self._on_audio)
@@ -195,6 +199,7 @@ class GeminiLive(LiveAudio):
     def close(self) -> None:
         """Stop everything. Safe to call twice."""
         self._stop = True
+        self._session.live_look = None
         self._echo_report()
         self._flush_turns()
         if self._mic is not None:
@@ -273,6 +278,65 @@ class GeminiLive(LiveAudio):
             print(f"⚠️  {plugin.name} result not sent to the Gemini session: {e}")
             return False
         return True
+
+    # --- the screen, on request ----------------------------------------------
+
+    def look(self) -> bool:
+        """
+        Send ``TALK_GEMINI_LOOK_SEC`` frames of the active window, one a second,
+        then stop. The only way an image ever leaves: S, or the model asking to look.
+        False when there is nothing to send them to (the caller describes instead).
+        """
+        n = config_module.CFG.TALK_GEMINI_LOOK_SEC
+        if self._conn is None or self._stop or n <= 0:
+            return False
+        self._looking += 1
+        threading.Thread(target=self._send_frames, args=(self._looking, n), daemon=True).start()
+        return True
+
+    def _send_frames(self, gen: int, n: int) -> None:
+        for i in range(n):
+            if gen != self._looking or self._stop or self._conn is None:
+                return
+            frame = self._frame()
+            if frame is not None:
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        self._conn.send_realtime_input(video=frame), self._loop)
+                    print(f"👁️  Frame {i + 1}/{n} sent to the Gemini session "
+                          f"({len(frame['data']) // 1024} KB)")
+                except Exception as e:
+                    print(f"⚠️  Frame not sent to the Gemini session: {e}")
+                    return
+            if i < n - 1:
+                time.sleep(self._look_gap)
+
+    @staticmethod
+    def _frame() -> Optional[Dict[str, Any]]:
+        """The active window as one JPEG blob, None when it could not be captured."""
+        import base64
+
+        cfg = config_module.CFG
+        from loquivox.services.image import ImageService
+        png = ImageService.take_screenshot(
+            path=f"{cfg.TEMP_SCREEN_PATH}.look.png", region=cfg.TALK_SCREENSHOT_REGION,
+            cursor_px=cfg.TALK_SCREENSHOT_CURSOR_PX, max_px=cfg.TALK_SCREENSHOT_MAX_PX)
+        if not png:
+            return None
+        data = base64.b64decode(png)
+        try:
+            import gi
+            gi.require_version("GdkPixbuf", "2.0")
+            from gi.repository import GdkPixbuf
+            loader = GdkPixbuf.PixbufLoader()
+            loader.write(data)
+            loader.close()
+            ok, jpeg = loader.get_pixbuf().save_to_bufferv("jpeg", ["quality"], ["80"])
+            if ok:
+                return {"data": bytes(jpeg), "mime_type": "image/jpeg"}
+        except Exception as e:
+            print(f"⚠️  Could not encode the frame as JPEG ({e}) — sending the PNG")
+        return {"data": data, "mime_type": "image/png"}
 
     # --- function calls ------------------------------------------------------
 
@@ -392,6 +456,7 @@ class GeminiLive(LiveAudio):
             + (CONSULT_CLAUSE if self._delegation == "consult" else ""),
             "speech_config": {"voice_config": {"prebuilt_voice_config": {
                 "voice_name": self._voice}}},
+            "media_resolution": "MEDIA_RESOLUTION_" + config_module.CFG.TALK_GEMINI_RESOLUTION.upper(),
             "input_audio_transcription": {},
             "output_audio_transcription": {},
             # the context is trimmed instead of ending the session (15 min → unlimited)
