@@ -495,9 +495,16 @@ function copyCode(btn) {
 // A message appended to the page that is already up (talk mode): what was in
 // the live node is that very message, already on screen, so it must not fade
 // in a second time.
-function appendMessages(html) {
+// `drop` messages were trimmed off the front (CHAT_MESSAGE_LIMIT): remove them
+// and renumber the copy buttons, whose index is the message's position.
+function appendMessages(html, drop) {
   const live = document.getElementById('live');
   if (!live) return;
+  for (let i = 0; i < (drop || 0); i++) {
+    const first = document.querySelector('.message-wrapper');
+    if (first) first.remove();
+  }
+  document.querySelectorAll('.message-wrapper .copy-btn').forEach((b, i) => b.setAttribute('onclick', `copyText(this, ${i})`));
   const t = document.createElement('template');
   t.innerHTML = html;
   const was = live.firstElementChild;
@@ -908,7 +915,12 @@ class ChatOverlay(Gtk.Window):
 
         # The page is replaced at every message: only what is new since the last
         # render may fade in, or the whole conversation blinks at each turn.
-        shown = self._shown if len(messages) >= self._shown else 0
+        sent = [(m["role"], m["text"]) for m in messages]
+        # Messages still at the head of the list: the whole previous page, or
+        # its tail once ChatManager trimmed k messages off the front.
+        drop, keep = next(((k, len(self._sent) - k) for k in range(len(self._sent) + 1)
+                           if sent[:len(self._sent) - k] == self._sent[k:]), (0, 0))
+        shown = keep or (self._shown if len(messages) >= self._shown else 0)
         self._shown = len(messages)
 
         for idx, msg in enumerate(messages):
@@ -970,14 +982,12 @@ class ChatOverlay(Gtk.Window):
         # replacing it, or every message restarts the page's animations (the
         # flicker). Anything else on the page changing (hints, bar, status,
         # scheme) or a message rewritten in place falls back to a full reload.
-        sent = [(m["role"], m["text"]) for m in messages]
         bar = self._talk_bar()
         sig = (pin_hint, bar, status_text, STATE.color_scheme, self.talk)
-        if (self.talk and self._ready and sig == self._sig and 0 < len(self._sent) < len(sent)
-                and sent[:len(self._sent)] == self._sent):
-            fresh = "".join(html_messages[len(self._sent):])
+        if (self.talk and self._ready and sig == self._sig and 0 < keep < len(sent)):
+            fresh = "".join(html_messages[keep:])
             self._sent = sent
-            self._run_js(f"appendMessages({json.dumps(fresh)});")
+            self._run_js(f"appendMessages({json.dumps(fresh)}, {drop});")
             return
         self._sig, self._sent = sig, sent
 

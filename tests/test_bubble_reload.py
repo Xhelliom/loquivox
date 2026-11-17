@@ -85,8 +85,27 @@ def test_talk_appends_without_reloading():
     print("✓ en talk, un message ajouté est injecté sans recharger la page")
 
 
+def test_trimmed_conversation_still_appends():
+    cls, o, pages = _overlay()
+    o.talk = True
+    kb = types.ModuleType("loquivox.handlers.keyboard")
+    kb.KeyboardHandler = types.SimpleNamespace(talk_hints=lambda: [])
+    sys.modules["loquivox.handlers.keyboard"] = kb
+    msgs = [{"role": "user" if i % 2 == 0 else "assistant", "text": f"m{i}"} for i in range(20)]
+    cls.update_content(o, msgs)
+    for i in range(20, 24):  # past CHAT_MESSAGE_LIMIT: one in, one trimmed off the front
+        o._ready = True
+        msgs = msgs[1:] + [{"role": "user" if i % 2 == 0 else "assistant", "text": f"m{i}"}]
+        cls.update_content(o, msgs)
+    assert len(pages) == 1 and len(o.js) == 4, (len(pages), o.js)
+    assert o.js[-1].endswith(", 1);") and "seen" not in o.js[-1], o.js[-1]
+    assert "copyText(this, 19)" in o.js[-1]
+    print("✓ au-delà de la limite, les messages sont injectés (aucun load_html)")
+
+
 if __name__ == "__main__":
     test_only_new_messages_animate()
     test_cleared_conversation_animates_again()
     test_css_has_a_static_state()
     test_talk_appends_without_reloading()
+    test_trimmed_conversation_still_appends()
