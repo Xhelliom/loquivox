@@ -94,6 +94,18 @@ def live_options(cfg=None) -> dict:
     }
 
 
+def live_provider(cfg=None) -> str:
+    cfg = cfg or config_module.CFG
+    return cfg.COMPANION_LIVE_PROVIDER or cfg.TALK_LIVE_PROVIDER
+
+
+def gemini_options(cfg=None) -> dict:
+    """Google's model and voice for the companion: its own, else the conversation's."""
+    cfg = cfg or config_module.CFG
+    return {"model": cfg.COMPANION_GEMINI_MODEL or cfg.TALK_GEMINI_MODEL,
+            "voice": cfg.COMPANION_GEMINI_VOICE or cfg.TALK_GEMINI_VOICE}
+
+
 def instructions(cfg=None) -> str:
     cfg = cfg or config_module.CFG
     return cfg.COMPANION_INSTRUCTIONS.strip() or cfg.TALK_INSTRUCTIONS
@@ -102,15 +114,15 @@ def instructions(cfg=None) -> str:
 def _converse(session, prefix=()) -> None:
     from loquivox.handlers.mode import ModeHandler
 
-    google = config_module.CFG.TALK_LIVE_PROVIDER == "google"
+    google = live_provider() == "google"
     if google:
         from loquivox.services.gemini_live import GeminiLive as Engine
     else:
         from loquivox.services.live_talk import LiveTalk as Engine
 
     def engine(s):
-        # Live options are OpenAI's (voice name, delegation…): Gemini has its own voice
-        talk = Engine(s) if google else Engine(s, **live_options())
+        # Live options are OpenAI's (voice name, delegation…): Gemini has its own
+        talk = Engine(s, **(gemini_options() if google else live_options()))
         talk.prefix = list(prefix)
         if _companion is not None:
             talk.on_level = _companion.on_level
