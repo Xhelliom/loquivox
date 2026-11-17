@@ -148,6 +148,44 @@ def test_voice_name_cannot_escape_the_cache():
     raise AssertionError("a path was accepted as a voice name")
 
 
+def test_gemini_sample_cache_per_voice_and_model_and_no_key_message():
+    calls = []
+    real, vs._record_gemini = vs._record_gemini, lambda v, m: calls.append((v, m)) or np.full(4800, 3000, dtype=np.int16)
+    try:
+        p1, c1 = vs.gemini_voice_sample("Kore", "gemini-3.8-live")
+        p2, c2 = vs.gemini_voice_sample("Kore", "gemini-3.8-live")
+        p3, _c = vs.gemini_voice_sample("Kore", "autre-modele")
+    finally:
+        vs._record_gemini = real
+    assert (c1, c2) == (False, True) and p1 == p2 and p1 != p3
+    assert calls == [("Kore", "gemini-3.8-live"), ("Kore", "autre-modele")]
+    import os
+    os.environ.pop("GEMINI_API_KEY", None)
+    try:
+        vs.gemini_voice_sample("Puck", "gemini-3.8-live")
+    except RuntimeError as e:
+        assert "GEMINI_API_KEY" in str(e) or "google-genai" in str(e), e
+    else:
+        raise AssertionError("no error without a key")
+
+
+def test_gemini_converse_collects_the_audio_until_turn_complete():
+    audio = NS(inline_data=NS(data=b"\x01\x02" * 100))
+    msgs = [NS(server_content=NS(model_turn=NS(parts=[audio]), turn_complete=False)),
+            NS(server_content=NS(model_turn=None, turn_complete=True))]
+    sent = []
+
+    async def send(**kw):
+        sent.append(kw)
+
+    async def receive():
+        for m in msgs:
+            yield m
+
+    pcm = asyncio.run(vs.gemini_converse(NS(send_client_content=send, receive=receive)))
+    assert pcm.size == 100 and sent and sent[0]["turn_complete"] is True
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

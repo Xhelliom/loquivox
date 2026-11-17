@@ -446,6 +446,8 @@ CATALOG = {
         "Modèle Realtime",
     "Hear this voice: the first time, Live records it saying a line":
         "Écouter cette voix : la première fois, Live l'enregistre en train de dire une phrase",
+    "Hear this voice: the first time, Gemini Live records it saying a line":
+        "Écouter cette voix : la première fois, Gemini Live l'enregistre en train de dire une phrase",
     "<small>⏳ Recording the voice…</small>":
         "<small>⏳ Enregistrement de la voix…</small>",
     "Preview this voice (same voice, spoken by the TTS model)":

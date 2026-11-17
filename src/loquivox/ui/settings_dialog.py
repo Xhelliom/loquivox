@@ -1360,7 +1360,11 @@ class SettingsDialog:
             config_module.CFG.TALK_GEMINI_VOICE
             if config_module.CFG.TALK_GEMINI_VOICE in config_module.CFG.TALK_GEMINI_VOICES
             else config_module.CFG.TALK_GEMINI_VOICES[0])
-        cls._field(body, _("Google voice"), cls._gemini_voice, labels)
+        gemini_test = Gtk.Button(label=_("▶ Test"))
+        gemini_test.set_tooltip_text(
+            _("Hear this voice: the first time, Gemini Live records it saying a line"))
+        gemini_test.connect("clicked", cls._on_test_gemini_voice)
+        cls._field(body, _("Google voice"), cls._gemini_voice, labels, extra=gemini_test)
 
         cls._live_voice = Gtk.ComboBoxText()
         for vid in config_module.CFG.TALK_LIVE_VOICES:
@@ -1512,6 +1516,12 @@ class SettingsDialog:
         cls._play_voice_sample(btn, cls._live_voice.get_active_id() or "", cls._engine_status)
 
     @classmethod
+    def _on_test_gemini_voice(cls, btn: Gtk.Button) -> None:
+        model = cls._gemini_model.get_text().strip() or config_module.CFG.TALK_GEMINI_MODEL
+        voice = cls._gemini_voice.get_active_id() or "Kore"
+        cls._play_voice_sample(btn, voice, cls._engine_status, model=model)
+
+    @classmethod
     def _on_test_comp_voice(cls, btn: Gtk.Button) -> None:
         # Empty = "like the conversation": that one is the voice to hear.
         voice = (cls._comp_voice.get_active_id() or cls._live_voice.get_active_id()
@@ -1519,7 +1529,8 @@ class SettingsDialog:
         cls._play_voice_sample(btn, voice, cls._comp_status)
 
     @classmethod
-    def _play_voice_sample(cls, btn: Gtk.Button, voice: str, status: Gtk.Label) -> None:
+    def _play_voice_sample(cls, btn: Gtk.Button, voice: str, status: Gtk.Label,
+                           model: str = "") -> None:
         """
         Record (first time) and play one Live voice, off the GTK thread.
 
@@ -1539,7 +1550,8 @@ class SettingsDialog:
 
                 import numpy as np
                 import sounddevice as sd
-                path, _cached = voice_sample.voice_sample(voice, current_language())
+                path, _cached = (voice_sample.gemini_voice_sample(voice, model) if model
+                                 else voice_sample.voice_sample(voice, current_language()))
                 with wave.open(str(path)) as w:
                     pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
                     rate = w.getframerate()
