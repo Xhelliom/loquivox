@@ -23,11 +23,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 def _overlay():
     from loquivox.ui.chat_overlay import ChatOverlay
 
-    pages = []
+    pages, js = [], []
     fake = types.SimpleNamespace(
-        talk=False, _shown=0, _ready=True, _pending_js=None,
+        talk=False, _shown=0, _sig=None, _sent=[], _ready=True, _pending_js=None,
+        _run_js=lambda script: js.append(script),
         webview=types.SimpleNamespace(load_html=lambda html, base: pages.append(html)),
         _talk_bar=lambda: "", _render_markdown=ChatOverlay._render_markdown)
+    fake.js = js
     return ChatOverlay, fake, pages
 
 
@@ -63,7 +65,28 @@ def test_css_has_a_static_state():
     print("✓ la feuille de style connaît .seen")
 
 
+def test_talk_appends_without_reloading():
+    cls, o, pages = _overlay()
+    o.talk = True
+    kb = types.ModuleType("loquivox.handlers.keyboard")  # the real one pulls in the audio/AI stack
+    kb.KeyboardHandler = types.SimpleNamespace(talk_hints=lambda: [])
+    sys.modules["loquivox.handlers.keyboard"] = kb
+    msgs = [{"role": "user", "text": "a"}]
+    cls.update_content(o, msgs)
+    assert len(pages) == 1
+    o._ready = True  # what load-changed FINISHED does
+    msgs.append({"role": "assistant", "text": "b"})
+    cls.update_content(o, msgs)
+    assert len(pages) == 1 and len(o.js) == 1 and "appendMessages" in o.js[0], (len(pages), o.js)
+    msgs[0] = {"role": "user", "text": "changed"}
+    o._ready = True
+    cls.update_content(o, msgs)
+    assert len(pages) == 2, "un message réécrit recharge la page"
+    print("✓ en talk, un message ajouté est injecté sans recharger la page")
+
+
 if __name__ == "__main__":
     test_only_new_messages_animate()
     test_cleared_conversation_animates_again()
     test_css_has_a_static_state()
+    test_talk_appends_without_reloading()
