@@ -57,7 +57,7 @@ import numpy as np
 
 import loquivox.config as config_module
 from loquivox.i18n import _
-from loquivox.services import media
+from loquivox.services import mcp_tools, media
 from loquivox.services.live_audio import SPEECH_TAIL_TIMEOUT, LiveAudio  # noqa: F401
 from loquivox.state import STATE
 from loquivox.transcription.streaming import float32_to_pcm16
@@ -90,6 +90,13 @@ CONSULT_CLAUSE: str = (
     "\n\nFor anything beyond chatting — facts to look up, tools, actions, long "
     "reasoning — call " + CONSULT_TOOL + " instead of guessing, and never say that "
     "something is done unless its answer says so.")
+
+
+#: after a question an acting tool is held on
+HELD_HINT: str = (
+    "\n[Nothing has been done yet. Ask the user this question out loud, then "
+    "STOP and wait for their spoken answer. Do not call " + CONSULT_TOOL +
+    " again until they have answered.]")
 
 
 class GeminiLive(LiveAudio):
@@ -261,8 +268,17 @@ class GeminiLive(LiveAudio):
     def _call(self, call) -> None:
         """One function call, on its own thread: nothing blocks the session's loop."""
         name, args = getattr(call, "name", ""), dict(getattr(call, "args", None) or {})
+        scheduling = "WHEN_IDLE"
+        # shortcut: no wait for a transcription still arriving (live_talk's
+        # _settle); what is already heard is recorded, as the yes counts on it.
+        self._close_turn("user")
         try:
-            if self._delegation == "consult":
+            if self._delegation == "consult" and mcp_tools.awaiting(self._session):
+                # A question is already out and nobody has answered it: asking
+                # again would only repeat it (measured: the voice model re-called
+                # ten times a second). Say nothing, do nothing, wait.
+                output, scheduling = "Still waiting for the user's answer. Do nothing.", "SILENT"
+            elif self._delegation == "consult":
                 output = self._consult() if name == CONSULT_TOOL else "Error: unknown tool."
             else:
                 desk = self._session.desks.get(name)
@@ -285,7 +301,7 @@ class GeminiLive(LiveAudio):
             asyncio.run_coroutine_threadsafe(self._conn.send_tool_response(
                 function_responses=[{"id": getattr(call, "id", None), "name": name,
                                      "response": {"output": output},
-                                     "scheduling": "WHEN_IDLE"}]), self._loop)
+                                     "scheduling": scheduling}]), self._loop)
         except Exception as e:
             print(f"⚠️  Call {name} result not sent to the Gemini session: {e}")
 
@@ -293,13 +309,14 @@ class GeminiLive(LiveAudio):
         """Our agent loop over the conversation so far; its answer is the call's."""
         from loquivox.managers.chat import ChatManager
 
-        # shortcut: no wait for a transcription still arriving (live_talk's
-        # _settle); turn_complete usually lands first. Upgrade if a request is lost.
-        self._close_turn("user")
         ChatManager.add_message("note", _("🧠 Thinking…"))
         started = time.time()
         answer = self._session.consult()
         print(f"🧠 Consult ({time.time() - started:.1f}s): '{answer}'")
+        if answer and mcp_tools.awaiting(self._session):
+            # Measured: told only the question, the voice model — which had just
+            # heard a yes — called again at once, ten times a second, instead of asking.
+            answer += HELD_HINT
         return answer or ("The assistant could not answer that request. Say so "
                           "plainly rather than guessing, and carry on.")
 
