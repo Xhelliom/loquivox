@@ -228,6 +228,15 @@ class Plugin:
         return {"type": "function", "name": self.name,
                 "description": self.description, "parameters": self.parameters}
 
+    @property
+    def gemini_tool(self) -> Dict[str, Any]:
+        """…and Gemini Live as a function declaration (async: the voice keeps talking)."""
+        decl: Dict[str, Any] = {"name": self.name, "description": self.description,
+                                "behavior": "NON_BLOCKING"}
+        if self.parameters.get("properties"):   # an empty schema is refused
+            decl["parameters_json_schema"] = self.parameters
+        return decl
+
 
 def register(plugin: Plugin) -> None:
     """Add a plugin to the registry. Called at import by each plugin module."""
@@ -514,6 +523,12 @@ class Desks:
     @property
     def realtime_tools(self) -> List[Dict[str, Any]]:
         return [d.plugin.realtime_tool for d in self._offered()]
+
+    @property
+    def gemini_tools(self) -> List[Dict[str, Any]]:
+        """The same list as Gemini function declarations (one ``tools`` entry)."""
+        decls = [d.plugin.gemini_tool for d in self._offered()]
+        return [{"function_declarations": decls}] if decls else []
 
     def realtime_tools_except(self, native: Tuple[str, ...]) -> List[Dict[str, Any]]:
         """
