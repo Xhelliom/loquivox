@@ -416,19 +416,22 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
 
 Plus besoin du mot d'éveil : il comprend seul qu'on s'adresse à lui, sans se déclencher en réunion ou au téléphone.
 
-### Cards
+### Lot — Lot 31 — Relance jugée par le modèle (launched, one at a time)
 
-- **Relance sans mot d'éveil : remplacer la liste de mots par un jugement du modèle** — backlog
+- **Relance sans mot d'éveil : remplacer la liste de mots par un jugement du modèle** — done
 
   La fenêtre de relance (#123, `follow_up_sec`) est une bonne idée mais son juge est une liste de mots codée en dur (`follow_up_verdict` dans handlers/companion.py : 2e personne, phrase qui commence par « et »/« est »/un mot interrogatif, un impératif d'une liste, ou un mot de 4+ lettres repris de l'échange). Trop large : « et du coup on mange quoi ? » dit à quelqu'un d'autre rouvre une session payante. Coupée chez l'opérateur le 14/11 (follow_up_sec = 0) en attendant.
   
   À faire : garder la transcription locale (whisper.cpp, rien ne part dans le cloud avant la décision) et le cadre (fenêtre, micro occupé, phrase d'arrêt), mais remplacer la liste par UN jugement du modèle, sur le slot du juge de mémoire (`AIService.judge_target()`, comme memory._ask) : on lui donne les 2-3 derniers échanges et la phrase, il répond oui/non + une raison courte. Inspiré de ~/git/perso/full-duplex-meetings (config.rs, section « Quand parler » : on lui parle quand on lui pose une question, qu'on le prend comme interlocuteur, qu'on poursuit l'échange qu'il a commencé ; quelqu'un se tourne vers une autre personne → non ; dans le doute, non). Erreur ou délai > 1,5 s = non. Le texte de la phrase ne part au modèle que si l'opérateur l'accepte : case dans Compagnon › Présence, qui explique que la phrase transcrite localement est envoyée au modèle du juge. Journal : décision + raison, jamais le texte. Banc : un jeu d'une vingtaine de phrases étiquetées (suites réelles vs phrases à un tiers, en français) dans tests/, avec un mode sans réseau (juge factice) pour le self-check et un mode réel pour mesurer précision / faux positifs du modèle ; la liste de mots reste en repli uniquement si le juge est indisponible, ou est supprimée si le banc montre qu'elle n'apporte rien.
 
-  - [ ] Le juge est le modèle (slot du juge), la liste de mots n'est plus la décision
-  - [ ] « et du coup on mange quoi ? » dit à un tiers après une session ne rouvre rien ; « et pour demain ? » en suite de la conversation rouvre (banc)
-  - [ ] Banc de phrases étiquetées : résultat réel chiffré dans le bilan (faux positifs ≤ 1/20)
-  - [ ] Consentement explicite dans Compagnon › Présence avant d'envoyer la phrase au modèle
-  - [ ] Journal sans texte ; test_presence, test_i18n, test_settings_layout passent
+  - [x] Le juge est le modèle (slot du juge), la liste de mots n'est plus la décision
+  - [x] « et du coup on mange quoi ? » dit à un tiers après une session ne rouvre rien ; « et pour demain ? » en suite de la conversation rouvre (banc)
+  - [x] Banc de phrases étiquetées : résultat réel chiffré dans le bilan (faux positifs ≤ 1/20)
+  - [x] Consentement explicite dans Compagnon › Présence avant d'envoyer la phrase au modèle
+  - [x] Journal sans texte ; test_presence, test_i18n, test_settings_layout passent
+
+### Not in a lot
+
 - **Compagnon : se réveiller sur son nom n'importe où dans la phrase (transcription locale, option)** — backlog
 
   Suite de docs/explorations/2026-10-27-ecoute-et-mot-d-eveil.md, Q1 étape 2. **Après** la carte « fenêtre de relance locale » (même chemin de transcription), et **seulement si l'opérateur accepte** une transcription locale permanente (question ouverte du rapport).

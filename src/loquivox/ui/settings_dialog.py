@@ -867,9 +867,17 @@ class SettingsDialog:
         cls._comp_follow.set_value(cfg.COMPANION_FOLLOW_UP_SEC)
         cls._comp_follow.set_tooltip_text(
             _("After a conversation, what you say within this many seconds is "
-              "judged on this computer; if it is for the companion, it listens "
+              "transcribed on this computer; if it is for the companion, it listens "
               "again without the wake word · 0 = off"))
         cls._field(body, _("Follow-up window (s)"), cls._comp_follow, labels)
+        cls._comp_follow_judge = Gtk.CheckButton(
+            label=_("Let the model judge the phrase (it is sent to it)"))
+        cls._comp_follow_judge.set_active(bool(cfg.COMPANION_FOLLOW_UP_JUDGE))
+        cls._comp_follow_judge.set_tooltip_text(
+            _("The phrase, transcribed on this computer, is sent to the memory judge's "
+              "model, which says whether it is for the companion. Off: nothing is sent "
+              "and the follow-up window never reopens a conversation."))
+        cls._field(body, _("Follow-up judge"), cls._comp_follow_judge, labels)
 
         cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "
                         "(<i>Companion</i>, F7 by default); it applies right away."))
@@ -1083,6 +1091,7 @@ class SettingsDialog:
                 "source_silence": cls._comp_source_silence.get_value(),
                 "resume_min": cls._comp_resume.get_value(),
                 "follow_up_sec": cls._comp_follow.get_value(),
+                "follow_up_judge": cls._comp_follow_judge.get_active(),
                 "live_provider": cls._comp_provider.get_active_id() or "",
                 "gemini_model": cls._comp_gemini_model.get_text().strip(),
                 "gemini_voice": cls._comp_gemini_voice.get_active_id() or "",
