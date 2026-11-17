@@ -100,6 +100,23 @@ def test_level_follows_the_voice_only():
     p.stop()
 
 
+def test_resume_loads_the_model_when_started_in_silence():
+    # presence_mode = silent at startup never calls start(): resume() must load it
+    woken, m = [], _Model()
+    p = _make(woken)
+    real, presence.load_wake_model = presence.load_wake_model, lambda name: m
+    try:
+        p.resume()
+    finally:
+        presence.load_wake_model = real
+    s = _Stream.opened[-1]
+    m.score = 0.9
+    s.push(0.01)
+    time.sleep(0.2)
+    assert woken == [1]
+    p.stop()
+
+
 def test_release_frees_device_and_resume_reopens():
     woken, m = [], _Model()
     p = _make(woken, m)

@@ -136,6 +136,9 @@ html, body {{
   opacity: 0;
   transform: translate3d(0, 15px, 0);
 }}
+/* Already on screen before this reload: the page is replaced at every message,
+   and replaying the fade-in for the whole conversation made it blink. */
+.message-wrapper.seen {{ animation: none; opacity: 1; transform: none; }}
 .message-wrapper.user {{ justify-content: flex-end; }}
 .message-wrapper.assistant {{ justify-content: flex-start; }}
 
@@ -489,6 +492,33 @@ function copyCode(btn) {
   setTimeout(() => { btn.innerHTML = copyIcon; btn.classList.remove('copied'); }, 1500);
 }
 
+// A message appended to the page that is already up (talk mode): what was in
+// the live node is that very message, already on screen, so it must not fade
+// in a second time.
+// `drop` messages were trimmed off the front (CHAT_MESSAGE_LIMIT): remove them
+// and renumber the copy buttons, whose index is the message's position.
+function appendMessages(html, drop) {
+  const live = document.getElementById('live');
+  if (!live) return;
+  for (let i = 0; i < (drop || 0); i++) {
+    const first = document.querySelector('.message-wrapper');
+    if (first) first.remove();
+  }
+  document.querySelectorAll('.message-wrapper .copy-btn').forEach((b, i) => b.setAttribute('onclick', `copyText(this, ${i})`));
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  const was = live.firstElementChild;
+  for (const w of t.content.children) {
+    for (const r of ['user', 'assistant', 'system', 'note']) {
+      if (was && was.classList.contains(r) && w.classList.contains(r)) { w.classList.add('seen'); break; }
+    }
+    if (was && w.classList.contains('seen')) break;
+  }
+  live.before(t.content);
+  live.innerHTML = '';
+  reportHeight();
+}
+
 // Scroll Logic: Improved to handle reloads and dynamic content
 function checkScroll(smooth=true) {
   const scrollArea = document.getElementById('scroll-area');
@@ -562,6 +592,9 @@ class ChatOverlay(Gtk.Window):
         self._height = TALK_MIN_HEIGHT
         self._wanted_height = TALK_MIN_HEIGHT
         self._resize_timer: Optional[int] = None
+        self._sig = None           # what the page around the messages was built from
+        self._sent: list = []      # (role, text) of the messages on the page
+        self._shown = 0            # messages already on the page (see update_content)
         self._ready = False        # the page is loaded and can run JS
         self._pending_js: Optional[str] = None
         self._setup_window()
@@ -880,8 +913,18 @@ class ChatOverlay(Gtk.Window):
         """Update chat content with markdown rendering."""
         html_messages = []
 
+        # The page is replaced at every message: only what is new since the last
+        # render may fade in, or the whole conversation blinks at each turn.
+        sent = [(m["role"], m["text"]) for m in messages]
+        # Messages still at the head of the list: the whole previous page, or
+        # its tail once ChatManager trimmed k messages off the front.
+        drop, keep = next(((k, len(self._sent) - k) for k in range(len(self._sent) + 1)
+                           if sent[:len(self._sent) - k] == self._sent[k:]), (0, 0))
+        shown = keep or (self._shown if len(messages) >= self._shown else 0)
+        self._shown = len(messages)
+
         for idx, msg in enumerate(messages):
-            role = msg["role"]
+            role = msg["role"] + (" seen" if idx < shown else "")
             rendered = self._render_markdown(msg["text"])
             # Pass index, not ID, for robust handling
             copy_btn = f'<button class="copy-btn" onclick="copyText(this, {idx})">{SVG_COPY_ICON}</button>'
@@ -935,6 +978,19 @@ class ChatOverlay(Gtk.Window):
             lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255
             return "#000000" if lum > 0.5 else "#FFFFFF"
 
+        # A talk session only ever appends: patch the page that is up instead of
+        # replacing it, or every message restarts the page's animations (the
+        # flicker). Anything else on the page changing (hints, bar, status,
+        # scheme) or a message rewritten in place falls back to a full reload.
+        bar = self._talk_bar()
+        sig = (pin_hint, bar, status_text, STATE.color_scheme, self.talk)
+        if (self.talk and self._ready and sig == self._sig and 0 < keep < len(sent)):
+            fresh = "".join(html_messages[keep:])
+            self._sent = sent
+            self._run_js(f"appendMessages({json.dumps(fresh)}, {drop});")
+            return
+        self._sig, self._sent = sig, sent
+
         scheme = CFG.COLOR_SCHEMES.get(STATE.color_scheme, CFG.COLOR_SCHEMES[CFG.DEFAULT_SCHEME])
 
         formatted_css = CHAT_CSS.format(
@@ -969,7 +1025,7 @@ class ChatOverlay(Gtk.Window):
         html = html.replace("{pin_hint}", pin_hint)
         html = html.replace("{talk_class}", " talk" if self.talk else "")
         html = html.replace("{TALK}", "true" if self.talk else "false")
-        html = html.replace("{talk_bar}", self._talk_bar())
+        html = html.replace("{talk_bar}", bar)
         html = html.replace("{CHAT_CSS}", formatted_css)
         html = html.replace("{CHAT_JS}", CHAT_JS)
 

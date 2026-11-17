@@ -129,8 +129,6 @@ class Presence:
         self._model = self._load_model()
 
     def start(self) -> None:
-        if self._model is None:
-            self._model = self._load_model()
         self.resume()
 
     def stop(self) -> None:
@@ -184,6 +182,8 @@ class Presence:
             if self._stream is not None:
                 return
             self._tail = None
+            if self._model is None:  # started in silence: start() never ran
+                self._model = self._load_model()
             if self._model is not None:
                 self._model.reset()
             self._vad = VoiceActivityDetector(RATE)

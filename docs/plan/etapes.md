@@ -376,14 +376,29 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
   - [x] Une notification du board ouvre une session et est dite sous Google
   - [x] Réglages › Compagnon : fournisseur, modèle, voix Google ; vide = valeur de la conversation
 
-### Not in a lot
+### Lot — Lot 30 — Correctifs : mot d'éveil, reconnexion Gemini, bulle (launched, 3 at a time)
 
-- **Gemini Live : fermer l'ancienne connexion avant de rouvrir (erreur 1008 à la reconnexion)** — backlog
+- **Gemini Live : fermer l'ancienne connexion avant de rouvrir (erreur 1008 à la reconnexion)** — done
 
   Banc réel du 16/11 (tests/bench_gemini_long.py 16 --force-at 600) : la reconnexion a réussi en 1,43 s, mais le premier essai a été refusé par Google « APIError 1008 BidiGenerateContent session is already connected to an existing client » : services/gemini_live.py rouvre avec le handle avant que l'ancienne WebSocket soit fermée. Fermer (et attendre) l'ancienne connexion avant d'ouvrir la nouvelle, sans allonger le blanc audible.
 
-  - [ ] Le banc bench_gemini_long.py --force-at 600 ne montre qu'une ligne « reconnecting » par reconnexion, sans 1008
-  - [ ] reconnect_s ne dépasse pas celui d'avant (≈1,4 s)
+  - [x] Le banc bench_gemini_long.py --force-at 600 ne montre qu'une ligne « reconnecting » par reconnexion, sans 1008
+  - [x] reconnect_s ne dépasse pas celui d'avant (≈1,4 s)
+- **Bulle de conversation : scintillement et rendu cassé pendant une session** — done
+
+  Signalé le 16/11 : depuis quelques semaines, la bulle de talk (ChatOverlay en mode talk, WebKit2) scintille et s'affiche mal pendant une conversation ; les autres fenêtres vont bien. Pistes : redimensionnements continus (ResizeObserver → _apply_height, RESIZE_COALESCE_MS), set_live qui réécrit #live, animation de la bulle (bord, goutte) ajoutée récemment, rendu WebKit/compositing sous niri (essayer WEBKIT_DISABLE_COMPOSITING_MODE / hardware acceleration policy). Reproduire, trouver la cause, corriger ; pas de contournement qui coupe les animations sans raison.
+
+  - [x] Une session F4 de 2 minutes ne scintille plus
+  - [x] La cause est nommée dans la PR
+- **Mot d'éveil sourd quand Loquivox démarre en silence puis repasse actif** — done
+
+  Constat du 16/11 : Loquivox démarré avec presence_mode = silent (persisté) n'appelle pas Presence.start(), donc le modèle openwakeword n'est jamais chargé. Repasser actif (F7, clic, Réglages) appelle presence.resume(), qui ouvre le micro mais _score() sort aussitôt car _model est None : aucune détection, aucune quasi-détection, aucun message. Corriger à la racine dans services/presence.py : resume() charge le modèle s'il manque (couvre les trois appelants de resume dans handlers/companion.py). Un test dans tests/test_presence.py : démarrer en silence, passer actif, un score au-dessus du seuil réveille.
+
+  - [x] Démarré en silence puis passé actif, « hey jarvis » réveille le compagnon
+  - [x] tests/test_presence.py couvre ce cas
+
+### Not in a lot
+
 - **Live : calibrer le filtre anti-écho quand le son sort, pas à la réception** — backlog
 
   Sous le moteur Live, `EchoGate` lance sa calibration (600 ms) dès que `_quiet()` passe à faux, c'est-à-dire à la RÉCEPTION de la première trame audible (`LiveTalk._mic_chunks`). Depuis la PR #43, le tampon anti-gigue (`PREBUFFER` = 200 ms) ne joue cette trame qu'environ 200 ms plus tard. La fenêtre mesure donc en partie autre chose que l'écho : la fin de phrase de l'utilisateur, un bruit.
