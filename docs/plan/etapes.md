@@ -318,8 +318,47 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
   - [x] Essai réel chiffré, ou la raison de son absence
   - [x] 3 à 6 cartes de suite créées au backlog avec dépendances
 
-### Not in a lot
+### Lot — Lot 28 — Gemini Live : moteur, outils, sessions longues (launched, one at a time)
 
+- **Gemini Live : sessions longues (GoAway, reprise transparente, compression, reprise #122)** — done
+  - after: Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)
+
+  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Une connexion Gemini dure ≈ 10 min (GoAway avant la coupure) ; une session audio 15 min, audio+vidéo 2 min sans compression. Activer context_window_compression (sliding_window) toujours ; garder le dernier session_resumption_update.new_handle ; sur GoAway ou coupure, rouvrir avec le handle sans que l'utilisateur l'entende (micro gardé, tampon de lecture vidé proprement, une ligne au journal). Reprise #122 (resume_min) : passer les derniers tours par send_client_content avec rôles user/model à l'ouverture, turn_complete=False.
+
+  - [x] Une conversation de 15 min sous Google continue sans coupure audible (essai réel, journal montrant la reconnexion)
+  - [x] Reconnexion couverte par le self-check (GoAway simulé)
+  - [x] Une session ouverte moins de resume_min après la précédente reprend ses tours sous Google
+- **Gemini Live : outils, délégation « consult » et plugins/MCP/sources** — done
+  - after: Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)
+
+  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Gemini n'a pas de délégation : il appelle des fonctions. Deux modes, comme client/responses aujourd'hui, choisis par [talk] gemini_delegation : « consult » = une seule fonction NON_BLOCKING (« demander à Loquivox ») qui lance TalkSession.consult() sur un thread (notre boucle d'agent, find_tools, MCP différés) et répond en scheduling WHEN_IDLE ; « native » = chaque Plugin activé déclaré comme fonction Gemini (forme dérivée dans Desks, jamais écrite deux fois ; liste fixée à l'ouverture comme responses, donc load_all). Oui parlé : user_turns alimenté par la transcription d'entrée + turn_complete. Sources : push_result sans appel → send_client_content encadré par SOURCE_FRAME. Le défaut entre consult et native est une question au propriétaire (rapport, question 1) : le demander avant de figer.
+
+  - [x] tests/test_plugins.py pilote un plugin inconnu à travers GeminiLive, dans les deux modes
+  - [x] Un outil MCP qui agit attend un oui parlé sous Google (essai réel)
+  - [x] Une source (board) est dite entre deux tours sous Google
+  - [x] CLAUDE.md : section Plugins à jour pour Gemini
+- **Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)** — done
+  - after: Explorer : Gemini Live comme second moteur Live (et le compagnon dessus)
+
+  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord : API, essai, table de correspondance, pièges). Cette carte remplace l'ancienne grosse carte « Gemini Live » ; outils, sessions longues, compagnon et écran sont des cartes séparées qui en dépendent.
+  
+  Faire : services/gemini_live.py, classe GeminiLive, même interface publique que LiveTalk (start, close, tick, push_context, push_result, finished_speaking, idle_for, done, error, prefix, on_level). Choisie par [talk] live_provider = "openai" | "google" sous engine = "live" — pas de quatrième moteur, pas de branche dans le cœur au-delà du choix de classe dans _talk_conversation. SDK google-genai en extra optionnel .[gemini], import paresseux, HttpOptions(api_version="v1beta") (le SDK ouvre en v1 par défaut → 404). Modèle [talk] gemini_model (défaut gemini-3.8-live ; thinking_level requis si extended-thinking), voix [talk] gemini_voice (30 voix préconstruites). Micro 16 kHz ouvert avant les haut-parleurs (await_headset_mic), zéros quand le micro est retenu, EchoGate devant le micro sur haut-parleurs ; interruption = server_content.interrupted → vider le tampon de lecture ; tours via input/output_audio_transcription + turn_complete dans TalkSession ; finished_speaking = tour terminé et tampon vide. Reprendre le tampon de gigue et _mic_chunks de live_talk.py en les sortant dans un module partagé, pas en les recopiant. Contexte écran (description) via send_client_content(turn_complete=False), encadré comme QUIET_CONTEXT. Échec d'ouverture = repli cascade dit à voix haute. Clé GEMINI_API_KEY dans Réglages › Modèles et clés › Clés (secrets.py, masquée par diagnostics.redact — format AIza…). Réglages › Conversation › Moteur : fournisseur Live, modèle, voix Google. Sans outils dans cette carte (carte suivante).
+
+  - [x] Une session F4 et une session F6 en français marchent sous Google (essai réel au micro), avec interruption au casque
+  - [x] Sans google-genai ou sans clé : repli sur la cascade annoncé
+  - [x] Réglages : fournisseur Live OpenAI/Google, modèle et voix Google, clé Gemini masquée dans le rapport
+  - [x] Self-check du module (python src/loquivox/services/gemini_live.py) : zéros envoyés micro retenu, v1beta, interrupted vide le tampon
+  - [x] CLAUDE.md (section du moteur Gemini, différences avec gpt-live-1) et config.example.toml à jour
+
+### Lot — Lot 29 — Gemini Live : compagnon et écran (planned, one at a time)
+
+- **Réglages : écouter les 30 voix Gemini avant de choisir (▶, comme pour gpt-live)** — backlog
+
+  L'opérateur trouve les voix Gemini un peu moins naturelles que celles d'OpenAI et veut les écouter avant de choisir. Reprendre le mécanisme de #127 (settings_dialog._on_test_live_voice : une courte session qui dit une phrase, gardée en cache wav) pour le fournisseur Google : une courte session gemini-3.8-live avec la voix choisie dit une phrase en français, mise en cache par voix et par modèle, rejouée ensuite sans appel. Même bouton ▶ à côté du champ voix Google (Conversation et Compagnon). Sans clé ou sans bibliothèque : message clair, pas de plantage.
+
+  - [ ] ▶ à côté de la voix Google fait entendre la voix choisie en français
+  - [ ] Le deuxième ▶ sur la même voix rejoue le cache sans appel réseau
+  - [ ] Sans GEMINI_API_KEY, un message le dit
 - **Gemini Live : l'écran à la demande (images à 1/s au lieu de la description)** — backlog
   - after: Gemini Live : sessions longues (GoAway, reprise transparente, compression, reprise #122)
 
@@ -336,35 +375,9 @@ Le mode marche sous GNOME, KDE et X11 avec des replis génériques ; notificatio
   - [ ] Mot d'éveil → session compagnon sous Google, interruption au casque, fin par la phrase d'arrêt (essai réel)
   - [ ] Une notification du board ouvre une session et est dite sous Google
   - [ ] Réglages › Compagnon : fournisseur, modèle, voix Google ; vide = valeur de la conversation
-- **Gemini Live : sessions longues (GoAway, reprise transparente, compression, reprise #122)** — backlog
-  - after: Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)
 
-  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Une connexion Gemini dure ≈ 10 min (GoAway avant la coupure) ; une session audio 15 min, audio+vidéo 2 min sans compression. Activer context_window_compression (sliding_window) toujours ; garder le dernier session_resumption_update.new_handle ; sur GoAway ou coupure, rouvrir avec le handle sans que l'utilisateur l'entende (micro gardé, tampon de lecture vidé proprement, une ligne au journal). Reprise #122 (resume_min) : passer les derniers tours par send_client_content avec rôles user/model à l'ouverture, turn_complete=False.
+### Not in a lot
 
-  - [ ] Une conversation de 15 min sous Google continue sans coupure audible (essai réel, journal montrant la reconnexion)
-  - [ ] Reconnexion couverte par le self-check (GoAway simulé)
-  - [ ] Une session ouverte moins de resume_min après la précédente reprend ses tours sous Google
-- **Gemini Live : outils, délégation « consult » et plugins/MCP/sources** — backlog
-  - after: Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)
-
-  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord). Gemini n'a pas de délégation : il appelle des fonctions. Deux modes, comme client/responses aujourd'hui, choisis par [talk] gemini_delegation : « consult » = une seule fonction NON_BLOCKING (« demander à Loquivox ») qui lance TalkSession.consult() sur un thread (notre boucle d'agent, find_tools, MCP différés) et répond en scheduling WHEN_IDLE ; « native » = chaque Plugin activé déclaré comme fonction Gemini (forme dérivée dans Desks, jamais écrite deux fois ; liste fixée à l'ouverture comme responses, donc load_all). Oui parlé : user_turns alimenté par la transcription d'entrée + turn_complete. Sources : push_result sans appel → send_client_content encadré par SOURCE_FRAME. Le défaut entre consult et native est une question au propriétaire (rapport, question 1) : le demander avant de figer.
-
-  - [ ] tests/test_plugins.py pilote un plugin inconnu à travers GeminiLive, dans les deux modes
-  - [ ] Un outil MCP qui agit attend un oui parlé sous Google (essai réel)
-  - [ ] Une source (board) est dite entre deux tours sous Google
-  - [ ] CLAUDE.md : section Plugins à jour pour Gemini
-- **Gemini Live, moteur minimal : F4/F6 parlent à Google (audio, tours, interruption, écho, repli)** — backlog
-  - after: Explorer : Gemini Live comme second moteur Live (et le compagnon dessus)
-
-  Suite de l'exploration docs/explorations/2026-11-16-gemini-live.md (à lire d'abord : API, essai, table de correspondance, pièges). Cette carte remplace l'ancienne grosse carte « Gemini Live » ; outils, sessions longues, compagnon et écran sont des cartes séparées qui en dépendent.
-  
-  Faire : services/gemini_live.py, classe GeminiLive, même interface publique que LiveTalk (start, close, tick, push_context, push_result, finished_speaking, idle_for, done, error, prefix, on_level). Choisie par [talk] live_provider = "openai" | "google" sous engine = "live" — pas de quatrième moteur, pas de branche dans le cœur au-delà du choix de classe dans _talk_conversation. SDK google-genai en extra optionnel .[gemini], import paresseux, HttpOptions(api_version="v1beta") (le SDK ouvre en v1 par défaut → 404). Modèle [talk] gemini_model (défaut gemini-3.8-live ; thinking_level requis si extended-thinking), voix [talk] gemini_voice (30 voix préconstruites). Micro 16 kHz ouvert avant les haut-parleurs (await_headset_mic), zéros quand le micro est retenu, EchoGate devant le micro sur haut-parleurs ; interruption = server_content.interrupted → vider le tampon de lecture ; tours via input/output_audio_transcription + turn_complete dans TalkSession ; finished_speaking = tour terminé et tampon vide. Reprendre le tampon de gigue et _mic_chunks de live_talk.py en les sortant dans un module partagé, pas en les recopiant. Contexte écran (description) via send_client_content(turn_complete=False), encadré comme QUIET_CONTEXT. Échec d'ouverture = repli cascade dit à voix haute. Clé GEMINI_API_KEY dans Réglages › Modèles et clés › Clés (secrets.py, masquée par diagnostics.redact — format AIza…). Réglages › Conversation › Moteur : fournisseur Live, modèle, voix Google. Sans outils dans cette carte (carte suivante).
-
-  - [ ] Une session F4 et une session F6 en français marchent sous Google (essai réel au micro), avec interruption au casque
-  - [ ] Sans google-genai ou sans clé : repli sur la cascade annoncé
-  - [ ] Réglages : fournisseur Live OpenAI/Google, modèle et voix Google, clé Gemini masquée dans le rapport
-  - [ ] Self-check du module (python src/loquivox/services/gemini_live.py) : zéros envoyés micro retenu, v1beta, interrupted vide le tampon
-  - [ ] CLAUDE.md (section du moteur Gemini, différences avec gpt-live-1) et config.example.toml à jour
 - **Live : calibrer le filtre anti-écho quand le son sort, pas à la réception** — backlog
 
   Sous le moteur Live, `EchoGate` lance sa calibration (600 ms) dès que `_quiet()` passe à faux, c'est-à-dire à la RÉCEPTION de la première trame audible (`LiveTalk._mic_chunks`). Depuis la PR #43, le tampon anti-gigue (`PREBUFFER` = 200 ms) ne joue cette trame qu'environ 200 ms plus tard. La fenêtre mesure donc en partie autre chose que l'écho : la fin de phrase de l'utilisateur, un bruit.

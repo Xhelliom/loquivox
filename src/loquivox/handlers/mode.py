@@ -644,6 +644,11 @@ class ModeHandler:
             return ModeHandler._talk_converse_server(session, keys, RealtimeTalk,
                                                      "Realtime")
         if engine == "live":
+            # One engine, two providers: the loop below cannot tell them apart.
+            if config_module.CFG.TALK_LIVE_PROVIDER == "google":
+                from loquivox.services.gemini_live import GeminiLive
+                return ModeHandler._talk_converse_server(session, keys, GeminiLive,
+                                                         "Gemini Live")
             from loquivox.services.live_talk import LiveTalk
             return ModeHandler._talk_converse_server(session, keys, LiveTalk, "Live")
         return ModeHandler._talk_converse(session, keys)
@@ -692,6 +697,9 @@ class ModeHandler:
                 print(f"⚠️  {label} talk unavailable ({e}) — companion session dropped")
                 return False
             print(f"⚠️  {label} talk unavailable ({e}) — using the cascade")
+            from loquivox.managers.chat import ChatManager
+            ChatManager.add_message("note", _("{engine} is unavailable — using the "
+                                              "standard conversation instead.").format(engine=label))
             # A session that failed to *open* has still opened things: the
             # asyncio loop is running on its thread and the socket may be up.
             # Falling straight through to the cascade would leave both behind,

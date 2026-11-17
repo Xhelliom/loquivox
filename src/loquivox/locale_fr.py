@@ -826,8 +826,19 @@ CATALOG = {
         "Cascade — transcrire, répondre, parler",
     "Realtime — speech to speech (OpenAI)":
         "Realtime — parole à parole (OpenAI)",
-    "Live — OpenAI voice, delegated thinking":
-        "Live — voix OpenAI, réflexion déléguée",
+    "Live — server voice (OpenAI or Google)":
+        "Live — voix serveur (OpenAI ou Google)",
+    "Live provider": "Fournisseur Live",
+    "Google model": "Modèle Google",
+    "Google voice": "Voix Google",
+    "Google needs the gemini extra (pip install 'loquivox[gemini]') and a "
+    "Gemini key (Models & keys → Keys). Without them the conversation "
+    "falls back to the standard one.":
+        "Google demande l'extra gemini (pip install 'loquivox[gemini]') et une "
+        "clé Gemini (Modèles et clés → Clés). Sans eux, la conversation "
+        "retombe sur la conversation standard.",
+    "{engine} is unavailable — using the standard conversation instead.":
+        "{engine} est indisponible — conversation standard à la place.",
     "Auto — follow the chat provider":
         "Auto — suivre le fournisseur de chat",
     "Your backend — the chat model, with plugins":

@@ -92,6 +92,8 @@ services/         audio (record+transcribe), ai (chat+vision), tts (engine per
                   Piper local via tts_piper.py), mcp_tools (MCP client: servers → plugins), realtime_talk (speech-to-speech
                   talk mode), live_talk (gpt-live-1: speech in/out, thinking
                   delegated back to our own model),
+                  gemini_live (Gemini Live, same surface, no delegation) +
+                  live_audio (mic gate / jitter buffer / turns they share),
                   clipboard, image, postprocess (LLM refinement of dictation),
                   talk (conversation → one text), vad (energy trigger),
                   turn_detector (Smart Turn v3 semantic end-of-turn)
@@ -478,7 +480,123 @@ spends. Sessions have a duration limit (`session.closed` with
 `reason: "expired"`) and there is no resumption — a replacement session must be
 given its context back.
 
+### The Gemini provider of the Live engine (`services/gemini_live.py`)
+
+`[talk] live_provider = "google"` (Settings → Conversation → Engine) swaps the
+class `_talk_conversation` hands to `_talk_converse_server`: `GeminiLive` instead
+of `LiveTalk`, same public surface, same loop. It is **not** a fourth engine and
+the core has no `if google` beyond that choice. Optional extra `.[gemini]`
+(`google-genai`, imported lazily), key `GEMINI_API_KEY` (Settings → Models &
+keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
+(`gemini-3.8-live`; the `-extended-thinking` model refuses to open without
+`gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
+refused connection: `start()` raises and the loop falls back to the cascade,
+with a note in the bubble. Tools are in (below, and the Plugins section). The
+companion does open it under `live_provider = "google"` (`companion._converse`
+picks the class like `mode.py`; its OpenAI-only Live options — voice, delegation… —
+are not passed), so its #122 resume goes through `_prior_turns()`.
+
+`services/live_audio.py` is what the two Live engines share, as a mixin
+(`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
+their tests pin): the microphone gate (`_mic_chunks`: **zeros, never nothing**),
+the jitter buffer (`_on_play`, `PREBUFFER`), and how a turn lands in `TalkSession`
+(`_on_delta`, `_close_turn`, `_on_user_said`…). `IN_RATE` / `OUT_RATE` differ
+(Gemini: 16 kHz in, 24 kHz out). The mic is opened before the speakers
+(`await_headset_mic`), as everywhere.
+
+What differs from gpt-live-1, each a reason it is not a subclass:
+
+- **The server says what OpenAI's never does.** `turn_complete` closes both
+  turns (so `tick()` is empty — no `TALK_LIVE_TURN_GAP`, no `SILENT_PEAK`, no
+  `AUDIO_IDLE`); `interrupted` empties the playback buffer (no `EchoGate` guess
+  — the gate is still in front of the microphone on speakers, or the server
+  hears its own voice); a reply is over when its turn is complete **and** the
+  buffer is empty (`_quiet()`), bounded by `SPEECH_TAIL_TIMEOUT`. The user's
+  turn is recorded the moment the first audio or output transcript of the reply
+  arrives, so `turns` stays in order.
+- **`HttpOptions(api_version="v1beta")`, always.** The SDK opens `v1` by default
+  and the Live endpoint answers 404 there. Pinned by the module's self-check
+  (`python src/loquivox/services/gemini_live.py`, which also pins zeros on a held
+  microphone and `interrupted` emptying the buffer).
+- **Context is a message.** `system_instruction` is fixed at open; the screen
+  description goes in through `send_client_content(turn_complete=False)` ("more
+  to come": the model does not answer it), framed by `CONTEXT_FRAME`, the
+  counterpart of `QUIET_CONTEXT`.
+- **Long sessions.** A connection lasts ~10 min (`go_away` first), so `_config()`
+  always asks `context_window_compression` (`sliding_window`) and
+  `session_resumption`; `_handle` keeps the last `new_handle`. On `go_away` or a
+  dropped socket `_session_task` reopens with it: microphone kept (`_conn` is
+  `None` meanwhile, blocks are skipped), turns flushed, one
+  `🔁 Gemini Live: reconnecting` line. On `go_away` `_pump` first lets the reply in
+  progress finish and play on the old connection (`_quiet()`, bounded by
+  `_goaway_deadline` = `time_left` − `GOAWAY_MARGIN`); the playback buffer is
+  emptied only when the socket was cut (`_flush_audio`), at most 3 failed reopens in a row. With no
+  handle — or a #122 `session.resumed` — `_prior_turns()` replays the turns
+  through `send_client_content` (roles `user`/`model`, `turn_complete=False`).
+  Pinned by the self-check (simulated go_away, dropped socket, replay).
+- Closing is cancelling the session task (leaving the SDK's `async with` closes the
+  socket): no `session.close` handshake.
+- Verified for real, 2026-11-16, on the code with the finish-the-reply `go_away`
+  (a90375b and after): `python tests/bench_gemini_long.py 16 --force-at 600` (real
+  `GeminiLive`, French TTS fed as the microphone, 961 s, exit 0). Google sent **no**
+  `go_away` in 600 s with compression on, so the bench **forced** it at 605.4 s through
+  the real `_handle` (`time_left` 30 s) *while the model was speaking* (6 audible frames
+  still queued): the reconnection path, the real handle and the real server are real;
+  Google's own signal is not proven. Journal: `🔁 Gemini Live: reconnecting (go_away,
+  with handle)`. `audio_after_go_away_s` 0.05 (last audio frame received), then the 6
+  queued frames were played out on the old connection: connection gone 1.64 s after the
+  `go_away` (`gone_after_go_away_s`), back 1.45 s later (`reconnect_s`, 607.0 → 608.5 s).
+  The reply in progress was not cut (every assistant turn in the transcript is a whole
+  sentence). The first reopen was refused once (`APIError: 1008 … session is already
+  connected to an existing client`, old socket not yet released) and the retry, 1 s
+  later, went through — one failed reopen of the 3 allowed. `error` None;
+  `recalled_cerisier` True ("Tu m'as demandé de mémoriser le mot cerisier", asked at
+  638 s, the word memorised at 10 s). A first pass of the same bench had memorised at
+  2 s, which the server did not hear (no transcript, so nothing to recall): the bench
+  now says it at 10 s. Not verified: a session by voice on a headset (by hand, with a
+  real key).
+
 ### Plugins (`services/plugins.py`)
+
+**Under Gemini Live** (`services/gemini_live.py`, `[talk] gemini_delegation`):
+Google has no delegation, the model calls *functions*, so the two Live routes
+are rebuilt as two modes — `consult` (default, **provisional: the owner's call**,
+one-line change in `TALK_GEMINI_DELEGATION`) and `native`. `consult` declares ONE
+`NON_BLOCKING` function (`ask_loquivox`); a call runs `TalkSession.consult()` on
+a thread — our agent loop, deferred MCP tools and `find_tools` included — and the
+answer goes back as a `FunctionResponse` with `scheduling="WHEN_IDLE"`, so the
+voice keeps the floor. `native` declares every enabled plugin
+(`Plugin.gemini_tool` → `Desks.gemini_tools`, derived, never written twice;
+`parameters_json_schema` carries the schema as is), the list fixed at open like
+`responses` (hence `load_all`, MCP deferral does not apply), and a call runs
+`Desk.run_now`. The spoken yes is the same `user_turns`, fed by the input
+transcription closed on `turn_complete`. A *source* has no call: `push_result`
+sweeps the desks (quiet reply, no open user turn) and `send_client_content`
+hands over the text `Desk.take()` already framed with `SOURCE_FRAME`, with
+`turn_complete=True` so it is said. `tests/test_plugins.py` drives a plugin the
+core has never heard of through both modes.
+
+**Real trial, 17/11/2026** (`tests/bench_gemini_tools.py`: OpenAI-synthesized French
+through `_on_audio`, real `gemini-3.8-live`, agent on Groq `gpt-oss-120b`, the fake
+acting MCP server of `tests/mcp_bench_server.py`; what ran is read from its log).
+Not a headset session. *`native`*: « Marque la carte 42 comme terminée » → the model
+called `finish_card` unconfirmed (held, nothing ran), said « Confirmez-vous… ? »;
+after « Oui, vas-y » it called it again `confirmed=true` and the action ran 3.7 s
+later. *`consult`*: same sentence → our loop answered with a question in words (so no
+hold existed yet), the first « oui » therefore only created the hold, nothing ran,
+and the action ran right after the **second** « oui » (the agent model, not the
+engine, decides whether the first call is an unconfirmed one: the same in the
+cascade). Source (`consult`, run before the two fixes above, which do not touch that path): after « Bonjour », a source `loads = "board"` put
+« Card 42 … is blocked: waiting for a review » → `push_result` handed it over, the
+voice said « La carte quarante-deux pour la refonte du login est bloquée en
+attendant une revue… Que souhaitez-vous ? » 15 s later (a consult in between:
+`whats_blocking`, read-only). Two things the trial taught, both fixed in
+`GeminiLive`: a test or caller must set `STATE.talk_session` (the yes is counted
+on it); and under `consult`, told only the held question, the voice model that had
+just heard a yes re-called the function ten times a second — a call made while a
+question is already awaiting an answer is now answered `SILENT` ("still waiting"),
+and a held answer carries `HELD_HINT` (ask out loud, then wait). Still not tried:
+a session on a headset, `native` + source.
 
 **The agent loop (`TalkSession._with_tools`, shared by the cascade's `_answer` and
 the Live client delegation's `consult()`).** Tools are not "started and swept

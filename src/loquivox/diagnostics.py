@@ -233,6 +233,8 @@ _SECRET_PATTERNS = [
     # (40 hex chars), and the generic bearer header.
     (re.compile(r"\bgsk_[A-Za-z0-9]{16,}"), REDACTED),
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), REDACTED),
+    # Google (AIza…, 39 chars)
+    (re.compile(r"\bAIza[A-Za-z0-9_\-]{30,}"), REDACTED),
     (re.compile(r"\b[0-9a-f]{40}\b"), REDACTED),
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._\-]{8,}"), r"\1 " + REDACTED),
     # An Authorization header (Basic, Bearer or anything else): the whole value.

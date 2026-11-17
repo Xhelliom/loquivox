@@ -365,7 +365,22 @@ realtime_model = "gpt-realtime-2.1"
 realtime_voice = "marin"
 realtime_transcribe = "gpt-4o-mini-transcribe"
 
-# Only read when engine = "live".
+# Only read when engine = "live". Who holds the conversation: "openai" (gpt-live-1,
+# below) or "google" (Gemini Live: needs pip install 'loquivox[gemini]' and
+# GEMINI_API_KEY; the live_* fields below do not apply to it — no delegation,
+# the model thinks for itself — and there are no tools yet). If it cannot open
+# (no package, no key, refused) the conversation falls back to the cascade and
+# says so in the bubble.
+live_provider = "openai"
+# "gemini-3.8-live-extended-thinking" also works, with gemini_thinking (low|medium|high).
+gemini_model = "gemini-3.8-live"
+gemini_thinking = "low"
+# Who thinks under Google: "consult" (one async function, our own agent loop and
+# MCP tools) or "native" (each plugin declared as a Gemini function, fixed at open).
+gemini_delegation = "consult"
+# One of the 30 prebuilt voices (Kore, Puck, Charon, Zephyr, Fenrir…). The language
+# is picked by the model; it cannot be forced.
+gemini_voice = "Kore"
 live_model = "gpt-live-1"
 # 22 voices. Only bossa and tempo are not English; the model itself speaks
 # whatever language its instructions are written in, but a voice's accent is
