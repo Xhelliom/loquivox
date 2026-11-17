@@ -101,15 +101,22 @@ def instructions(cfg=None) -> str:
 
 def _converse(session, prefix=()) -> None:
     from loquivox.handlers.mode import ModeHandler
-    from loquivox.services.live_talk import LiveTalk
+
+    google = config_module.CFG.TALK_LIVE_PROVIDER == "google"
+    if google:
+        from loquivox.services.gemini_live import GeminiLive as Engine
+    else:
+        from loquivox.services.live_talk import LiveTalk as Engine
 
     def engine(s):
-        talk = LiveTalk(s, **live_options())
+        # Live options are OpenAI's (voice name, delegation…): Gemini has its own voice
+        talk = Engine(s) if google else Engine(s, **live_options())
         talk.prefix = list(prefix)
         if _companion is not None:
             talk.on_level = _companion.on_level
         return talk
-    ModeHandler._talk_converse_server(session, _NoKeys(), engine, "Live")
+    ModeHandler._talk_converse_server(session, _NoKeys(), engine,
+                                      "Gemini Live" if google else "Live")
 
 
 _ADDRESSED = {"tu", "te", "toi", "ton", "ta", "tes", "vous", "votre", "vos"}

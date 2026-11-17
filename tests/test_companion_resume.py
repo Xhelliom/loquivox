@@ -140,6 +140,31 @@ def test_end_of_session_memory_does_not_see_resumed_turns():
     print("✓ resumed turns are not extracted twice")
 
 
+def test_companion_under_google_resumes_through_gemini_live():
+    from loquivox.handlers.mode import ModeHandler
+    from loquivox.services.gemini_live import GeminiLive
+    config_module.CFG = dataclasses.replace(
+        config_module.CFG, TALK_LIVE_PROVIDER="google", COMPANION_LIVE_VOICE="marin")
+    s = TalkSession(write=False)
+    s.resumed = [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]
+    got = []
+    real = ModeHandler._talk_converse_server
+    ModeHandler._talk_converse_server = staticmethod(
+        lambda session, keys, engine, label: got.append((engine(session), label)))
+    try:
+        comp._converse(s, prefix=[1])
+    finally:
+        ModeHandler._talk_converse_server = real
+        config_module.CFG = dataclasses.replace(config_module.CFG, TALK_LIVE_PROVIDER="openai",
+                                                COMPANION_LIVE_VOICE="")
+    (g, label), = got
+    assert isinstance(g, GeminiLive) and label == "Gemini Live" and g.prefix == [1]
+    # replayed through send_client_content (turn_complete=False) by _session_task
+    assert g._prior_turns() == [{"role": "user", "parts": [{"text": "q"}]},
+                                {"role": "model", "parts": [{"text": "a"}]}]
+    print("✓ the companion under google opens GeminiLive and hands it the resumed turns")
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
