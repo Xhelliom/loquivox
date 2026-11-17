@@ -492,9 +492,12 @@ keys → Keys; `diagnostics.redact` masks `AIza…`), `[talk] gemini_model`
 `gemini_thinking`), `gemini_voice` (30 prebuilt voices). No SDK, no key or a
 refused connection: `start()` raises and the loop falls back to the cascade,
 with a note in the bubble. Tools are in (below, and the Plugins section). The
-companion does open it under `live_provider = "google"` (`companion._converse`
-picks the class like `mode.py`; its OpenAI-only Live options — voice, delegation… —
-are not passed), so its #122 resume goes through `_prior_turns()`.
+companion does open it under Google: `companion._converse` picks the class
+through `companion.live_provider()` (`[companion] live_provider`, empty = `[talk]`)
+and hands `GeminiLive` its model and voice through `gemini_options()`
+(`[companion] gemini_model` / `gemini_voice`, empty = `[talk]`); its OpenAI-only
+Live options — voice, delegation… — are not passed, so its #122 resume goes
+through `_prior_turns()`.
 
 `services/live_audio.py` is what the two Live engines share, as a mixin
 (`LiveAudio`, so both keep the same `_chunks` / `_audible` / `_gate` attributes
@@ -1250,8 +1253,9 @@ through the same `redact()`.
   **Everything that sets the companion is on the Companion tab** (the silence key
   aside, which is cited): *General* (wake word, click, style), *Voice & thinking*
   (its own Live voice, delegation, backend model, web search and instructions,
-  `[companion] live_voice` / `live_delegation` / `live_backend_model` /
-  `live_web_search` / `instructions`, empty = "like the conversation", i.e. the
+  `[companion] live_provider` / `gemini_model` / `gemini_voice` (the last two
+  greyed unless the provider is Google) / `live_voice` / `live_delegation` /
+  `live_backend_model` / `live_web_search` / `instructions`, empty = "like the conversation", i.e. the
   `[talk]` value; resolved when the session opens by `companion.live_options()` /
   `companion.instructions()`, passed to `LiveTalk(...)` and
   `TalkSession(instructions=)`), *Presence* (enabled, lock, idle, delay before
