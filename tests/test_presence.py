@@ -354,6 +354,46 @@ def test_follow_up_opens_a_session_for_a_question_not_for_a_colleague():
     assert woke == [] and "micro occupé" in log
 
 
+def test_follow_up_judge_is_the_model_and_needs_consent():
+    import dataclasses, io, contextlib, time
+    import loquivox.config as config_module
+    from loquivox.handlers import companion
+    real = companion.FOLLOW_UP_JUDGE
+    seen = []
+    def judge(text, last):
+        seen.append(text)
+        return ("et pour demain" in text.lower()), "suite de l'échange"
+    companion.FOLLOW_UP_JUDGE = judge
+    try:
+        # consent off (default): the model never sees the text, the word list decides
+        woke, log, _c = _decide("Et pour demain ?")
+        assert woke == ["follow_up"] and seen == [], (woke, seen)
+        c, woke = _companion(["et du coup on mange quoi ?"])
+        config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            c._follow_up([np.zeros(presence.BLOCK, "float32")])
+        assert woke == [], out.getvalue()
+        assert "relance : non" in out.getvalue() and "mange" not in out.getvalue()
+        c, woke = _companion(["Et pour demain ?"])
+        config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            c._follow_up([np.zeros(presence.BLOCK, "float32")])
+        assert woke == ["follow_up"], woke
+        # an error or a slow model is a "non", not a fallback to the list
+        for bad in (lambda t, l: 1 / 0, lambda t, l: (time.sleep(3), (True, "x"))[1]):
+            companion.FOLLOW_UP_JUDGE = bad
+            c, woke = _companion(["Et pour demain ?"])
+            config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=True)
+            t0 = time.monotonic()
+            with contextlib.redirect_stdout(io.StringIO()):
+                c._follow_up([np.zeros(presence.BLOCK, "float32")])
+            assert woke == [] and time.monotonic() - t0 < 2.5, woke
+    finally:
+        companion.FOLLOW_UP_JUDGE = real
+        config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=False)
+
+
 def test_a_closed_session_opens_the_window_unless_it_is_off():
     import dataclasses
     import loquivox.config as config_module

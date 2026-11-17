@@ -923,8 +923,13 @@ CATALOG = {
     "Delay before announcing (s)": "Délai avant d'annoncer (s)",
     "Resume the conversation (min)": "Reprendre la conversation (min)",
     "Follow-up window (s)": "Fenêtre de relance (s)",
-    "After a conversation, what you say within this many seconds is judged on this computer; if it is for the companion, it listens again without the wake word · 0 = off":
-        "Après une conversation, ce que vous dites dans ce délai est jugé sur cet ordinateur ; si cela s'adresse au compagnon, il réécoute sans mot d'éveil · 0 = désactivé",
+    "After a conversation, what you say within this many seconds is transcribed on this computer; if it is for the companion, it listens again without the wake word · 0 = off":
+        "Après une conversation, ce que vous dites dans ce délai est transcrit sur cet ordinateur ; si cela s'adresse au compagnon, il réécoute sans mot d'éveil · 0 = désactivé",
+    "Let the model judge the phrase (it is sent to it)":
+        "Laisser le modèle juger la phrase (elle lui est envoyée)",
+    "Follow-up judge": "Juge de la relance",
+    "The phrase, transcribed on this computer, is sent to the memory judge's model, which says whether it is for the companion. Off: nothing is sent and a fixed word list decides, less precisely.":
+        "La phrase, transcrite sur cet ordinateur, est envoyée au modèle du juge de mémoire, qui dit si elle s'adresse au compagnon. Désactivé : rien n'est envoyé et une liste de mots fixe décide, avec moins de précision.",
     "A conversation opened within this many minutes of the previous one picks up where it left off · 0 = always start empty":
         "Une conversation ouverte dans ce délai après la précédente reprend où elle s'était arrêtée · 0 = toujours repartir à vide",
     "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>, F7 by default); it applies right away.":

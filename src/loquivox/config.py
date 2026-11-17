@@ -488,6 +488,7 @@ class Config:
     #: seconds after a session closes during which the next utterance is judged locally
     #: (whisper.cpp) and, if it is for the companion, reopens one. 0 = off.
     COMPANION_FOLLOW_UP_SEC: float = 10.0
+    COMPANION_FOLLOW_UP_JUDGE: bool = False   # consent: the locally transcribed phrase goes to the judge model
     #: When a session opens on more than this many held messages (after a
     #: silence), it says how many there are and the three most important.
     COMPANION_DIGEST_MAX: int = 5
@@ -1021,6 +1022,8 @@ def _build_config() -> Config:
         overrides["COMPANION_RESUME_MIN"] = max(0.0, float(companion["resume_min"]))
     if "follow_up_sec" in companion:
         overrides["COMPANION_FOLLOW_UP_SEC"] = max(0.0, float(companion["follow_up_sec"]))
+    if "follow_up_judge" in companion:
+        overrides["COMPANION_FOLLOW_UP_JUDGE"] = bool(companion["follow_up_judge"])
     if "digest_max" in companion:
         overrides["COMPANION_DIGEST_MAX"] = max(3, int(companion["digest_max"]))
     if "duck_on_assistant" in companion:
