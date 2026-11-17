@@ -408,6 +408,7 @@ def test_an_mcp_server_reaches_all_three_engines():
         test_client_delegation_reaches_the_plugin_through_our_backend(MCP_CASE)
         test_gemini_consult_runs_our_agent_loop_for_a_plugin(MCP_CASE)
         test_gemini_native_declares_the_plugin_and_answers_its_call(MCP_CASE)
+        test_gemini_consult_holds_an_acting_tool_for_a_spoken_yes()
     finally:
         config_module.CFG = cfg
         mcp_tools.stop()
@@ -541,6 +542,48 @@ def test_gemini_consult_runs_our_agent_loop_for_a_plugin(case=WEATHER_CASE):
     assert kind == "tool" and r["id"] == "c1" and r["name"] == CONSULT_TOOL, talk.sent
     assert r["response"]["output"] == "Il pleut à Lyon." and r["scheduling"] == "WHEN_IDLE", r
     print("✓ Gemini 'consult' reaches the plugin through our agent loop, answered WHEN_IDLE")
+
+
+def test_gemini_consult_holds_an_acting_tool_for_a_spoken_yes():
+    """Held call → HELD_HINT; the repeat is SILENT and runs nothing; a yes lets it run."""
+    from loquivox.services import ai as ai_module
+    from loquivox.services.gemini_live import HELD_HINT, CONSULT_TOOL
+    from loquivox.state import STATE
+
+    name, args = "mcp_fx_delete_all", '{"what": "everything", "confirmed": true}'
+    session = STATE.talk_session = TalkSession()
+    talk = _gemini(session, "consult")
+
+    def _fake_complete(messages, on_delta=None, tools=None, tool_calls_out=None, **kw):
+        tools_said = [m for m in messages if m.get("role") == "tool"]
+        if not tools_said:
+            tool_calls_out.append({"id": "t1", "name": name, "arguments": args})
+            return ""
+        return tools_said[-1]["content"]      # what the tool really returned
+
+    def _call():
+        talk.sent.clear()
+        talk.call(CONSULT_TOOL, {})
+        assert _wait(lambda: bool(talk.sent))
+        return talk.sent[0][1][0]
+
+    real = ai_module.AIService.complete
+    ai_module.AIService.complete = staticmethod(_fake_complete)
+    try:
+        session.add_user("supprime tout")
+        r = _call()                                   # first call: held, nothing runs
+        assert "deleted" not in r["response"]["output"], r
+        assert HELD_HINT in r["response"]["output"] and r["scheduling"] == "WHEN_IDLE", r
+        r = _call()                                   # no new user turn: SILENT, still held
+        assert r["scheduling"] == "SILENT" and "deleted" not in r["response"]["output"], r
+        session.add_user("oui vas-y")                 # the spoken yes
+        r = _call()
+        assert "deleted everything" in r["response"]["output"], r
+        assert r["scheduling"] == "WHEN_IDLE", r
+    finally:
+        ai_module.AIService.complete = real
+        STATE.talk_session = None
+    print("✓ Gemini 'consult' holds an acting tool: hint, silent repeat, runs after the yes")
 
 
 def test_gemini_native_declares_the_plugin_and_answers_its_call(case=WEATHER_CASE):
