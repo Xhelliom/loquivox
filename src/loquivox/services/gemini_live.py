@@ -490,11 +490,12 @@ class GeminiLive(LiveAudio):
                 and t["content"]]
 
     async def _session_task(self) -> None:
-        failures = 0
+        failures = held = 0
         try:
             while not self._stop:
                 try:
                     async with self._open() as conn:
+                        held = 0
                         prior = self._prior_turns()
                         if prior:   # roles user/model, "more to come": no answer to it
                             await conn.send_client_content(turns=prior, turn_complete=False)
@@ -508,6 +509,12 @@ class GeminiLive(LiveAudio):
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
+                    if "already connected" in str(e) and held < 20 and not self._stop:
+                        # 1008: the server has not yet released the old socket. Not a
+                        # failure and not a new journal line: ask again at once-ish.
+                        held += 1
+                        await asyncio.sleep(0.2)
+                        continue
                     why = f"{type(e).__name__}: {e}"[:120]
                     failures += 1
                     if self._stop or not self._started.is_set() or failures > 3:
@@ -613,6 +620,8 @@ if __name__ == "__main__":
     # Self-check, no network, no audio device, no SDK:
     #     python src/loquivox/services/gemini_live.py
     import base64  # noqa: F401
+    import contextlib
+    import io
     import types
 
     import loquivox.managers.chat as chat_module
@@ -793,6 +802,32 @@ if __name__ == "__main__":
     g3._open, g3._handle_token = _CM3, "H"
     asyncio.run(g3._session_task())
     assert n["i"] >= 2 and g3.error is None, "a dropped connection was not resumed"
+
+    # The server still holding the old socket (1008 "already connected") is waited out
+    # silently: not a failure (5 refusals > the 3 allowed), not a second journal line.
+    g5 = GeminiLive(TalkSession())
+    g5._handle_token = "H"
+    ok = _Fake([[audio()]])
+    ok.on_end = lambda: setattr(g5, "_stop", True)
+    seq5 = [_Fake([[bye]])] + [None] * 5 + [ok]
+    n5 = {"i": 0}
+
+    class _CM5:
+        async def __aenter__(self_):
+            c = seq5[n5["i"]]
+            n5["i"] += 1
+            if c is None:
+                raise RuntimeError("1008 None. session is already connected to an existing client")
+            return c
+
+        async def __aexit__(self_, *a):
+            return False
+    g5._open = _CM5
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        asyncio.run(g5._session_task())
+    assert n5["i"] == 7 and g5.error is None, f"1008 not waited out: {n5} {g5.error}"
+    assert buf.getvalue().count("reconnecting") == 1, buf.getvalue()
 
     # Without the SDK or the key, start() raises: the caller falls back to the cascade.
     saved = os.environ.pop("GEMINI_API_KEY", None)
