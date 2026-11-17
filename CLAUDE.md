@@ -936,9 +936,11 @@ Noctalia really emits; if it emits no Lock/Unlock, only the idle fallback works.
 **Follow-up window** (`[companion] follow_up_sec`, 10, 0 = off). `wake()`'s `finally`
 calls `Presence.open_follow_up`: for N s the one utterance the VAD keeps and Smart
 Turn closes goes to `Companion._follow_up`, which transcribes it with whisper.cpp
-whatever the dictation backend (never the cloud) and asks `follow_up_verdict`
-(not a stop phrase, mic not used by another app via `media.mic_busy`, 2+ words,
-2nd person / question / imperative / a word of the last exchange). Yes →
+whatever the dictation backend (never the cloud) and asks `judge_follow_up`: not a
+stop phrase, mic not used by another app via `media.mic_busy`, then ONE model call
+on the memory judge's slot (last 2 exchanges + the phrase; error or > 1.5 s = no).
+It needs the operator's consent (`follow_up_judge`, off by default → "juge non
+autorisé", nothing reopens, nothing is sent). Bench: `tests/bench_follow_up.py`. Yes →
 `wake(cause="follow_up")` with the audio as `take_tail`. One journal line per
 decision, reason only, never the text. Outside the window nothing is buffered.
 `release()` closes the window. Tests: `tests/test_presence.py`.

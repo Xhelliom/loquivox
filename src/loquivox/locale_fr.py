@@ -928,8 +928,8 @@ CATALOG = {
     "Let the model judge the phrase (it is sent to it)":
         "Laisser le modèle juger la phrase (elle lui est envoyée)",
     "Follow-up judge": "Juge de la relance",
-    "The phrase, transcribed on this computer, is sent to the memory judge's model, which says whether it is for the companion. Off: nothing is sent and a fixed word list decides, less precisely.":
-        "La phrase, transcrite sur cet ordinateur, est envoyée au modèle du juge de mémoire, qui dit si elle s'adresse au compagnon. Désactivé : rien n'est envoyé et une liste de mots fixe décide, avec moins de précision.",
+    "The phrase, transcribed on this computer, is sent to the memory judge's model, which says whether it is for the companion. Off: nothing is sent and the follow-up window never reopens a conversation.":
+        "La phrase, transcrite sur cet ordinateur, est envoyée au modèle du juge de mémoire, qui dit si elle s'adresse au compagnon. Désactivé : rien n'est envoyé et la fenêtre de relance ne rouvre jamais de conversation.",
     "A conversation opened within this many minutes of the previous one picks up where it left off · 0 = always start empty":
         "Une conversation ouverte dans ce délai après la précédente reprend où elle s'était arrêtée · 0 = toujours repartir à vide",
     "The silence key is set in the <b>Hotkeys</b> tab (<i>Companion</i>, F7 by default); it applies right away.":

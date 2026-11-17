@@ -876,7 +876,7 @@ class SettingsDialog:
         cls._comp_follow_judge.set_tooltip_text(
             _("The phrase, transcribed on this computer, is sent to the memory judge's "
               "model, which says whether it is for the companion. Off: nothing is sent "
-              "and a fixed word list decides, less precisely."))
+              "and the follow-up window never reopens a conversation."))
         cls._field(body, _("Follow-up judge"), cls._comp_follow_judge, labels)
 
         cls._note(body, _("The silence key is set in the <b>Hotkeys</b> tab "

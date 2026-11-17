@@ -317,7 +317,7 @@ def _companion(said, busy=False):
     import loquivox.config as config_module
     from loquivox.handlers import companion
     from loquivox.state import STATE
-    config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_SEC=10.0,
+    config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_SEC=10.0, COMPANION_FOLLOW_UP_JUDGE=True,
                                             COMPANION_STOP_PHRASES=("je ne te parlais pas",))
     c = companion.Companion(_FPresence(), _FBubble(), look=lambda s: None,
                             converse=lambda s, prefix=(): None,
@@ -341,6 +341,18 @@ def _decide(text, **kw):
 
 
 def test_follow_up_opens_a_session_for_a_question_not_for_a_colleague():
+    import dataclasses
+    import loquivox.config as config_module
+    from loquivox.handlers import companion
+    real = companion.FOLLOW_UP_JUDGE
+    companion.FOLLOW_UP_JUDGE = lambda t, l: (t.lower().startswith(("et pour", "peux", "ajoute", "pluie")), "x")
+    try:
+        _follow_up_cases()
+    finally:
+        companion.FOLLOW_UP_JUDGE = real
+
+
+def _follow_up_cases():
     woke, log, c = _decide("Et pour demain ?")
     assert woke == ["follow_up"] and c.presence.kept, (woke, log)
     assert "relance : oui" in log and "demain" not in log.lower()   # the journal never quotes
@@ -365,9 +377,14 @@ def test_follow_up_judge_is_the_model_and_needs_consent():
         return ("et pour demain" in text.lower()), "suite de l'échange"
     companion.FOLLOW_UP_JUDGE = judge
     try:
-        # consent off (default): the model never sees the text, the word list decides
-        woke, log, _c = _decide("Et pour demain ?")
-        assert woke == ["follow_up"] and seen == [], (woke, seen)
+        # consent off (default): the model never sees the text and nothing reopens
+        c, woke = _companion(["Et pour demain ?"])
+        config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=False)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            c._follow_up([np.zeros(presence.BLOCK, "float32")])
+        log = out.getvalue()
+        assert woke == [] and seen == [] and "juge non autorisé" in log, (woke, seen, log)
         c, woke = _companion(["et du coup on mange quoi ?"])
         config_module.CFG = dataclasses.replace(config_module.CFG, COMPANION_FOLLOW_UP_JUDGE=True)
         out = io.StringIO()

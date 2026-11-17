@@ -4,7 +4,6 @@ real continuations vs phrases meant for someone else.
 
     python tests/bench_follow_up.py          # offline: fake judge, self-check of the bench
     python tests/bench_follow_up.py --real   # the configured judge slot (costs ~25 completions)
-    python tests/bench_follow_up.py --real --words   # also score the old word list
 
 Exit 1 when the real judge has more than 1 false positive in 20 phrases.
 """
@@ -75,8 +74,6 @@ def main() -> int:
     from loquivox.services.ai import AIService
     print("judge slot:", AIService.judge_target())
     judges = [("modèle", companion._ask_follow_up)]
-    if "--words" in sys.argv:
-        judges.append(("liste de mots", companion.follow_up_verdict))
     code = 0
     for name, judge in judges:
         r = score(judge)

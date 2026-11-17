@@ -131,35 +131,6 @@ def _converse(session, prefix=()) -> None:
                                       "Gemini Live" if google else "Live")
 
 
-_ADDRESSED = {"tu", "te", "toi", "ton", "ta", "tes", "vous", "votre", "vos"}
-_QUESTION = {"et", "est", "qui", "que", "quoi", "quel", "quelle", "quels", "quelles",
-             "comment", "pourquoi", "quand", "ou", "combien", "peux", "pourrais", "sais"}
-# ponytail: a short list of common imperatives; grow it from the journal's "non" lines
-_IMPERATIVE = {"dis", "donne", "montre", "ajoute", "rappelle", "ouvre", "ferme", "cherche",
-               "lis", "lance", "mets", "envoie", "explique", "resume", "repete", "continue",
-               "fais", "trouve", "note", "annule", "vas", "oublie", "compte", "traduis"}
-
-
-def follow_up_verdict(text: str, last: str) -> tuple:
-    """Fallback only, when the judge may not be asked. (addressed to the companion?, reason without the words). ``last`` is the end of
-    the previous exchange: a word of 4+ letters said again counts as a follow-up."""
-    from loquivox.services.talk import _normalize, user_said_stop
-    words = _normalize(text).split()
-    if user_said_stop(text):
-        return False, "phrase d'arrêt"
-    if len(words) < 2:
-        return False, "trop court"
-    if _ADDRESSED & set(words):
-        return True, "2e personne"
-    if "?" in text or words[0] in _QUESTION:
-        return True, "question"
-    if words[0] in _IMPERATIVE:
-        return True, "impératif"
-    if {w for w in words if len(w) >= 4} & set(_normalize(last).split()):
-        return True, "mot repris"
-    return False, "rien ne s'adresse à nous"
-
-
 _JUDGE_PROMPT = (
     "A user was talking with a voice assistant; the conversation just ended. They said "
     "one more sentence. Is it addressed to the assistant? Yes when it asks the assistant "
@@ -188,10 +159,10 @@ FOLLOW_UP_JUDGE = _ask_follow_up
 
 def judge_follow_up(text: str, last: str) -> tuple:
     """One model call, at most JUDGE_TIMEOUT: an error or a delay is a "non". Without the
-    operator's consent nothing leaves the machine and the word list decides, as a fallback."""
+    operator's consent nothing leaves the machine and nothing reopens."""
     from loquivox.services.talk import user_said_stop
     if not config_module.CFG.COMPANION_FOLLOW_UP_JUDGE:
-        return follow_up_verdict(text, last)
+        return False, "juge non autorisé"
     if user_said_stop(text):
         return False, "phrase d'arrêt"
     box: list = []
